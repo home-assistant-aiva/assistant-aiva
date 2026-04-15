@@ -24,6 +24,7 @@
       "cannot_connect": "No pudimos conectar con AIVA. Revisá la dirección de conexión e intentá nuevamente.",
       "invalid_pairing_code": "El código de vinculación no es válido o ya venció. Iniciá la activación nuevamente.",
       "invalid_response": "AIVA no pudo completar la solicitud en este momento. Intentá nuevamente en unos minutos.",
+      "invalid_scan_interval": "El intervalo mínimo permitido es de 30 segundos.",
       "missing_required_data": "Faltan datos para completar la activación. Iniciá el proceso nuevamente.",
       "pairing_pending": "Todavía no recibimos la vinculación. Ingresá el código en el canal de activación indicado por AIVA y volvé a intentarlo.",
       "payment_pending": "El pago de instalación todavía no fue confirmado. Volvé a intentarlo cuando recibas la confirmación.",

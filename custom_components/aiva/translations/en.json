@@ -23,6 +23,7 @@
       "cannot_connect": "We could not connect to AIVA. Check the connection address and try again.",
       "invalid_pairing_code": "The linking code is no longer valid. Start activation again.",
       "invalid_response": "AIVA could not complete the request right now. Try again in a few minutes.",
+      "invalid_scan_interval": "The minimum allowed interval is 30 seconds.",
       "missing_required_data": "Some activation details are missing. Start the process again.",
       "pairing_pending": "We have not received the link yet. Enter the code in the activation channel provided by AIVA and try again.",
       "payment_pending": "The installation payment has not been confirmed yet. Try again after you receive confirmation.",
