@@ -1,0 +1,45 @@
+name: Reportar un problema
+description: Informar un problema con la integración AIVA para Home Assistant.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar el problema. No pegues `secret`, códigos de vinculación completos ni credenciales.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Versión de Home Assistant
+      placeholder: "2026.4.0"
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Versión de AIVA
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Método de instalación
+      options:
+        - HACS
+        - Manual
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Qué pasó
+      description: Describí el comportamiento observado y el comportamiento esperado.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs relevantes
+      description: Pegá sólo logs redactados. No incluyas credenciales ni códigos completos.
+      render: text

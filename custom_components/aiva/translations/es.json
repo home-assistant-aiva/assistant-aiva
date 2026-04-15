@@ -1,0 +1,69 @@
+{
+  "title": "AIVA",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bienvenido a AIVA",
+        "description": "AIVA ya está instalado en Home Assistant. Para dejarlo listo, indicá el nombre de tu hogar, elegí el plan y comenzá la activación.",
+        "data": {
+          "base_url": "Dirección de conexión de AIVA",
+          "home_name": "Nombre de la casa",
+          "plan": "Plan de AIVA"
+        }
+      },
+      "awaiting_pairing": {
+        "title": "Código de vinculación generado",
+        "description": "AIVA está instalado, pero todavía no está activado.\n\nIngresá este código en el canal de activación indicado por AIVA: {pairing_code}\n\nCuando lo hayas completado, volvé a esta pantalla y continuá."
+      },
+      "awaiting_payment": {
+        "title": "Confirmación de pago pendiente",
+        "description": "La vinculación fue recibida correctamente. Ahora AIVA está esperando la confirmación del pago de instalación.\n\nCuando el pago esté confirmado, continuá para completar la activación."
+      }
+    },
+    "error": {
+      "cannot_connect": "No pudimos conectar con AIVA. Revisá la dirección de conexión e intentá nuevamente.",
+      "invalid_pairing_code": "El código de vinculación no es válido o ya venció. Iniciá la activación nuevamente.",
+      "invalid_response": "AIVA no pudo completar la solicitud en este momento. Intentá nuevamente en unos minutos.",
+      "missing_required_data": "Faltan datos para completar la activación. Iniciá el proceso nuevamente.",
+      "pairing_pending": "Todavía no recibimos la vinculación. Ingresá el código en el canal de activación indicado por AIVA y volvé a intentarlo.",
+      "payment_pending": "El pago de instalación todavía no fue confirmado. Volvé a intentarlo cuando recibas la confirmación.",
+      "unknown": "No pudimos completar la activación. Intentá nuevamente en unos minutos."
+    },
+    "abort": {
+      "already_configured": "AIVA ya está configurado para este Home Assistant."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones de AIVA",
+        "description": "Ajustá la conexión de AIVA y la frecuencia de actualización.",
+        "data": {
+          "base_url": "Dirección de conexión de AIVA",
+          "scan_interval": "Intervalo de actualización en segundos"
+        }
+      }
+    },
+    "error": {
+      "invalid_scan_interval": "El intervalo mínimo permitido es de 30 segundos."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Estado de AIVA"
+      },
+      "last_sync": {
+        "name": "Última sincronización"
+      }
+    },
+    "button": {
+      "retry_connection": {
+        "name": "Verificar conexión"
+      },
+      "sync_entities": {
+        "name": "Actualizar dispositivos"
+      }
+    }
+  }
+}

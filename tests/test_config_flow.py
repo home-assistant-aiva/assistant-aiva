@@ -1,0 +1,243 @@
+"""Tests for the AIVA config flow."""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from homeassistant import config_entries
+from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.aiva.api import (
+    AivaActivationStartResult,
+    AivaActivationStatus,
+    AivaCannotConnectError,
+    AivaInvalidResponseError,
+    AivaMissingRequiredDataError,
+)
+from custom_components.aiva.const import (
+    CONF_BASE_URL,
+    CONF_HOME_ID,
+    CONF_HOME_NAME,
+    CONF_PAIRING_CODE,
+    CONF_PLAN,
+    CONF_SCAN_INTERVAL,
+    CONF_SECRET,
+    DEFAULT_SCAN_INTERVAL_SECONDS,
+    DOMAIN,
+    STATE_ACTIVE,
+    STATE_AWAITING_PAIRING,
+    STATE_AWAITING_PAYMENT,
+)
+
+
+async def test_config_flow_activation_valid_creates_entry(hass):
+    """Create a config entry after commercial activation is active."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code="<pairing-code>",
+            home_name="Casa Principal",
+            plan="smart",
+            state=STATE_AWAITING_PAIRING,
+        ),
+    ), patch(
+        "custom_components.aiva.config_flow._get_activation_status",
+        side_effect=[
+            AivaActivationStatus(state=STATE_AWAITING_PAYMENT),
+            AivaActivationStatus(
+                state=STATE_ACTIVE,
+                home_id="home-1",
+                secret="<redacted-secret>",
+                home_name="Casa Principal",
+                plan="smart",
+            ),
+        ],
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com/",
+                CONF_HOME_NAME: "Casa Principal",
+                CONF_PLAN: "smart",
+            },
+        )
+
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "awaiting_pairing"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={},
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "awaiting_payment"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={},
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Casa Principal"
+    assert result["data"] == {
+        CONF_BASE_URL: "https://api.example.com",
+        CONF_HOME_ID: "home-1",
+        CONF_SECRET: "<redacted-secret>",
+        CONF_HOME_NAME: "Casa Principal",
+        CONF_PLAN: "smart",
+    }
+
+
+async def test_config_flow_pairing_pending(hass):
+    """Show a clear form error while external pairing is pending."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code="<pairing-code>",
+            home_name="Casa Principal",
+            plan="base",
+            state=STATE_AWAITING_PAIRING,
+        ),
+    ), patch(
+        "custom_components.aiva.config_flow._get_activation_status",
+        return_value=AivaActivationStatus(state=STATE_AWAITING_PAIRING),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "http://127.0.0.1:8080",
+                CONF_PLAN: "base",
+            },
+        )
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "awaiting_pairing"
+    assert result["errors"] == {"base": "pairing_pending"}
+
+
+async def test_config_flow_timeout_or_unreachable(hass):
+    """Show cannot_connect when the backend cannot be reached."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        side_effect=AivaCannotConnectError,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "http://127.0.0.1:8080",
+                CONF_PLAN: "base",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_config_flow_invalid_backend_response(hass):
+    """Show invalid_response for malformed backend responses."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        side_effect=AivaInvalidResponseError,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "http://127.0.0.1:8080",
+                CONF_PLAN: "base",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_response"}
+
+
+async def test_config_flow_incomplete_backend_response(hass):
+    """Show missing_required_data when pairing lacks home_id or secret."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        side_effect=AivaMissingRequiredDataError,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "http://127.0.0.1:8080",
+                CONF_PLAN: "base",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "missing_required_data"}
+
+
+async def test_config_flow_does_not_duplicate_existing_entry(hass):
+    """Abort when AIVA is already configured."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Casa Principal",
+        data={
+            CONF_BASE_URL: "http://127.0.0.1:8080",
+            CONF_HOME_ID: "home-1",
+            CONF_SECRET: "<redacted-secret>",
+            CONF_HOME_NAME: "Casa Principal",
+        },
+        source=config_entries.SOURCE_USER,
+        entry_id="test-entry",
+        unique_id="home-1",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_options_flow_updates_base_url_and_scan_interval(hass):
+    """Allow changing backend URL and update interval without reinstalling."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Casa Principal",
+        data={
+            CONF_BASE_URL: "http://127.0.0.1:8080",
+            CONF_PAIRING_CODE: "<pairing-code>",
+            CONF_HOME_ID: "home-1",
+            CONF_SECRET: "<redacted-secret>",
+            CONF_HOME_NAME: "Casa Principal",
+        },
+        source=config_entries.SOURCE_USER,
+        entry_id="test-entry",
+        unique_id="home-1",
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_BASE_URL: "https://api.example.com/",
+            CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL_SECONDS,
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        CONF_BASE_URL: "https://api.example.com",
+        CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL_SECONDS,
+    }

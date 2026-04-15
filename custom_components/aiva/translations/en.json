@@ -1,0 +1,68 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Welcome to AIVA",
+        "description": "AIVA is installed in Home Assistant. To finish setup, name your home, choose your plan, and start activation.",
+        "data": {
+          "base_url": "AIVA connection address",
+          "home_name": "Home name",
+          "plan": "AIVA plan"
+        }
+      },
+      "awaiting_pairing": {
+        "title": "Linking code generated",
+        "description": "AIVA is installed, but it is not active yet.\n\nEnter this code in the activation channel provided by AIVA: {pairing_code}\n\nAfter completing activation, return to this screen and continue."
+      },
+      "awaiting_payment": {
+        "title": "Payment confirmation pending",
+        "description": "The link was received successfully. AIVA is now waiting for installation payment confirmation.\n\nWhen the payment is confirmed, continue to complete activation."
+      }
+    },
+    "error": {
+      "cannot_connect": "We could not connect to AIVA. Check the connection address and try again.",
+      "invalid_pairing_code": "The linking code is no longer valid. Start activation again.",
+      "invalid_response": "AIVA could not complete the request right now. Try again in a few minutes.",
+      "missing_required_data": "Some activation details are missing. Start the process again.",
+      "pairing_pending": "We have not received the link yet. Enter the code in the activation channel provided by AIVA and try again.",
+      "payment_pending": "The installation payment has not been confirmed yet. Try again after you receive confirmation.",
+      "unknown": "We could not complete activation. Try again in a few minutes."
+    },
+    "abort": {
+      "already_configured": "AIVA is already configured for this Home Assistant."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AIVA options",
+        "description": "Adjust the AIVA connection and update frequency.",
+        "data": {
+          "base_url": "AIVA connection address",
+          "scan_interval": "Update interval in seconds"
+        }
+      }
+    },
+    "error": {
+      "invalid_scan_interval": "The minimum allowed interval is 30 seconds."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "AIVA status"
+      },
+      "last_sync": {
+        "name": "Last update"
+      }
+    },
+    "button": {
+      "retry_connection": {
+        "name": "Check connection"
+      },
+      "sync_entities": {
+        "name": "Update devices"
+      }
+    }
+  }
+}
