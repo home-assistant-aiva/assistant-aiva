@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Bienvenido a AIVA",
-        "description": "AIVA ya está instalado en Home Assistant. Para dejarlo listo, indicá el nombre de tu hogar, elegí el plan y comenzá la activación.",
+        "description": "AIVA ya está instalado en Home Assistant. Para dejarlo listo, indicá el nombre de tu hogar, elegí el plan y comenzá la activación.\n\n{error_detail}",
         "data": {
           "base_url": "Dirección de conexión de AIVA",
           "home_name": "Nombre de la casa",
@@ -13,15 +13,21 @@
       },
       "awaiting_pairing": {
         "title": "Código de vinculación generado",
-        "description": "AIVA está instalado, pero todavía no está activado.\n\nIngresá este código en el canal de activación indicado por AIVA: {pairing_code}\n\nCuando lo hayas completado, volvé a esta pantalla y continuá."
+        "description": "AIVA está instalado, pero todavía no está activado.\n\nIngresá este código en el canal de activación indicado por AIVA: {pairing_code}\n\nCuando lo hayas completado, volvé a esta pantalla y continuá.\n\n{error_detail}"
       },
       "awaiting_payment": {
         "title": "Confirmación de pago pendiente",
-        "description": "La vinculación fue recibida correctamente. Ahora AIVA está esperando la confirmación del pago de instalación.\n\nCuando el pago esté confirmado, continuá para completar la activación."
+        "description": "La vinculación fue recibida correctamente. Ahora AIVA está esperando la confirmación del pago de instalación.\n\nCuando el pago esté confirmado, continuá para completar la activación.\n\n{error_detail}"
       }
     },
     "error": {
       "cannot_connect": "No pudimos conectar con AIVA. Revisá la dirección de conexión e intentá nuevamente.",
+      "timeout": "AIVA tardó demasiado en responder. Revisá la dirección de conexión e intentá nuevamente.",
+      "backend_client_error": "AIVA rechazó la solicitud. Revisá los datos ingresados e intentá nuevamente.",
+      "backend_server_error": "AIVA respondió con un error interno. Intentá nuevamente en unos minutos.",
+      "invalid_base_url": "Ingresá una dirección válida de AIVA que comience con http:// o https://.",
+      "invalid_base_url_local": "La dirección de AIVA no puede ser localhost ni 127.0.0.1 en esta instalación.",
+      "invalid_home_name": "Ingresá un nombre de casa válido.",
       "invalid_pairing_code": "El código de vinculación no es válido o ya venció. Iniciá la activación nuevamente.",
       "invalid_response": "AIVA no pudo completar la solicitud en este momento. Intentá nuevamente en unos minutos.",
       "invalid_scan_interval": "El intervalo mínimo permitido es de 30 segundos.",
@@ -56,6 +62,15 @@
       },
       "last_sync": {
         "name": "Última sincronización"
+      },
+      "home_settings": {
+        "name": "Configuración de AIVA"
+      },
+      "effective_entities": {
+        "name": "Entidades efectivas"
+      },
+      "home_automations": {
+        "name": "Automatizaciones de AIVA"
       }
     },
     "button": {

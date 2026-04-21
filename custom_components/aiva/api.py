@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import json as json_module
+import logging
 from typing import Any
 from urllib.parse import urljoin
 
@@ -17,19 +19,28 @@ from .const import (
     ACTIVATION_STATES,
     DEFAULT_API_BASE_URL,
     DEFAULT_API_TIMEOUT_SECONDS,
+    ENDPOINT_ACTIVATION_REQUEST,
+    ENDPOINT_ENTITIES_EFFECTIVE,
     ENDPOINT_ENTITIES_SYNC,
     ENDPOINT_HEARTBEAT,
+    ENDPOINT_HOME_AUTOMATIONS,
+    ENDPOINT_HOME_SETTINGS,
     ENDPOINT_PAIR,
     ENDPOINT_PAIRING_START,
     ENDPOINT_PAIRING_STATUS,
+    FIELD_AUTOMATIONS,
     FIELD_ENTITIES,
+    FIELD_EFFECTIVE_ENTITIES,
     FIELD_HEARTBEAT_AT,
+    FIELD_HOME_AUTOMATIONS,
     FIELD_HOME_ID,
     FIELD_HOME_NAME,
+    FIELD_HOME_SETTINGS,
     FIELD_OK,
     FIELD_PAIRING_CODE,
     FIELD_PLAN,
     FIELD_SECRET,
+    FIELD_SETTINGS,
     FIELD_STATE,
     HEADER_AIVA_SECRET,
     STATE_ACTIVE,
@@ -37,6 +48,8 @@ from .const import (
     STATE_AWAITING_PAYMENT,
     STATE_INSTALLED,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 DISPLAY_STATES = {
     STATE_INSTALLED: "Instalado",
@@ -49,12 +62,42 @@ DISPLAY_STATES = {
 class AivaApiError(Exception):
     """Base exception for AIVA API errors."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        user_message: str | None = None,
+        status: int | None = None,
+        endpoint: str | None = None,
+        url: str | None = None,
+        response_body: str | None = None,
+        request_id: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        """Initialize the exception with backend diagnostics."""
+        super().__init__(message)
+        self.user_message = user_message or message
+        self.status = status
+        self.endpoint = endpoint
+        self.url = url
+        self.response_body = response_body
+        self.request_id = request_id
+        self.error_code = error_code
+
 
 AivaError = AivaApiError
 
 
 class AivaCannotConnectError(AivaApiError):
     """Raised when the AIVA backend cannot be reached."""
+
+
+class AivaTimeoutError(AivaCannotConnectError):
+    """Raised when the AIVA backend request times out."""
+
+
+class AivaConnectionError(AivaCannotConnectError):
+    """Raised when the AIVA backend connection fails."""
 
 
 class AivaInvalidPairingCodeError(AivaApiError):
@@ -71,6 +114,14 @@ class AivaInvalidResponseError(AivaApiError):
 
 class AivaMissingRequiredDataError(AivaInvalidResponseError):
     """Raised when pairing succeeds without required fields."""
+
+
+class AivaBackendClientError(AivaApiError):
+    """Raised when the backend returns a 4xx response."""
+
+
+class AivaBackendServerError(AivaApiError):
+    """Raised when the backend returns a 5xx response."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +166,46 @@ class AivaStatus:
     last_sync: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class AivaHomeSettings:
+    """AIVA home-level settings returned by the backend."""
+
+    language: str | None = None
+    assistant_name: str | None = None
+    voice_provider: str | None = None
+    voice_id: str | None = None
+    custom_prompt: str | None = None
+    country_code: str | None = None
+    locale: str | None = None
+    timezone: str | None = None
+    response_style: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AivaEffectiveEntity:
+    """Entity metadata after backend defaults and customizations are merged."""
+
+    entity_id: str
+    display_name: str | None = None
+    effective_area: str | None = None
+    alias: str | None = None
+    area_override: str | None = None
+    is_allowed: bool | None = None
+    is_visible: bool | None = None
+    requires_confirmation: bool | None = None
+    priority: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AivaHomeAutomation:
+    """AIVA automation summary returned by the backend."""
+
+    automation_id: str
+    name: str | None = None
+    enabled: bool | None = None
+    raw: dict[str, Any] | None = None
+
+
 class AivaApiClient:
     """Client used to communicate with the AIVA backend."""
 
@@ -131,13 +222,18 @@ class AivaApiClient:
     ) -> None:
         """Initialize the AIVA API client."""
         self._hass = hass
-        self._base_url = base_url.rstrip("/")
+        self._base_url = self.normalize_base_url(base_url)
         self._pairing_code = (pairing_code or "").strip()
         self._home_name = home_name
         self._home_id = home_id
         self._secret = secret
         self._timeout = timeout
         self._last_sync: datetime | None = None
+
+    @staticmethod
+    def normalize_base_url(base_url: str) -> str:
+        """Normalize a backend base URL for relative endpoint joins."""
+        return base_url.strip().rstrip("/")
 
     async def validate_pairing_code(
         self,
@@ -175,7 +271,18 @@ class AivaApiClient:
             FIELD_HOME_NAME: home_name.strip(),
             FIELD_PLAN: plan.strip(),
         }
-        data = await self._request("post", ENDPOINT_PAIRING_START, json=payload)
+        try:
+            data = await self._request("post", ENDPOINT_ACTIVATION_REQUEST, json=payload)
+        except AivaBackendClientError as err:
+            if err.status not in {404, 405}:
+                raise
+            _LOGGER.warning(
+                "AIVA backend rejected %s with HTTP %s; retrying legacy endpoint %s",
+                ENDPOINT_ACTIVATION_REQUEST,
+                err.status,
+                ENDPOINT_PAIRING_START,
+            )
+            data = await self._request("post", ENDPOINT_PAIRING_START, json=payload)
         result = self._parse_activation_start(data, requested_plan=payload[FIELD_PLAN])
         self._pairing_code = result.pairing_code
         self._home_name = result.home_name
@@ -254,6 +361,36 @@ class AivaApiClient:
         self._last_sync = dt_util.utcnow()
         return data
 
+    async def get_home_settings(self) -> AivaHomeSettings:
+        """Return home settings from AIVA."""
+        self._ensure_paired()
+        data = await self._request(
+            "get",
+            ENDPOINT_HOME_SETTINGS,
+            authenticated=True,
+        )
+        return self._parse_home_settings(data)
+
+    async def get_effective_entities(self) -> tuple[AivaEffectiveEntity, ...]:
+        """Return backend-enriched entity metadata."""
+        self._ensure_paired()
+        data = await self._request(
+            "get",
+            ENDPOINT_ENTITIES_EFFECTIVE,
+            authenticated=True,
+        )
+        return self._parse_effective_entities(data)
+
+    async def get_home_automations(self) -> tuple[AivaHomeAutomation, ...]:
+        """Return AIVA home automations."""
+        self._ensure_paired()
+        data = await self._request(
+            "get",
+            ENDPOINT_HOME_AUTOMATIONS,
+            authenticated=True,
+        )
+        return self._parse_home_automations(data)
+
     async def async_get_status(self) -> AivaStatus:
         """Return the current AIVA status."""
         return await self.get_status()
@@ -284,6 +421,16 @@ class AivaApiClient:
                 raise AivaInvalidAuthError("Falta la credencial de AIVA")
             headers[HEADER_AIVA_SECRET] = self._secret
 
+        _LOGGER.debug(
+            "AIVA request starting: method=%s base_url=%s endpoint=%s url=%s payload=%s headers=%s",
+            method.upper(),
+            self._base_url,
+            endpoint,
+            url,
+            self._sanitize_for_log(json),
+            self._sanitize_for_log(headers),
+        )
+
         try:
             async with session.request(
                 method,
@@ -292,41 +439,178 @@ class AivaApiClient:
                 headers=headers,
                 timeout=ClientTimeout(total=self._timeout),
             ) as response:
-                data = await response.json(content_type=None)
+                response_text = await response.text()
+                request_id = response.headers.get("x-request-id") or response.headers.get(
+                    "X-Request-ID"
+                )
+                sanitized_body = self._sanitize_text_for_log(response_text)
+                _LOGGER.debug(
+                    "AIVA response received: method=%s url=%s endpoint=%s status=%s request_id=%s body=%s",
+                    method.upper(),
+                    url,
+                    endpoint,
+                    response.status,
+                    request_id,
+                    sanitized_body,
+                )
         except TimeoutError as err:
-            raise AivaCannotConnectError("Timeout conectando con AIVA") from err
+            _LOGGER.exception(
+                "AIVA request timed out: method=%s url=%s endpoint=%s",
+                method.upper(),
+                url,
+                endpoint,
+            )
+            raise AivaTimeoutError(
+                "Timeout conectando con AIVA",
+                user_message="AIVA tardó demasiado en responder. Verificá la dirección e intentá nuevamente.",
+                endpoint=endpoint,
+                url=url,
+            ) from err
         except ClientError as err:
-            raise AivaCannotConnectError("No se pudo conectar con AIVA") from err
+            _LOGGER.exception(
+                "AIVA request failed due to connection error: method=%s url=%s endpoint=%s error=%s",
+                method.upper(),
+                url,
+                endpoint,
+                err,
+            )
+            raise AivaConnectionError(
+                "No se pudo conectar con AIVA",
+                user_message="No se pudo conectar con AIVA. Revisá la dirección de conexión e intentá nuevamente.",
+                endpoint=endpoint,
+                url=url,
+            ) from err
+
+        try:
+            data = json_module.loads(response_text)
         except ValueError as err:
-            raise AivaInvalidResponseError("AIVA devolvio una respuesta invalida") from err
+            _LOGGER.error(
+                "AIVA returned a non-JSON or malformed response: method=%s url=%s endpoint=%s status=%s request_id=%s body=%s",
+                method.upper(),
+                url,
+                endpoint,
+                response.status,
+                request_id,
+                sanitized_body,
+            )
+            raise AivaInvalidResponseError(
+                "AIVA devolvio una respuesta invalida",
+                user_message="AIVA devolvió una respuesta inválida. Revisá los logs para más detalle.",
+                status=response.status,
+                endpoint=endpoint,
+                url=url,
+                response_body=sanitized_body,
+                request_id=request_id,
+            ) from err
 
         if not isinstance(data, dict):
-            raise AivaInvalidResponseError("AIVA devolvio una respuesta invalida")
+            raise AivaInvalidResponseError(
+                "AIVA devolvio una respuesta invalida",
+                user_message="AIVA devolvió una respuesta inválida. Revisá los logs para más detalle.",
+                status=response.status,
+                endpoint=endpoint,
+                url=url,
+                response_body=sanitized_body,
+                request_id=request_id,
+            )
 
         if response.status >= 400:
-            self._raise_for_error_response(response.status, data)
+            self._raise_for_error_response(
+                response.status,
+                data,
+                endpoint=endpoint,
+                url=url,
+                response_body=sanitized_body,
+                request_id=request_id,
+            )
 
         if data.get(FIELD_OK) is not True:
-            raise AivaInvalidResponseError("AIVA devolvio una respuesta sin ok=true")
+            raise AivaInvalidResponseError(
+                "AIVA devolvio una respuesta sin ok=true",
+                user_message=(
+                    self._extract_backend_message(data)
+                    or "AIVA respondió sin confirmar la operación."
+                ),
+                status=response.status,
+                endpoint=endpoint,
+                url=url,
+                response_body=sanitized_body,
+                request_id=request_id,
+            )
 
         return data
 
-    def _raise_for_error_response(self, status: int, data: dict[str, Any]) -> None:
+    def _raise_for_error_response(
+        self,
+        status: int,
+        data: dict[str, Any],
+        *,
+        endpoint: str,
+        url: str,
+        response_body: str,
+        request_id: str | None,
+    ) -> None:
         """Translate backend error responses into integration exceptions."""
         error = data.get("error")
         code = error.get("code") if isinstance(error, dict) else None
+        backend_message = self._extract_backend_message(data)
+
+        _LOGGER.warning(
+            "AIVA backend returned HTTP error: status=%s endpoint=%s url=%s request_id=%s code=%s body=%s",
+            status,
+            endpoint,
+            url,
+            request_id,
+            code,
+            response_body,
+        )
 
         if code in {
             "expired_pairing_code",
             "invalid_pairing_code",
             "used_pairing_code",
         }:
-            raise AivaInvalidPairingCodeError(str(code))
+            raise AivaInvalidPairingCodeError(
+                str(code),
+                user_message=backend_message
+                or "El código de vinculación no es válido o ya venció.",
+                status=status,
+                endpoint=endpoint,
+                url=url,
+                response_body=response_body,
+                request_id=request_id,
+                error_code=code,
+            )
 
         if code == "invalid_secret" or status == 401:
-            raise AivaInvalidAuthError(str(code or "invalid_auth"))
+            raise AivaInvalidAuthError(
+                str(code or "invalid_auth"),
+                user_message=backend_message
+                or "Las credenciales de AIVA fueron rechazadas por el backend.",
+                status=status,
+                endpoint=endpoint,
+                url=url,
+                response_body=response_body,
+                request_id=request_id,
+                error_code=code,
+            )
 
-        raise AivaApiError(str(code or f"HTTP {status}"))
+        error_cls = AivaBackendServerError if status >= 500 else AivaBackendClientError
+        default_message = (
+            "AIVA respondió con un error interno. Intentá nuevamente en unos minutos."
+            if status >= 500
+            else "AIVA rechazó la solicitud. Revisá los datos ingresados e intentá nuevamente."
+        )
+        raise error_cls(
+            str(code or f"HTTP {status}"),
+            user_message=backend_message or default_message,
+            status=status,
+            endpoint=endpoint,
+            url=url,
+            response_body=response_body,
+            request_id=request_id,
+            error_code=code,
+        )
 
     def _parse_pairing_result(self, data: dict[str, Any]) -> AivaPairingResult:
         """Parse and validate the backend pairing response."""
@@ -410,7 +694,197 @@ class AivaApiClient:
             plan=plan,
         )
 
+    def _parse_home_settings(self, data: dict[str, Any]) -> AivaHomeSettings:
+        """Parse home settings from a backend response."""
+        settings = data.get(FIELD_SETTINGS, data.get(FIELD_HOME_SETTINGS, data))
+        if not isinstance(settings, dict):
+            raise AivaInvalidResponseError("AIVA devolvio settings invalidos")
+
+        return AivaHomeSettings(
+            language=self._optional_str(settings, "language"),
+            assistant_name=self._optional_str(settings, "assistant_name"),
+            voice_provider=self._optional_str(settings, "voice_provider"),
+            voice_id=self._optional_str(settings, "voice_id"),
+            custom_prompt=self._optional_str(settings, "custom_prompt"),
+            country_code=self._optional_str(settings, "country_code"),
+            locale=self._optional_str(settings, "locale"),
+            timezone=self._optional_str(settings, "timezone"),
+            response_style=self._optional_str(settings, "response_style"),
+        )
+
+    def _parse_effective_entities(
+        self,
+        data: dict[str, Any],
+    ) -> tuple[AivaEffectiveEntity, ...]:
+        """Parse effective entity metadata from a backend response."""
+        entities = data.get(FIELD_ENTITIES, data.get(FIELD_EFFECTIVE_ENTITIES))
+        if not isinstance(entities, list):
+            raise AivaInvalidResponseError("AIVA devolvio entidades invalidas")
+
+        parsed: list[AivaEffectiveEntity] = []
+        for entity in entities:
+            if not isinstance(entity, dict):
+                raise AivaInvalidResponseError("AIVA devolvio una entidad invalida")
+
+            entity_id = entity.get("entity_id")
+            if not isinstance(entity_id, str) or not entity_id:
+                raise AivaInvalidResponseError("AIVA devolvio entity_id invalido")
+
+            parsed.append(
+                AivaEffectiveEntity(
+                    entity_id=entity_id,
+                    display_name=self._optional_str(entity, "display_name"),
+                    effective_area=self._optional_str(entity, "effective_area"),
+                    alias=self._optional_str(entity, "alias"),
+                    area_override=self._optional_str(entity, "area_override"),
+                    is_allowed=self._optional_bool(entity, "is_allowed"),
+                    is_visible=self._optional_bool(entity, "is_visible"),
+                    requires_confirmation=self._optional_bool(
+                        entity,
+                        "requires_confirmation",
+                    ),
+                    priority=self._optional_int(entity, "priority"),
+                )
+            )
+
+        return tuple(parsed)
+
+    def _parse_home_automations(
+        self,
+        data: dict[str, Any],
+    ) -> tuple[AivaHomeAutomation, ...]:
+        """Parse home automations from a backend response."""
+        automations = data.get(FIELD_AUTOMATIONS, data.get(FIELD_HOME_AUTOMATIONS))
+        if not isinstance(automations, list):
+            raise AivaInvalidResponseError("AIVA devolvio automatizaciones invalidas")
+
+        parsed: list[AivaHomeAutomation] = []
+        for automation in automations:
+            if not isinstance(automation, dict):
+                raise AivaInvalidResponseError(
+                    "AIVA devolvio una automatizacion invalida"
+                )
+
+            automation_id = automation.get("id", automation.get("automation_id"))
+            if not isinstance(automation_id, str) or not automation_id:
+                raise AivaInvalidResponseError("AIVA devolvio automation_id invalido")
+
+            parsed.append(
+                AivaHomeAutomation(
+                    automation_id=automation_id,
+                    name=self._optional_str(automation, "name"),
+                    enabled=self._optional_bool(automation, "enabled"),
+                    raw=dict(automation),
+                )
+            )
+
+        return tuple(parsed)
+
+    def _optional_str(self, data: dict[str, Any], field: str) -> str | None:
+        """Return an optional string field or reject incompatible values."""
+        value = data.get(field)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise AivaInvalidResponseError(f"AIVA devolvio {field} invalido")
+        return value
+
+    def _optional_bool(self, data: dict[str, Any], field: str) -> bool | None:
+        """Return an optional boolean field or reject incompatible values."""
+        value = data.get(field)
+        if value is None:
+            return None
+        if not isinstance(value, bool):
+            raise AivaInvalidResponseError(f"AIVA devolvio {field} invalido")
+        return value
+
+    def _optional_int(self, data: dict[str, Any], field: str) -> int | None:
+        """Return an optional integer field or reject incompatible values."""
+        value = data.get(field)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise AivaInvalidResponseError(f"AIVA devolvio {field} invalido")
+        return value
+
     def _ensure_paired(self) -> None:
         """Ensure this client has credentials for paired-home endpoints."""
         if not self._home_id or not self._secret:
             raise AivaInvalidAuthError("AIVA no esta vinculado")
+
+    def _extract_backend_message(self, data: dict[str, Any]) -> str | None:
+        """Extract the most useful backend-facing message from a JSON payload."""
+        for key in ("detail", "message", "error_description", "title"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        error = data.get("error")
+        if isinstance(error, str) and error.strip():
+            return error.strip()
+        if isinstance(error, dict):
+            for key in ("detail", "message", "description", "code"):
+                value = error.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+
+        return None
+
+    def _sanitize_for_log(self, value: Any) -> Any:
+        """Mask sensitive values before writing diagnostics."""
+        if isinstance(value, dict):
+            return {
+                key: self._mask_sensitive_value(key, item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._sanitize_for_log(item) for item in value]
+        return value
+
+    def _mask_sensitive_value(self, key: str, value: Any) -> Any:
+        """Mask individual sensitive fields while preserving structure."""
+        lowered = key.lower()
+        if isinstance(value, dict):
+            return self._sanitize_for_log(value)
+        if isinstance(value, list):
+            return [self._sanitize_for_log(item) for item in value]
+        if not isinstance(value, str):
+            return value
+        if "secret" in lowered:
+            return self._mask_token(value, keep_start=2, keep_end=2)
+        if "pairing_code" in lowered or "linking_code" in lowered:
+            return self._mask_token(value, keep_start=2, keep_end=2)
+        return value
+
+    def _sanitize_text_for_log(self, text: str) -> str:
+        """Mask sensitive token-like values inside raw backend bodies."""
+        if not text:
+            return "<empty>"
+
+        sanitized = text
+        for field in (FIELD_SECRET, FIELD_PAIRING_CODE):
+            marker = f'"{field}"'
+            index = sanitized.find(marker)
+            while index != -1:
+                value_start = sanitized.find('"', index + len(marker))
+                value_start = sanitized.find('"', value_start + 1)
+                value_end = sanitized.find('"', value_start + 1)
+                if value_start == -1 or value_end == -1:
+                    break
+                raw_value = sanitized[value_start + 1 : value_end]
+                sanitized = sanitized.replace(raw_value, self._mask_token(raw_value), 1)
+                index = sanitized.find(marker, value_end)
+
+        return sanitized
+
+    def _mask_token(
+        self,
+        value: str,
+        *,
+        keep_start: int = 2,
+        keep_end: int = 2,
+    ) -> str:
+        """Mask a token-like string while keeping it identifiable in logs."""
+        if len(value) <= keep_start + keep_end:
+            return "***"
+        return f"{value[:keep_start]}***{value[-keep_end:]}"

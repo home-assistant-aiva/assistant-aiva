@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
@@ -11,9 +11,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.aiva.api import (
     AivaActivationStartResult,
     AivaActivationStatus,
+    AivaBackendClientError,
     AivaCannotConnectError,
     AivaInvalidResponseError,
     AivaMissingRequiredDataError,
+    AivaTimeoutError,
 )
 from custom_components.aiva.const import (
     CONF_BASE_URL,
@@ -53,6 +55,9 @@ async def test_config_flow_activation_valid_creates_entry(hass):
                 plan="smart",
             ),
         ],
+    ), patch(
+        "custom_components.aiva.async_setup_entry",
+        AsyncMock(return_value=True),
     ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -63,7 +68,6 @@ async def test_config_flow_activation_valid_creates_entry(hass):
                 CONF_PLAN: "smart",
             },
         )
-
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "awaiting_pairing"
 
@@ -108,8 +112,9 @@ async def test_config_flow_pairing_pending(hass):
             DOMAIN,
             context={"source": config_entries.SOURCE_USER},
             data={
-                CONF_BASE_URL: "http://127.0.0.1:8080",
+                CONF_BASE_URL: "https://api.example.com",
                 CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
             },
         )
 
@@ -133,8 +138,9 @@ async def test_config_flow_timeout_or_unreachable(hass):
             DOMAIN,
             context={"source": config_entries.SOURCE_USER},
             data={
-                CONF_BASE_URL: "http://127.0.0.1:8080",
+                CONF_BASE_URL: "https://api.example.com",
                 CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
             },
         )
 
@@ -152,8 +158,9 @@ async def test_config_flow_invalid_backend_response(hass):
             DOMAIN,
             context={"source": config_entries.SOURCE_USER},
             data={
-                CONF_BASE_URL: "http://127.0.0.1:8080",
+                CONF_BASE_URL: "https://api.example.com",
                 CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
             },
         )
 
@@ -171,8 +178,9 @@ async def test_config_flow_incomplete_backend_response(hass):
             DOMAIN,
             context={"source": config_entries.SOURCE_USER},
             data={
-                CONF_BASE_URL: "http://127.0.0.1:8080",
+                CONF_BASE_URL: "https://api.example.com",
                 CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
             },
         )
 
@@ -203,7 +211,7 @@ async def test_config_flow_does_not_duplicate_existing_entry(hass):
     )
 
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
+    assert result["reason"] == "single_instance_allowed"
 
 
 async def test_options_flow_updates_base_url_and_scan_interval(hass):
@@ -241,3 +249,82 @@ async def test_options_flow_updates_base_url_and_scan_interval(hass):
         CONF_BASE_URL: "https://api.example.com",
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL_SECONDS,
     }
+
+
+async def test_config_flow_rejects_localhost_base_url(hass):
+    """Reject localhost URLs during initial activation."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data={
+            CONF_BASE_URL: " http://127.0.0.1:8080/ ",
+            CONF_PLAN: "base",
+            CONF_HOME_NAME: "Casa Principal",
+        },
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_BASE_URL: "invalid_base_url_local"}
+
+
+async def test_config_flow_rejects_blank_home_name(hass):
+    """Reject empty or whitespace-only home names."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data={
+            CONF_BASE_URL: "https://api.example.com",
+            CONF_PLAN: "base",
+            CONF_HOME_NAME: "   ",
+        },
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_HOME_NAME: "invalid_home_name"}
+
+
+async def test_config_flow_shows_backend_client_error_detail(hass):
+    """Surface useful backend details in the form description."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        side_effect=AivaBackendClientError(
+            "HTTP 422",
+            user_message="El plan seleccionado no está disponible",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com",
+                CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "backend_client_error"}
+    assert (
+        result["description_placeholders"]["error_detail"]
+        == "Detalle del error: El plan seleccionado no está disponible"
+    )
+
+
+async def test_config_flow_maps_timeout_separately(hass):
+    """Differentiate backend timeouts from generic connection failures."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        side_effect=AivaTimeoutError("timeout"),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com",
+                CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "timeout"}

@@ -30,18 +30,23 @@ ACTIVATION_STATES = (
 
 DEFAULT_SCAN_INTERVAL_SECONDS = 300
 MIN_SCAN_INTERVAL_SECONDS = 30
-# Development default. Production can use any direct backend URL or reverse
-# proxy URL, for example https://api.example.com, because endpoints are relative.
-DEFAULT_API_BASE_URL = "http://localhost:8080"
+# Current deployment default. Keep this configurable from the UI so the
+# integration can later point to a direct domain or reverse proxy without code
+# changes.
+DEFAULT_API_BASE_URL = "http://187.77.44.118:8080"
 DEFAULT_API_TIMEOUT_SECONDS = 10
 
 # Keep backend paths relative so base_url can point to a local backend today or
 # to a future domain/reverse proxy without changing the integration architecture.
 ENDPOINT_PAIR = "/pair"
+ENDPOINT_ACTIVATION_REQUEST = "/activation/request"
 ENDPOINT_PAIRING_START = "/pairing/start"
 ENDPOINT_PAIRING_STATUS = "/pairing/status"
 ENDPOINT_HEARTBEAT = "/heartbeat"
 ENDPOINT_ENTITIES_SYNC = "/entities/sync"
+ENDPOINT_HOME_SETTINGS = "/home/settings"
+ENDPOINT_HOME_AUTOMATIONS = "/home/automations"
+ENDPOINT_ENTITIES_EFFECTIVE = "/entities/effective"
 
 HEADER_AIVA_SECRET = "x-aiva-secret"
 
@@ -54,9 +59,30 @@ FIELD_PLAN = "plan"
 FIELD_STATE = "state"
 FIELD_HEARTBEAT_AT = "heartbeat_at"
 FIELD_ENTITIES = "entities"
+FIELD_EFFECTIVE_ENTITIES = "effective_entities"
+FIELD_SETTINGS = "settings"
+FIELD_HOME_SETTINGS = "home_settings"
+FIELD_AUTOMATIONS = "automations"
+FIELD_HOME_AUTOMATIONS = "home_automations"
 
 ATTR_CONNECTED = "connected"
 ATTR_HOME_NAME = "home_name"
+ATTR_LANGUAGE = "language"
+ATTR_ASSISTANT_NAME = "assistant_name"
+ATTR_COUNTRY_CODE = "country_code"
+ATTR_LOCALE = "locale"
+ATTR_TIMEZONE = "timezone"
+ATTR_RESPONSE_STYLE = "response_style"
+ATTR_CUSTOM_PROMPT_CONFIGURED = "custom_prompt_configured"
+ATTR_TOTAL_COUNT = "total_count"
+ATTR_ALLOWED_COUNT = "allowed_count"
+ATTR_VISIBLE_COUNT = "visible_count"
+ATTR_REQUIRES_CONFIRMATION_COUNT = "requires_confirmation_count"
+ATTR_ENABLED_COUNT = "enabled_count"
+ATTR_DISABLED_COUNT = "disabled_count"
+ATTR_SAMPLE = "sample"
+
+MAX_SUMMARY_ITEMS = 10
 
 SYNC_ENTITY_DOMAINS = (
     "alarm_control_panel",

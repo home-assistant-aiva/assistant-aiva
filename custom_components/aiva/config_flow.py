@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import voluptuous as vol
 
@@ -14,10 +16,14 @@ from .api import (
     AivaActivationStatus,
     AivaApiClient,
     AivaApiError,
+    AivaBackendClientError,
+    AivaBackendServerError,
     AivaCannotConnectError,
+    AivaConnectionError,
     AivaInvalidPairingCodeError,
     AivaInvalidResponseError,
     AivaMissingRequiredDataError,
+    AivaTimeoutError,
 )
 from .const import (
     CONF_BASE_URL,
@@ -36,16 +42,40 @@ from .const import (
     STATE_AWAITING_PAYMENT,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_BASE_URL, default=DEFAULT_API_BASE_URL): str,
-        vol.Optional(CONF_HOME_NAME): str,
+        vol.Required(CONF_HOME_NAME): str,
         vol.Required(CONF_PLAN, default="base"): vol.In(PLANS),
     }
 )
 
 EMPTY_SCHEMA = vol.Schema({})
+
+
+def _normalize_user_base_url(base_url: Any) -> str:
+    """Normalize user-provided base URL values."""
+    value = AivaApiClient.normalize_base_url(str(base_url or ""))
+    parsed = urlparse(value)
+    if not value or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return value
+
+
+def _is_blocked_base_url(base_url: str) -> bool:
+    """Reject local-only URLs in the activation flow."""
+    parsed = urlparse(base_url)
+    return parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+
+
+def _format_user_error_detail(message: str | None) -> str:
+    """Render a concrete backend detail without leaking secrets."""
+    if not message:
+        return ""
+    return f"Detalle del error: {message}"
 
 
 async def _start_activation(
@@ -89,6 +119,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._home_name: str | None = None
         self._plan: str | None = None
         self._pairing_code: str | None = None
+        self._last_error_detail: str = ""
 
     @staticmethod
     def async_get_options_flow(
@@ -107,45 +138,55 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="already_configured")
 
         if user_input is not None:
-            base_url = user_input[CONF_BASE_URL].strip().rstrip("/")
-            home_name = user_input.get(CONF_HOME_NAME, "").strip()
-            requested_home_name = (
-                home_name or self.hass.config.location_name or "Casa AIVA"
-            )
+            base_url = _normalize_user_base_url(user_input.get(CONF_BASE_URL))
+            home_name = (user_input.get(CONF_HOME_NAME) or "").strip()
             plan = user_input[CONF_PLAN]
 
-            normalized_input: dict[str, Any] = {
-                CONF_BASE_URL: base_url,
-                CONF_HOME_NAME: requested_home_name,
-                CONF_PLAN: plan,
-            }
+            if not base_url:
+                errors[CONF_BASE_URL] = "invalid_base_url"
+            elif _is_blocked_base_url(base_url):
+                errors[CONF_BASE_URL] = "invalid_base_url_local"
 
-            try:
-                activation = await _start_activation(self.hass, normalized_input)
-            except AivaCannotConnectError:
-                errors["base"] = "cannot_connect"
-            except AivaMissingRequiredDataError:
-                errors["base"] = "missing_required_data"
-            except AivaInvalidResponseError:
-                errors["base"] = "invalid_response"
-            except AivaApiError:
-                errors["base"] = "unknown"
-            else:
-                self._base_url = base_url
-                self._home_name = activation.home_name
-                self._plan = activation.plan
-                self._pairing_code = activation.pairing_code
+            if not home_name:
+                errors[CONF_HOME_NAME] = "invalid_home_name"
 
-                if activation.state == STATE_ACTIVE:
-                    return await self.async_step_awaiting_payment()
-                if activation.state == STATE_AWAITING_PAYMENT:
-                    return await self.async_step_awaiting_payment()
-                return await self.async_step_awaiting_pairing()
+            normalized_input: dict[str, Any] | None = None
+            if not errors:
+                normalized_input = {
+                    CONF_BASE_URL: base_url,
+                    CONF_HOME_NAME: home_name,
+                    CONF_PLAN: plan,
+                }
+                _LOGGER.debug(
+                    "AIVA activation requested from config flow: base_url=%s plan=%s home_name=%s",
+                    base_url,
+                    plan,
+                    home_name,
+                )
+
+            if normalized_input is not None:
+                try:
+                    activation = await _start_activation(self.hass, normalized_input)
+                except AivaApiError as err:
+                    self._apply_api_error(errors, err)
+                else:
+                    self._last_error_detail = ""
+                    self._base_url = base_url
+                    self._home_name = activation.home_name
+                    self._plan = activation.plan
+                    self._pairing_code = activation.pairing_code
+
+                    if activation.state == STATE_ACTIVE:
+                        return await self.async_step_awaiting_payment()
+                    if activation.state == STATE_AWAITING_PAYMENT:
+                        return await self.async_step_awaiting_payment()
+                    return await self.async_step_awaiting_pairing()
 
         return self.async_show_form(
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
+            description_placeholders={"error_detail": self._last_error_detail},
         )
 
     async def async_step_awaiting_pairing(
@@ -158,6 +199,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             status = await self._poll_activation_status(errors)
             if status:
+                self._last_error_detail = ""
                 if status.state == STATE_ACTIVE:
                     return await self._create_active_entry(status)
                 if status.state == STATE_AWAITING_PAYMENT:
@@ -171,6 +213,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "pairing_code": self._pairing_code or "",
+                "error_detail": self._last_error_detail,
             },
         )
 
@@ -184,6 +227,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             status = await self._poll_activation_status(errors)
             if status:
+                self._last_error_detail = ""
                 if status.state == STATE_ACTIVE:
                     return await self._create_active_entry(status)
                 if status.state == STATE_AWAITING_PAIRING:
@@ -195,6 +239,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="awaiting_payment",
             data_schema=EMPTY_SCHEMA,
             errors=errors,
+            description_placeholders={"error_detail": self._last_error_detail},
         )
 
     async def _poll_activation_status(
@@ -212,16 +257,8 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 base_url=self._base_url,
                 pairing_code=self._pairing_code,
             )
-        except AivaInvalidPairingCodeError:
-            errors["base"] = "invalid_pairing_code"
-        except AivaCannotConnectError:
-            errors["base"] = "cannot_connect"
-        except AivaMissingRequiredDataError:
-            errors["base"] = "missing_required_data"
-        except AivaInvalidResponseError:
-            errors["base"] = "invalid_response"
-        except AivaApiError:
-            errors["base"] = "unknown"
+        except AivaApiError as err:
+            self._apply_api_error(errors, err)
 
         return None
 
@@ -254,6 +291,29 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data=entry_data,
         )
 
+    def _apply_api_error(self, errors: dict[str, str], err: AivaApiError) -> None:
+        """Map API exceptions to Home Assistant flow errors and visible details."""
+        self._last_error_detail = _format_user_error_detail(err.user_message)
+
+        if isinstance(err, AivaInvalidPairingCodeError):
+            errors["base"] = "invalid_pairing_code"
+        elif isinstance(err, AivaTimeoutError):
+            errors["base"] = "timeout"
+        elif isinstance(err, AivaConnectionError):
+            errors["base"] = "cannot_connect"
+        elif isinstance(err, AivaBackendClientError):
+            errors["base"] = "backend_client_error"
+        elif isinstance(err, AivaBackendServerError):
+            errors["base"] = "backend_server_error"
+        elif isinstance(err, AivaMissingRequiredDataError):
+            errors["base"] = "missing_required_data"
+        elif isinstance(err, AivaInvalidResponseError):
+            errors["base"] = "invalid_response"
+        elif isinstance(err, AivaCannotConnectError):
+            errors["base"] = "cannot_connect"
+        else:
+            errors["base"] = "unknown"
+
 
 class AivaOptionsFlow(config_entries.OptionsFlow):
     """Handle AIVA options."""
@@ -270,10 +330,14 @@ class AivaOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            base_url = user_input[CONF_BASE_URL].strip().rstrip("/")
+            base_url = _normalize_user_base_url(user_input[CONF_BASE_URL])
             scan_interval = user_input[CONF_SCAN_INTERVAL]
 
-            if scan_interval < MIN_SCAN_INTERVAL_SECONDS:
+            if not base_url:
+                errors[CONF_BASE_URL] = "invalid_base_url"
+            elif _is_blocked_base_url(base_url):
+                errors[CONF_BASE_URL] = "invalid_base_url_local"
+            elif scan_interval < MIN_SCAN_INTERVAL_SECONDS:
                 errors[CONF_SCAN_INTERVAL] = "invalid_scan_interval"
             else:
                 return self.async_create_entry(

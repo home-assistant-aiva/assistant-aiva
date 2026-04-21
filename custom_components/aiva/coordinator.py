@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
@@ -11,13 +12,53 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import AivaApiClient, AivaApiError, AivaStatus
+from .api import (
+    AivaApiClient,
+    AivaApiError,
+    AivaEffectiveEntity,
+    AivaHomeAutomation,
+    AivaHomeSettings,
+    AivaStatus,
+)
 from .const import DOMAIN, SYNC_ENTITY_DOMAINS
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaStatus]):
+@dataclass(frozen=True, slots=True)
+class AivaCoordinatorData:
+    """Data exposed by the AIVA coordinator."""
+
+    state: str
+    connected: bool
+    home_name: str | None
+    last_sync: datetime | None
+    home_settings: AivaHomeSettings | None = None
+    effective_entities: tuple[AivaEffectiveEntity, ...] = ()
+    home_automations: tuple[AivaHomeAutomation, ...] = ()
+
+    @classmethod
+    def from_status(
+        cls,
+        status: AivaStatus,
+        *,
+        home_settings: AivaHomeSettings | None = None,
+        effective_entities: tuple[AivaEffectiveEntity, ...] = (),
+        home_automations: tuple[AivaHomeAutomation, ...] = (),
+    ) -> "AivaCoordinatorData":
+        """Build enriched coordinator data from the base status."""
+        return cls(
+            state=status.state,
+            connected=status.connected,
+            home_name=status.home_name,
+            last_sync=status.last_sync,
+            home_settings=home_settings,
+            effective_entities=effective_entities,
+            home_automations=home_automations,
+        )
+
+
+class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
     """Coordinate data updates for AIVA."""
 
     def __init__(
@@ -35,12 +76,19 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaStatus]):
         )
         self.client = client
 
-    async def _async_update_data(self) -> AivaStatus:
+    async def _async_update_data(self) -> AivaCoordinatorData:
         """Fetch data from AIVA."""
         try:
-            return await self.client.get_status()
+            status = await self.client.get_status()
         except AivaApiError as err:
             raise UpdateFailed(str(err)) from err
+
+        return AivaCoordinatorData.from_status(
+            status,
+            home_settings=await self._async_load_home_settings(),
+            effective_entities=await self._async_load_effective_entities(),
+            home_automations=await self._async_load_home_automations(),
+        )
 
     async def async_retry_connection(self) -> None:
         """Retry the AIVA connection and refresh data."""
@@ -51,6 +99,30 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaStatus]):
         """Ask AIVA to synchronize entities and refresh data."""
         await self.client.sync_entities(self._collect_entities())
         await self.async_request_refresh()
+
+    async def _async_load_home_settings(self) -> AivaHomeSettings | None:
+        """Load optional home settings without failing the base integration."""
+        try:
+            return await self.client.get_home_settings()
+        except AivaApiError as err:
+            _LOGGER.debug("No se pudieron cargar settings de AIVA: %s", err)
+            return self.data.home_settings if self.data else None
+
+    async def _async_load_effective_entities(self) -> tuple[AivaEffectiveEntity, ...]:
+        """Load optional effective entities without failing the base integration."""
+        try:
+            return await self.client.get_effective_entities()
+        except AivaApiError as err:
+            _LOGGER.debug("No se pudieron cargar entidades efectivas de AIVA: %s", err)
+            return self.data.effective_entities if self.data else ()
+
+    async def _async_load_home_automations(self) -> tuple[AivaHomeAutomation, ...]:
+        """Load optional automations without failing the base integration."""
+        try:
+            return await self.client.get_home_automations()
+        except AivaApiError as err:
+            _LOGGER.debug("No se pudieron cargar automatizaciones de AIVA: %s", err)
+            return self.data.home_automations if self.data else ()
 
     def _collect_entities(self) -> list[dict]:
         """Build the entity snapshot expected by the AIVA backend."""
