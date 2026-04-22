@@ -13,12 +13,14 @@ from aiohttp import ClientError, ClientTimeout
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.instance_id import async_get as async_get_instance_id
 from homeassistant.util import dt as dt_util
 
 from .const import (
     ACTIVATION_STATES,
     DEFAULT_API_BASE_URL,
     DEFAULT_API_TIMEOUT_SECONDS,
+    ENDPOINT_ACTIVATION_PAIRING_CODE,
     ENDPOINT_ACTIVATION_REQUEST,
     ENDPOINT_ENTITIES_EFFECTIVE,
     ENDPOINT_ENTITIES_SYNC,
@@ -28,6 +30,7 @@ from .const import (
     ENDPOINT_PAIR,
     ENDPOINT_PAIRING_START,
     ENDPOINT_PAIRING_STATUS,
+    FIELD_ACTIVATION_STATE,
     FIELD_AUTOMATIONS,
     FIELD_ENTITIES,
     FIELD_EFFECTIVE_ENTITIES,
@@ -36,6 +39,7 @@ from .const import (
     FIELD_HOME_ID,
     FIELD_HOME_NAME,
     FIELD_HOME_SETTINGS,
+    FIELD_INSTALLATION_ID,
     FIELD_OK,
     FIELD_PAIRING_CODE,
     FIELD_PLAN,
@@ -141,6 +145,28 @@ class AivaActivationStartResult:
     pairing_code: str
     home_name: str
     plan: str
+    state: str
+    home_id: str | None = None
+    secret: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AivaActivationRequestResult:
+    """Data returned by the initial activation request."""
+
+    home_name: str
+    plan: str
+    state: str
+    home_id: str | None = None
+    secret: str | None = None
+    pairing_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AivaPairingCodeResult:
+    """Data returned by the pairing-code generation endpoint."""
+
+    pairing_code: str
     state: str
 
 
@@ -266,8 +292,10 @@ class AivaApiClient:
         home_name: str,
         plan: str,
     ) -> AivaActivationStartResult:
-        """Ask the backend to generate a pairing code for this installation."""
+        """Start activation and obtain the pairing code using the backend flow."""
+        installation_id = await self._get_installation_id()
         payload = {
+            FIELD_INSTALLATION_ID: installation_id,
             FIELD_HOME_NAME: home_name.strip(),
             FIELD_PLAN: plan.strip(),
         }
@@ -283,9 +311,118 @@ class AivaApiClient:
                 ENDPOINT_PAIRING_START,
             )
             data = await self._request("post", ENDPOINT_PAIRING_START, json=payload)
-        result = self._parse_activation_start(data, requested_plan=payload[FIELD_PLAN])
-        self._pairing_code = result.pairing_code
-        self._home_name = result.home_name
+            result = self._parse_legacy_activation_start(
+                data,
+                requested_plan=payload[FIELD_PLAN],
+            )
+            self._pairing_code = result.pairing_code
+            self._home_name = result.home_name
+            return result
+
+        activation = self._parse_activation_request(
+            data,
+            requested_plan=payload[FIELD_PLAN],
+        )
+        self._home_id = activation.home_id
+        self._secret = activation.secret
+        self._home_name = activation.home_name
+
+        _LOGGER.debug(
+            "AIVA activation request parsed: endpoint=%s installation_id=%s state=%s home_id=%s home_name=%s plan=%s pairing_code=%s",
+            ENDPOINT_ACTIVATION_REQUEST,
+            self._mask_token(installation_id),
+            activation.state,
+            self._mask_token(activation.home_id) if activation.home_id else None,
+            activation.home_name,
+            activation.plan,
+            self._mask_token(activation.pairing_code) if activation.pairing_code else None,
+        )
+
+        if activation.pairing_code:
+            self._pairing_code = activation.pairing_code
+            return AivaActivationStartResult(
+                pairing_code=activation.pairing_code,
+                home_name=activation.home_name,
+                plan=activation.plan,
+                state=activation.state,
+                home_id=activation.home_id,
+                secret=activation.secret,
+            )
+
+        if not activation.home_id or not activation.secret:
+            raise AivaMissingRequiredDataError(
+                "AIVA no devolvio home_id o secret para generar el codigo de vinculacion",
+                user_message=(
+                    "AIVA respondió que la instalación está lista, pero no envió "
+                    "los datos necesarios para generar el código de vinculación."
+                ),
+                endpoint=ENDPOINT_ACTIVATION_REQUEST,
+            )
+
+        pairing = await self.generate_pairing_code(
+            home_id=activation.home_id,
+            secret=activation.secret,
+        )
+        self._pairing_code = pairing.pairing_code
+
+        return AivaActivationStartResult(
+            pairing_code=pairing.pairing_code,
+            home_name=activation.home_name,
+            plan=activation.plan,
+            state=(
+                activation.state
+                if activation.state != STATE_INSTALLED
+                and pairing.state == STATE_AWAITING_PAIRING
+                else pairing.state
+            ),
+            home_id=activation.home_id,
+            secret=activation.secret,
+        )
+
+    async def generate_pairing_code(
+        self,
+        *,
+        home_id: str | None = None,
+        secret: str | None = None,
+    ) -> AivaPairingCodeResult:
+        """Generate a pairing code after activation/request succeeded."""
+        resolved_home_id = (home_id or self._home_id or "").strip()
+        resolved_secret = (secret or self._secret or "").strip()
+        if not resolved_home_id:
+            raise AivaMissingRequiredDataError(
+                "AIVA no devolvio home_id para generar el codigo de vinculacion",
+                user_message=(
+                    "AIVA no envió el identificador del hogar necesario para "
+                    "generar el código de vinculación."
+                ),
+                endpoint=ENDPOINT_ACTIVATION_PAIRING_CODE,
+            )
+        if not resolved_secret:
+            raise AivaMissingRequiredDataError(
+                "AIVA no devolvio secret para generar el codigo de vinculacion",
+                user_message=(
+                    "AIVA no envió la credencial necesaria para generar el "
+                    "código de vinculación."
+                ),
+                endpoint=ENDPOINT_ACTIVATION_PAIRING_CODE,
+            )
+
+        self._home_id = resolved_home_id
+        self._secret = resolved_secret
+        data = await self._request(
+            "post",
+            ENDPOINT_ACTIVATION_PAIRING_CODE,
+            json={FIELD_HOME_ID: resolved_home_id},
+            authenticated=True,
+        )
+        result = self._parse_pairing_code_generation(data)
+        _LOGGER.debug(
+            "AIVA pairing code parsed: endpoint=%s state=%s home_id=%s pairing_code=%s",
+            ENDPOINT_ACTIVATION_PAIRING_CODE,
+            result.state,
+            self._mask_token(resolved_home_id),
+            self._mask_token(result.pairing_code),
+        )
         return result
 
     async def get_activation_status(
@@ -635,17 +772,52 @@ class AivaApiClient:
             plan=plan,
         )
 
-    def _parse_activation_start(
+    def _parse_activation_request(
+        self,
+        data: dict[str, Any],
+        *,
+        requested_plan: str,
+    ) -> AivaActivationRequestResult:
+        """Parse the initial activation request response."""
+        home_id = data.get(FIELD_HOME_ID)
+        secret = data.get(FIELD_SECRET)
+        pairing_code = data.get(FIELD_PAIRING_CODE)
+        home_name = data.get(FIELD_HOME_NAME)
+        plan = data.get(FIELD_PLAN, requested_plan)
+        state = self._extract_activation_state(data, default=STATE_INSTALLED)
+
+        if not isinstance(home_name, str) or not home_name:
+            raise AivaMissingRequiredDataError("AIVA no devolvio home_name")
+        if not isinstance(plan, str) or not plan:
+            raise AivaInvalidResponseError("AIVA devolvio plan invalido")
+        for field_name, value in (
+            (FIELD_HOME_ID, home_id),
+            (FIELD_SECRET, secret),
+            (FIELD_PAIRING_CODE, pairing_code),
+        ):
+            if value is not None and (not isinstance(value, str) or not value):
+                raise AivaInvalidResponseError(f"AIVA devolvio {field_name} invalido")
+
+        return AivaActivationRequestResult(
+            home_name=home_name,
+            plan=plan,
+            state=state,
+            home_id=home_id,
+            secret=secret,
+            pairing_code=pairing_code,
+        )
+
+    def _parse_legacy_activation_start(
         self,
         data: dict[str, Any],
         *,
         requested_plan: str,
     ) -> AivaActivationStartResult:
-        """Parse the pairing-code generation response."""
+        """Parse the legacy endpoint that already returns pairing_code."""
         pairing_code = data.get(FIELD_PAIRING_CODE)
         home_name = data.get(FIELD_HOME_NAME)
         plan = data.get(FIELD_PLAN, requested_plan)
-        state = data.get(FIELD_STATE, STATE_AWAITING_PAIRING)
+        state = self._extract_activation_state(data, default=STATE_AWAITING_PAIRING)
 
         if not isinstance(pairing_code, str) or not pairing_code:
             raise AivaMissingRequiredDataError("AIVA no devolvio pairing_code")
@@ -653,8 +825,6 @@ class AivaApiClient:
             raise AivaMissingRequiredDataError("AIVA no devolvio home_name")
         if not isinstance(plan, str) or not plan:
             raise AivaInvalidResponseError("AIVA devolvio plan invalido")
-        if not isinstance(state, str) or state not in ACTIVATION_STATES:
-            raise AivaInvalidResponseError("AIVA devolvio estado invalido")
 
         return AivaActivationStartResult(
             pairing_code=pairing_code,
@@ -663,11 +833,29 @@ class AivaApiClient:
             state=state,
         )
 
+    def _parse_pairing_code_generation(
+        self,
+        data: dict[str, Any],
+    ) -> AivaPairingCodeResult:
+        """Parse the pairing-code generation response."""
+        pairing_code = data.get(FIELD_PAIRING_CODE)
+        state = self._extract_activation_state(data, default=STATE_AWAITING_PAIRING)
+
+        if not isinstance(pairing_code, str) or not pairing_code:
+            raise AivaMissingRequiredDataError(
+                "AIVA no devolvio pairing_code",
+                user_message=(
+                    "AIVA no devolvió el código de vinculación. Intentá iniciar "
+                    "la activación nuevamente."
+                ),
+                endpoint=ENDPOINT_ACTIVATION_PAIRING_CODE,
+            )
+
+        return AivaPairingCodeResult(pairing_code=pairing_code, state=state)
+
     def _parse_activation_status(self, data: dict[str, Any]) -> AivaActivationStatus:
         """Parse the activation status response."""
-        state = data.get(FIELD_STATE)
-        if not isinstance(state, str) or state not in ACTIVATION_STATES:
-            raise AivaInvalidResponseError("AIVA devolvio estado invalido")
+        state = self._extract_activation_state(data)
 
         pairing_code = data.get(FIELD_PAIRING_CODE)
         home_id = data.get(FIELD_HOME_ID)
@@ -693,6 +881,25 @@ class AivaApiClient:
             home_name=home_name,
             plan=plan,
         )
+
+    async def _get_installation_id(self) -> str:
+        """Return a stable Home Assistant installation identifier."""
+        installation_id = await async_get_instance_id(self._hass)
+        if not installation_id:
+            raise AivaInvalidResponseError("Home Assistant no devolvio installation_id")
+        return installation_id
+
+    def _extract_activation_state(
+        self,
+        data: dict[str, Any],
+        *,
+        default: str | None = None,
+    ) -> str:
+        """Read activation state from either state or activation_state."""
+        state = data.get(FIELD_ACTIVATION_STATE, data.get(FIELD_STATE, default))
+        if not isinstance(state, str) or state not in ACTIVATION_STATES:
+            raise AivaInvalidResponseError("AIVA devolvio estado invalido")
+        return state
 
     def _parse_home_settings(self, data: dict[str, Any]) -> AivaHomeSettings:
         """Parse home settings from a backend response."""

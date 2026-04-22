@@ -80,6 +80,16 @@ def _patch_session(monkeypatch, response_or_error):
     return session
 
 
+def _patch_installation_id(monkeypatch, installation_id="ha-installation-1"):
+    async def _async_get_instance_id(hass):
+        return installation_id
+
+    monkeypatch.setattr(
+        "custom_components.aiva.api.async_get_instance_id",
+        _async_get_instance_id,
+    )
+
+
 @pytest.mark.asyncio
 async def test_validate_pairing_code_success(hass, monkeypatch):
     """Validate a pairing code and parse the backend response."""
@@ -171,19 +181,39 @@ async def test_validate_pairing_code_incomplete_response(hass, monkeypatch, payl
 
 @pytest.mark.asyncio
 async def test_start_activation_success(hass, monkeypatch):
-    """Start commercial activation and parse the generated pairing code."""
-    session = _patch_session(
-        monkeypatch,
+    """Start activation using the two-step backend flow."""
+    responses = [
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "home_id": "home-1",
+                "secret": "<redacted-secret>",
+                "home_name": "Casa Principal",
+                "plan": "premium",
+                "activation_state": "installed",
+            },
+        ),
         FakeResponse(
             200,
             {
                 "ok": True,
                 "pairing_code": "<pairing-code>",
-                "home_name": "Casa Principal",
-                "plan": "premium",
-                "state": STATE_AWAITING_PAIRING,
+                "activation_state": STATE_AWAITING_PAIRING,
             },
         ),
+    ]
+
+    class SequencedSession(FakeSession):
+        def request(self, method, url, **kwargs):
+            self.calls.append({"method": method, "url": url, **kwargs})
+            return responses.pop(0)
+
+    _patch_installation_id(monkeypatch)
+    session = SequencedSession(None)
+    monkeypatch.setattr(
+        "custom_components.aiva.api.async_get_clientsession",
+        lambda hass: session,
     )
     client = AivaApiClient(hass, base_url="https://api.example.com")
 
@@ -194,11 +224,68 @@ async def test_start_activation_success(hass, monkeypatch):
 
     assert result.pairing_code == "<pairing-code>"
     assert result.state == STATE_AWAITING_PAIRING
+    assert result.home_id == "home-1"
+    assert result.secret == "<redacted-secret>"
     assert session.calls[0]["url"] == "https://api.example.com/activation/request"
     assert session.calls[0]["json"] == {
+        "installation_id": "ha-installation-1",
         "home_name": "Casa Principal",
         "plan": "premium",
     }
+    assert session.calls[1]["url"] == "https://api.example.com/activation/pairing-code"
+    assert session.calls[1]["json"] == {"home_id": "home-1"}
+    assert session.calls[1]["headers"] == {"x-aiva-secret": "<redacted-secret>"}
+
+
+@pytest.mark.asyncio
+async def test_start_activation_accepts_pairing_code_in_first_response(hass, monkeypatch):
+    """Keep compatibility when the first endpoint still returns pairing_code."""
+    _patch_installation_id(monkeypatch)
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "pairing_code": "<pairing-code>",
+                "home_name": "Casa Principal",
+                "plan": "premium",
+                "activation_state": STATE_AWAITING_PAIRING,
+            },
+        ),
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    result = await client.start_activation(home_name="Casa Principal", plan="premium")
+
+    assert result.pairing_code == "<pairing-code>"
+    assert len(session.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_activation_requires_home_id_and_secret_when_pairing_code_is_missing(
+    hass, monkeypatch
+):
+    """Reject installed responses that cannot generate the second-step pairing code."""
+    _patch_installation_id(monkeypatch)
+    _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "home_name": "Casa Principal",
+                "plan": "premium",
+                "activation_state": "installed",
+            },
+        ),
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    with pytest.raises(AivaMissingRequiredDataError) as err:
+        await client.start_activation(home_name="Casa Principal", plan="premium")
+
+    assert "código de vinculación" in err.value.user_message
 
 
 @pytest.mark.asyncio
@@ -223,6 +310,7 @@ async def test_start_activation_falls_back_to_legacy_endpoint_on_404(hass, monke
             self.calls.append({"method": method, "url": url, **kwargs})
             return responses.pop(0)
 
+    _patch_installation_id(monkeypatch)
     session = SequencedSession(None)
     monkeypatch.setattr(
         "custom_components.aiva.api.async_get_clientsession",
@@ -247,7 +335,7 @@ async def test_get_activation_status_awaiting_payment(hass, monkeypatch):
     """Parse a pending payment activation status."""
     session = _patch_session(
         monkeypatch,
-        FakeResponse(200, {"ok": True, "state": STATE_AWAITING_PAYMENT}),
+        FakeResponse(200, {"ok": True, "activation_state": STATE_AWAITING_PAYMENT}),
     )
     client = AivaApiClient(hass, base_url="https://api.example.com")
 

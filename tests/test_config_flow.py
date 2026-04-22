@@ -42,6 +42,8 @@ async def test_config_flow_activation_valid_creates_entry(hass):
             home_name="Casa Principal",
             plan="smart",
             state=STATE_AWAITING_PAIRING,
+            home_id="home-1",
+            secret="<redacted-secret>",
         ),
     ), patch(
         "custom_components.aiva.config_flow._get_activation_status",
@@ -103,6 +105,8 @@ async def test_config_flow_pairing_pending(hass):
             home_name="Casa Principal",
             plan="base",
             state=STATE_AWAITING_PAIRING,
+            home_id="home-1",
+            secret="<redacted-secret>",
         ),
     ), patch(
         "custom_components.aiva.config_flow._get_activation_status",

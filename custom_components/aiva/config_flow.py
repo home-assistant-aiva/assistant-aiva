@@ -117,8 +117,10 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the AIVA config flow."""
         self._base_url: str | None = None
         self._home_name: str | None = None
+        self._home_id: str | None = None
         self._plan: str | None = None
         self._pairing_code: str | None = None
+        self._secret: str | None = None
         self._last_error_detail: str = ""
 
     @staticmethod
@@ -173,8 +175,10 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._last_error_detail = ""
                     self._base_url = base_url
                     self._home_name = activation.home_name
+                    self._home_id = activation.home_id
                     self._plan = activation.plan
                     self._pairing_code = activation.pairing_code
+                    self._secret = activation.secret
 
                     if activation.state == STATE_ACTIVE:
                         return await self.async_step_awaiting_payment()
