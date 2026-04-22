@@ -136,7 +136,7 @@ async def test_config_flow_timeout_or_unreachable(hass):
     """Show cannot_connect when the backend cannot be reached."""
     with patch(
         "custom_components.aiva.config_flow._start_activation",
-        side_effect=AivaCannotConnectError,
+        side_effect=AivaCannotConnectError("backend unreachable"),
     ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -156,7 +156,7 @@ async def test_config_flow_invalid_backend_response(hass):
     """Show invalid_response for malformed backend responses."""
     with patch(
         "custom_components.aiva.config_flow._start_activation",
-        side_effect=AivaInvalidResponseError,
+        side_effect=AivaInvalidResponseError("invalid backend payload"),
     ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -176,7 +176,7 @@ async def test_config_flow_incomplete_backend_response(hass):
     """Show missing_required_data when pairing lacks home_id or secret."""
     with patch(
         "custom_components.aiva.config_flow._start_activation",
-        side_effect=AivaMissingRequiredDataError,
+        side_effect=AivaMissingRequiredDataError("missing required activation data"),
     ):
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
