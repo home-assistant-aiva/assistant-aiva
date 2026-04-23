@@ -132,6 +132,62 @@ async def test_config_flow_pairing_pending(hass):
     assert result["errors"] == {"base": "pairing_pending"}
 
 
+async def test_config_flow_keeps_user_plan_when_status_omits_it(hass):
+    """Persist the selected plan if later activation steps do not return it."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code="<pairing-code>",
+            home_name="Casa Principal",
+            plan="premium",
+            state=STATE_AWAITING_PAIRING,
+            home_id="home-1",
+            secret="<redacted-secret>",
+        ),
+    ), patch(
+        "custom_components.aiva.config_flow._get_activation_status",
+        side_effect=[
+            AivaActivationStatus(state=STATE_AWAITING_PAYMENT),
+            AivaActivationStatus(
+                state=STATE_ACTIVE,
+                home_id="home-1",
+                secret="<redacted-secret>",
+                home_name="Casa Principal",
+                plan=None,
+            ),
+        ],
+    ), patch(
+        "custom_components.aiva.async_setup_entry",
+        AsyncMock(return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com/",
+                CONF_HOME_NAME: "Casa Principal",
+                CONF_PLAN: "premium",
+            },
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "awaiting_pairing"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={},
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "awaiting_payment"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={},
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_PLAN] == "premium"
+
+
 async def test_config_flow_timeout_or_unreachable(hass):
     """Show cannot_connect when the backend cannot be reached."""
     with patch(

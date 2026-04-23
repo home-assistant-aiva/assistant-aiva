@@ -783,13 +783,15 @@ class AivaApiClient:
         secret = data.get(FIELD_SECRET)
         pairing_code = data.get(FIELD_PAIRING_CODE)
         home_name = data.get(FIELD_HOME_NAME)
-        plan = data.get(FIELD_PLAN, requested_plan)
+        plan = self._resolve_activation_plan(
+            data.get(FIELD_PLAN),
+            requested_plan=requested_plan,
+            endpoint=ENDPOINT_ACTIVATION_REQUEST,
+        )
         state = self._extract_activation_state(data, default=STATE_INSTALLED)
 
         if not isinstance(home_name, str) or not home_name:
             raise AivaMissingRequiredDataError("AIVA no devolvio home_name")
-        if not isinstance(plan, str) or not plan:
-            raise AivaInvalidResponseError("AIVA devolvio plan invalido")
         for field_name, value in (
             (FIELD_HOME_ID, home_id),
             (FIELD_SECRET, secret),
@@ -816,15 +818,17 @@ class AivaApiClient:
         """Parse the legacy endpoint that already returns pairing_code."""
         pairing_code = data.get(FIELD_PAIRING_CODE)
         home_name = data.get(FIELD_HOME_NAME)
-        plan = data.get(FIELD_PLAN, requested_plan)
+        plan = self._resolve_activation_plan(
+            data.get(FIELD_PLAN),
+            requested_plan=requested_plan,
+            endpoint=ENDPOINT_PAIRING_START,
+        )
         state = self._extract_activation_state(data, default=STATE_AWAITING_PAIRING)
 
         if not isinstance(pairing_code, str) or not pairing_code:
             raise AivaMissingRequiredDataError("AIVA no devolvio pairing_code")
         if not isinstance(home_name, str) or not home_name:
             raise AivaMissingRequiredDataError("AIVA no devolvio home_name")
-        if not isinstance(plan, str) or not plan:
-            raise AivaInvalidResponseError("AIVA devolvio plan invalido")
 
         return AivaActivationStartResult(
             pairing_code=pairing_code,
@@ -900,6 +904,40 @@ class AivaApiClient:
         if not isinstance(state, str) or state not in ACTIVATION_STATES:
             raise AivaInvalidResponseError("AIVA devolvio estado invalido")
         return state
+
+    def _resolve_activation_plan(
+        self,
+        backend_plan: Any,
+        *,
+        requested_plan: str,
+        endpoint: str,
+    ) -> str:
+        """Resolve the plan during activation, preferring the user-selected one."""
+        normalized_requested_plan = requested_plan.strip()
+        if not normalized_requested_plan:
+            raise AivaInvalidResponseError("AIVA no recibio un plan valido para activar")
+
+        if backend_plan is None:
+            _LOGGER.debug(
+                "AIVA activation response omitted plan on %s; keeping requested plan=%s",
+                endpoint,
+                normalized_requested_plan,
+            )
+            return normalized_requested_plan
+
+        if not isinstance(backend_plan, str):
+            raise AivaInvalidResponseError("AIVA devolvio plan invalido")
+
+        normalized_backend_plan = backend_plan.strip()
+        if not normalized_backend_plan:
+            _LOGGER.warning(
+                "AIVA activation response returned empty plan on %s; keeping requested plan=%s",
+                endpoint,
+                normalized_requested_plan,
+            )
+            return normalized_requested_plan
+
+        return normalized_backend_plan
 
     def _parse_home_settings(self, data: dict[str, Any]) -> AivaHomeSettings:
         """Parse home settings from a backend response."""

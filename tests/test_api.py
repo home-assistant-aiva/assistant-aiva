@@ -238,6 +238,103 @@ async def test_start_activation_success(hass, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_activation_uses_requested_plan_when_backend_returns_null(
+    hass, monkeypatch
+):
+    """Keep the user-selected plan when the first step omits it with null."""
+    responses = [
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "home_id": "home-1",
+                "secret": "<redacted-secret>",
+                "home_name": "Casa Principal",
+                "plan": None,
+                "activation_state": "installed",
+            },
+        ),
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "pairing_code": "<pairing-code>",
+                "activation_state": STATE_AWAITING_PAIRING,
+            },
+        ),
+    ]
+
+    class SequencedSession(FakeSession):
+        def request(self, method, url, **kwargs):
+            self.calls.append({"method": method, "url": url, **kwargs})
+            return responses.pop(0)
+
+    _patch_installation_id(monkeypatch)
+    session = SequencedSession(None)
+    monkeypatch.setattr(
+        "custom_components.aiva.api.async_get_clientsession",
+        lambda hass: session,
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    result = await client.start_activation(
+        home_name="Casa Principal",
+        plan="premium",
+    )
+
+    assert result.plan == "premium"
+    assert result.pairing_code == "<pairing-code>"
+
+
+@pytest.mark.asyncio
+async def test_start_activation_uses_requested_plan_when_backend_omits_plan(
+    hass, monkeypatch
+):
+    """Keep the user-selected plan when the first step omits the field."""
+    responses = [
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "home_id": "home-1",
+                "secret": "<redacted-secret>",
+                "home_name": "Casa Principal",
+                "activation_state": "installed",
+            },
+        ),
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "pairing_code": "<pairing-code>",
+                "activation_state": STATE_AWAITING_PAIRING,
+            },
+        ),
+    ]
+
+    class SequencedSession(FakeSession):
+        def request(self, method, url, **kwargs):
+            self.calls.append({"method": method, "url": url, **kwargs})
+            return responses.pop(0)
+
+    _patch_installation_id(monkeypatch)
+    session = SequencedSession(None)
+    monkeypatch.setattr(
+        "custom_components.aiva.api.async_get_clientsession",
+        lambda hass: session,
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    result = await client.start_activation(
+        home_name="Casa Principal",
+        plan="smart",
+    )
+
+    assert result.plan == "smart"
+    assert result.pairing_code == "<pairing-code>"
+
+
+@pytest.mark.asyncio
 async def test_start_activation_accepts_pairing_code_in_first_response(hass, monkeypatch):
     """Keep compatibility when the first endpoint still returns pairing_code."""
     _patch_installation_id(monkeypatch)
@@ -258,6 +355,32 @@ async def test_start_activation_accepts_pairing_code_in_first_response(hass, mon
 
     result = await client.start_activation(home_name="Casa Principal", plan="premium")
 
+    assert result.pairing_code == "<pairing-code>"
+    assert len(session.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_activation_accepts_backend_valid_plan_override(hass, monkeypatch):
+    """Use the backend plan when it returns a valid explicit value."""
+    _patch_installation_id(monkeypatch)
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "pairing_code": "<pairing-code>",
+                "home_name": "Casa Principal",
+                "plan": "premium",
+                "activation_state": STATE_AWAITING_PAIRING,
+            },
+        ),
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    result = await client.start_activation(home_name="Casa Principal", plan="base")
+
+    assert result.plan == "premium"
     assert result.pairing_code == "<pairing-code>"
     assert len(session.calls) == 1
 
