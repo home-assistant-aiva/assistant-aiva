@@ -24,6 +24,7 @@ from .const import (
     ATTR_DISABLED_COUNT,
     ATTR_ENABLED_COUNT,
     ATTR_HOME_NAME,
+    ATTR_INTEGRATION_VERSION,
     ATTR_LANGUAGE,
     ATTR_LOCALE,
     ATTR_REQUIRES_CONFIRMATION_COUNT,
@@ -36,6 +37,7 @@ from .const import (
     MAX_SUMMARY_ITEMS,
 )
 from .coordinator import AivaDataUpdateCoordinator
+from .version import get_integration_version
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -168,9 +170,15 @@ async def async_setup_entry(
     """Set up AIVA sensors."""
     runtime_data = hass.data[DOMAIN][entry.entry_id]
     coordinator = runtime_data.coordinator
+    integration_version = getattr(
+        runtime_data,
+        "integration_version",
+        get_integration_version(),
+    )
 
     async_add_entities(
-        AivaSensor(coordinator, entry, description) for description in SENSORS
+        AivaSensor(coordinator, entry, description, integration_version)
+        for description in SENSORS
     )
 
 
@@ -185,10 +193,12 @@ class AivaSensor(CoordinatorEntity[AivaDataUpdateCoordinator], SensorEntity):
         coordinator: AivaDataUpdateCoordinator,
         entry: ConfigEntry,
         description: AivaSensorEntityDescription,
+        integration_version: str,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self.entity_description = description
+        self._integration_version = integration_version
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -210,4 +220,5 @@ class AivaSensor(CoordinatorEntity[AivaDataUpdateCoordinator], SensorEntity):
         return {
             ATTR_CONNECTED: self.coordinator.data.connected,
             ATTR_HOME_NAME: self.coordinator.data.home_name,
+            ATTR_INTEGRATION_VERSION: self._integration_version,
         }

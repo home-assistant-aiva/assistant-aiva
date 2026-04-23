@@ -21,6 +21,7 @@ from custom_components.aiva.const import (
     DOMAIN,
 )
 from custom_components.aiva.diagnostics import async_get_config_entry_diagnostics
+from custom_components.aiva.version import get_integration_version
 
 
 async def test_diagnostics_redacts_sensitive_enriched_data(hass):
@@ -78,6 +79,8 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
+    assert diagnostics["integration"]["domain"] == DOMAIN
+    assert diagnostics["integration"]["version"] == get_integration_version()
     assert diagnostics["entry"]["data"][CONF_SECRET] == "**REDACTED**"
     assert diagnostics["entry"]["data"][CONF_PAIRING_CODE] == "1234...**REDACTED**"
     assert diagnostics["home_settings"]["custom_prompt_configured"] is True

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -23,8 +24,10 @@ from .const import (
     MIN_SCAN_INTERVAL_SECONDS,
 )
 from .coordinator import AivaDataUpdateCoordinator
+from .version import get_integration_version
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -33,10 +36,12 @@ class AivaRuntimeData:
 
     client: AivaApiClient
     coordinator: AivaDataUpdateCoordinator
+    integration_version: str
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AIVA from a config entry."""
+    integration_version = get_integration_version()
     pairing_code = entry.data.get(CONF_PAIRING_CODE, entry.data.get(CONF_LINKING_CODE))
     if CONF_PAIRING_CODE not in entry.data and pairing_code:
         hass.config_entries.async_update_entry(
@@ -66,6 +71,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = AivaRuntimeData(
         client=client,
         coordinator=coordinator,
+        integration_version=integration_version,
+    )
+
+    _LOGGER.info(
+        "Cargando integración AIVA version %s para '%s'",
+        integration_version,
+        entry.title,
     )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

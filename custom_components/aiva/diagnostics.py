@@ -15,6 +15,7 @@ from .const import (
     DOMAIN,
     MAX_SUMMARY_ITEMS,
 )
+from .version import get_integration_version
 
 
 def _mask_pairing_code(value: Any) -> Any:
@@ -104,10 +105,19 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     runtime_data = hass.data.get(DOMAIN, {}).get(config_entry.entry_id)
+    integration_version = getattr(
+        runtime_data,
+        "integration_version",
+        get_integration_version(),
+    )
     coordinator = getattr(runtime_data, "coordinator", None)
     coordinator_data = getattr(coordinator, "data", None)
 
     return {
+        "integration": {
+            "domain": DOMAIN,
+            "version": integration_version,
+        },
         "entry": {
             "title": config_entry.title,
             "data": _redact_sensitive_data(config_entry.data),

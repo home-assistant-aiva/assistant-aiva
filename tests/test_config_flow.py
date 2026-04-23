@@ -17,6 +17,7 @@ from custom_components.aiva.api import (
     AivaMissingRequiredDataError,
     AivaTimeoutError,
 )
+from custom_components.aiva.config_flow import CONF_PAIRING_CONFIRMED
 from custom_components.aiva.const import (
     CONF_BASE_URL,
     CONF_HOME_ID,
@@ -75,7 +76,7 @@ async def test_config_flow_activation_valid_creates_entry(hass):
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            user_input={},
+            user_input={CONF_PAIRING_CONFIRMED: True},
         )
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "awaiting_payment"
@@ -124,7 +125,7 @@ async def test_config_flow_pairing_pending(hass):
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            user_input={},
+            user_input={CONF_PAIRING_CONFIRMED: True},
         )
 
     assert result["type"] is FlowResultType.FORM
@@ -174,7 +175,7 @@ async def test_config_flow_keeps_user_plan_when_status_omits_it(hass):
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            user_input={},
+            user_input={CONF_PAIRING_CONFIRMED: True},
         )
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "awaiting_payment"
@@ -388,3 +389,80 @@ async def test_config_flow_maps_timeout_separately(hass):
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "timeout"}
+
+
+async def test_config_flow_pairing_requires_explicit_confirmation(hass):
+    """Keep awaiting_pairing guided until the user confirms the external step."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code="<pairing-code>",
+            home_name="Casa Principal",
+            plan="base",
+            state=STATE_AWAITING_PAIRING,
+            home_id="home-1",
+            secret="<redacted-secret>",
+        ),
+    ), patch(
+        "custom_components.aiva.config_flow._get_activation_status",
+    ) as get_status:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com",
+                CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_PAIRING_CONFIRMED: False},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "awaiting_pairing"
+    assert result["errors"] == {CONF_PAIRING_CONFIRMED: "confirm_pairing_required"}
+    get_status.assert_not_called()
+
+
+async def test_config_flow_pairing_404_is_treated_as_pending(hass):
+    """Treat backend 404 during pairing poll as a pending external link."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code="<pairing-code>",
+            home_name="Casa Principal",
+            plan="base",
+            state=STATE_AWAITING_PAIRING,
+            home_id="home-1",
+            secret="<redacted-secret>",
+        ),
+    ), patch(
+        "custom_components.aiva.config_flow._get_activation_status",
+        side_effect=AivaBackendClientError(
+            "HTTP 404",
+            user_message="Not Found",
+            status=404,
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com",
+                CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_PAIRING_CONFIRMED: True},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "awaiting_pairing"
+    assert result["errors"] == {"base": "pairing_pending"}
+    assert result["description_placeholders"]["error_detail"] == ""

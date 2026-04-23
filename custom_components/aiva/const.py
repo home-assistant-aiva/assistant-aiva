@@ -70,6 +70,7 @@ FIELD_HOME_AUTOMATIONS = "home_automations"
 
 ATTR_CONNECTED = "connected"
 ATTR_HOME_NAME = "home_name"
+ATTR_INTEGRATION_VERSION = "integration_version"
 ATTR_LANGUAGE = "language"
 ATTR_ASSISTANT_NAME = "assistant_name"
 ATTR_COUNTRY_CODE = "country_code"

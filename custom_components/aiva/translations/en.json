@@ -12,7 +12,10 @@
       },
       "awaiting_pairing": {
         "title": "Linking code generated",
-        "description": "AIVA is installed, but it is not active yet.\n\nEnter this code in the activation channel provided by AIVA: {pairing_code}\n\nAfter completing activation, return to this screen and continue.\n\n{error_detail}"
+        "description": "AIVA has already generated your linking code.\n\nStep 1: copy this code: {pairing_code}\nStep 2: send it to the AIVA bot using the linking channel you received.\nStep 3: once you have sent it, return to this screen, confirm it below, and continue.\n\nAs soon as we receive the link, AIVA will continue the activation flow.\n\n{error_detail}",
+        "data": {
+          "pairing_confirmed": "I already sent the code to the AIVA bot"
+        }
       },
       "awaiting_payment": {
         "title": "Payment confirmation pending",
@@ -30,8 +33,9 @@
       "invalid_pairing_code": "The linking code is no longer valid. Start activation again.",
       "invalid_response": "AIVA could not complete the request right now. Try again in a few minutes.",
       "invalid_scan_interval": "The minimum allowed interval is 30 seconds.",
+      "confirm_pairing_required": "Before continuing, send the code to the AIVA bot and then confirm it here.",
       "missing_required_data": "Some activation details are missing. Start the process again.",
-      "pairing_pending": "We have not received the link yet. Enter the code in the activation channel provided by AIVA and try again.",
+      "pairing_pending": "We have not received the link yet. Send the code to the AIVA bot and try again.",
       "payment_pending": "The installation payment has not been confirmed yet. Try again after you receive confirmation.",
       "unknown": "We could not complete activation. Try again in a few minutes."
     },

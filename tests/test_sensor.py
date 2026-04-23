@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
 from custom_components.aiva.api import (
     AivaEffectiveEntity,
     AivaHomeAutomation,
     AivaHomeSettings,
 )
 from custom_components.aiva.coordinator import AivaCoordinatorData
-from custom_components.aiva.sensor import SENSORS
+from custom_components.aiva.const import DOMAIN
+from custom_components.aiva.sensor import AivaSensor, SENSORS
+from custom_components.aiva.version import get_integration_version
 
 
 def _description(key):
@@ -119,3 +123,32 @@ def test_home_automations_sensor_is_bounded_summary():
     assert attributes["enabled_count"] == 1
     assert attributes["disabled_count"] == 1
     assert attributes["sample"][0]["id"] == "auto-1"
+
+
+def test_status_sensor_exposes_runtime_integration_version():
+    """Expose the runtime integration version in the status sensor."""
+    data = AivaCoordinatorData(
+        state="Activo",
+        connected=True,
+        home_name="Casa Principal",
+        last_sync=None,
+    )
+    coordinator = SimpleNamespace(data=data)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Casa Principal",
+        entry_id="test-entry",
+        unique_id="home-1",
+    )
+    sensor = AivaSensor(
+        coordinator,
+        entry,
+        _description("status"),
+        get_integration_version(),
+    )
+
+    assert sensor.extra_state_attributes == {
+        "connected": True,
+        "home_name": "Casa Principal",
+        "integration_version": get_integration_version(),
+    }

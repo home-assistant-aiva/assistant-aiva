@@ -43,6 +43,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+CONF_PAIRING_CONFIRMED = "pairing_confirmed"
 
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -54,6 +55,11 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 EMPTY_SCHEMA = vol.Schema({})
+STEP_AWAITING_PAIRING_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_PAIRING_CONFIRMED, default=False): bool,
+    }
+)
 
 
 def _normalize_user_base_url(base_url: Any) -> str:
@@ -201,19 +207,25 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            status = await self._poll_activation_status(errors)
-            if status:
-                self._last_error_detail = ""
-                if status.state == STATE_ACTIVE:
-                    return await self._create_active_entry(status)
-                if status.state == STATE_AWAITING_PAYMENT:
-                    return await self.async_step_awaiting_payment()
+            if not user_input.get(CONF_PAIRING_CONFIRMED):
+                errors[CONF_PAIRING_CONFIRMED] = "confirm_pairing_required"
+            else:
+                status = await self._poll_activation_status(
+                    errors,
+                    treat_not_found_as_pending=True,
+                )
+                if status:
+                    self._last_error_detail = ""
+                    if status.state == STATE_ACTIVE:
+                        return await self._create_active_entry(status)
+                    if status.state == STATE_AWAITING_PAYMENT:
+                        return await self.async_step_awaiting_payment()
 
-                errors["base"] = "pairing_pending"
+                    errors["base"] = "pairing_pending"
 
         return self.async_show_form(
             step_id="awaiting_pairing",
-            data_schema=EMPTY_SCHEMA,
+            data_schema=STEP_AWAITING_PAIRING_DATA_SCHEMA,
             errors=errors,
             description_placeholders={
                 "pairing_code": self._pairing_code or "",
@@ -249,6 +261,8 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def _poll_activation_status(
         self,
         errors: dict[str, str],
+        *,
+        treat_not_found_as_pending: bool = False,
     ) -> AivaActivationStatus | None:
         """Poll activation status and translate backend errors for the flow."""
         if not self._base_url or not self._pairing_code:
@@ -262,6 +276,14 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 pairing_code=self._pairing_code,
             )
         except AivaApiError as err:
+            if (
+                treat_not_found_as_pending
+                and isinstance(err, AivaBackendClientError)
+                and err.status == 404
+            ):
+                self._last_error_detail = ""
+                errors["base"] = "pairing_pending"
+                return None
             self._apply_api_error(errors, err)
 
         return None
