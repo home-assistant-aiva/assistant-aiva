@@ -12,7 +12,7 @@
       },
       "awaiting_pairing": {
         "title": "Linking code generated",
-        "description": "AIVA has already generated your linking code.\n\nStep 1: copy this code: {pairing_code}\nStep 2: send it to the AIVA bot using the linking channel you received.\nStep 3: once you have sent it, return to this screen, confirm it below, and continue.\n\nAs soon as we receive the link, AIVA will continue the activation flow.\n\n{error_detail}",
+        "description": "AIVA has already generated your linking code.\n\nCode: `{pairing_code}`\n\n{telegram_bot_link_md}\n{telegram_bot_help}\n\nIf Telegram does not prefill the message automatically, paste and send the code manually.\n\nOnce you have sent it, return to this screen, confirm it below, and continue.\n\nAs soon as we receive the link, AIVA will continue the activation flow.\n\n{error_detail}",
         "data": {
           "pairing_confirmed": "I already sent the code to the AIVA bot"
         }

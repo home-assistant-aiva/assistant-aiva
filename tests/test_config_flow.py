@@ -97,6 +97,78 @@ async def test_config_flow_activation_valid_creates_entry(hass):
     }
 
 
+async def test_config_flow_pairing_step_exposes_direct_bot_link_when_configured(hass):
+    """Show a direct Telegram deep link when the bot username is configured."""
+    with patch(
+        "custom_components.aiva.config_flow.TELEGRAM_BOT_USERNAME",
+        "aiva_bot",
+    ), patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code="<pairing-code>",
+            home_name="Casa Principal",
+            plan="base",
+            state=STATE_AWAITING_PAIRING,
+            home_id="home-1",
+            secret="<redacted-secret>",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com",
+                CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "awaiting_pairing"
+    assert (
+        result["description_placeholders"]["telegram_bot_url"]
+        == "https://t.me/aiva_bot?start=%3Cpairing-code%3E"
+    )
+    assert (
+        result["description_placeholders"]["telegram_bot_link_md"]
+        == "[Abrir bot de AIVA](https://t.me/aiva_bot?start=%3Cpairing-code%3E)"
+    )
+    assert result["description_placeholders"]["telegram_bot_username"] == "@aiva_bot"
+
+
+async def test_config_flow_pairing_step_falls_back_to_manual_telegram_instructions(hass):
+    """Keep a simple manual UX if the Telegram bot username is not configured."""
+    with patch(
+        "custom_components.aiva.config_flow.TELEGRAM_BOT_USERNAME",
+        "",
+    ), patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code="<pairing-code>",
+            home_name="Casa Principal",
+            plan="base",
+            state=STATE_AWAITING_PAIRING,
+            home_id="home-1",
+            secret="<redacted-secret>",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com",
+                CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "awaiting_pairing"
+    assert result["description_placeholders"]["telegram_bot_url"] == ""
+    assert result["description_placeholders"]["telegram_bot_link_md"] == ""
+    assert "buscá el bot de AIVA" in result["description_placeholders"]["telegram_bot_help"]
+
+
 async def test_config_flow_pairing_pending(hass):
     """Show a clear form error while external pairing is pending."""
     with patch(

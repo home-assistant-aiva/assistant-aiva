@@ -13,7 +13,7 @@
       },
       "awaiting_pairing": {
         "title": "Código de vinculación generado",
-        "description": "AIVA ya generó tu código de vinculación.\n\nPaso 1: copiá este código: {pairing_code}\nPaso 2: envialo al bot de AIVA usando el canal de vinculación que recibiste.\nPaso 3: cuando ya lo hayas enviado, volvé a esta pantalla, marcá la confirmación y continuá.\n\nApenas recibamos la vinculación, AIVA seguirá con la activación.\n\n{error_detail}",
+        "description": "AIVA ya generó tu código de vinculación.\n\nCódigo: `{pairing_code}`\n\n{telegram_bot_link_md}\n{telegram_bot_help}\n\nSi Telegram no completa el mensaje automáticamente, pegá y enviá el código manualmente.\n\nCuando ya lo hayas enviado, volvé a esta pantalla, marcá la confirmación y continuá.\n\nApenas recibamos la vinculación, AIVA seguirá con la activación.\n\n{error_detail}",
         "data": {
           "pairing_confirmed": "Ya envié el código al bot de AIVA"
         }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import voluptuous as vol
 
@@ -40,6 +40,7 @@ from .const import (
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
+    TELEGRAM_BOT_USERNAME,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,6 +83,37 @@ def _format_user_error_detail(message: str | None) -> str:
     if not message:
         return ""
     return f"Detalle del error: {message}"
+
+
+def _build_telegram_pairing_placeholders(pairing_code: str | None) -> dict[str, str]:
+    """Build user-facing placeholders for the pairing onboarding step."""
+    code = (pairing_code or "").strip()
+    bot_username = TELEGRAM_BOT_USERNAME.strip().lstrip("@")
+
+    if not bot_username:
+        return {
+            "pairing_code": code,
+            "telegram_bot_username": "",
+            "telegram_bot_url": "",
+            "telegram_bot_link_md": "",
+            "telegram_bot_help": (
+                "Abrí Telegram en tu celular o computadora, buscá el bot de AIVA "
+                "que te compartieron y enviale el código exacto."
+            ),
+        }
+
+    telegram_bot_url = f"https://t.me/{bot_username}"
+    deep_link = f"{telegram_bot_url}?start={quote(code)}" if code else telegram_bot_url
+
+    return {
+        "pairing_code": code,
+        "telegram_bot_username": f"@{bot_username}",
+        "telegram_bot_url": deep_link,
+        "telegram_bot_link_md": f"[Abrir bot de AIVA]({deep_link})",
+        "telegram_bot_help": (
+            f"Si preferís abrirlo manualmente, buscá `@{bot_username}` en Telegram."
+        ),
+    }
 
 
 async def _start_activation(
@@ -228,7 +260,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=STEP_AWAITING_PAIRING_DATA_SCHEMA,
             errors=errors,
             description_placeholders={
-                "pairing_code": self._pairing_code or "",
+                **_build_telegram_pairing_placeholders(self._pairing_code),
                 "error_detail": self._last_error_detail,
             },
         )
