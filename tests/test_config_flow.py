@@ -101,7 +101,7 @@ async def test_config_flow_pairing_step_exposes_direct_bot_link_when_configured(
     """Show a direct Telegram deep link when the bot username is configured."""
     with patch(
         "custom_components.aiva.config_flow.TELEGRAM_BOT_USERNAME",
-        "aiva_bot",
+        "aiva_asistente_1_bot",
     ), patch(
         "custom_components.aiva.config_flow._start_activation",
         return_value=AivaActivationStartResult(
@@ -127,13 +127,16 @@ async def test_config_flow_pairing_step_exposes_direct_bot_link_when_configured(
     assert result["step_id"] == "awaiting_pairing"
     assert (
         result["description_placeholders"]["telegram_bot_url"]
-        == "https://t.me/aiva_bot?start=%3Cpairing-code%3E"
+        == "https://t.me/aiva_asistente_1_bot?start=%3Cpairing-code%3E"
     )
     assert (
         result["description_placeholders"]["telegram_bot_link_md"]
-        == "[Abrir bot de AIVA](https://t.me/aiva_bot?start=%3Cpairing-code%3E)"
+        == "[Abrir bot de AIVA](https://t.me/aiva_asistente_1_bot?start=%3Cpairing-code%3E)"
     )
-    assert result["description_placeholders"]["telegram_bot_username"] == "@aiva_bot"
+    assert (
+        result["description_placeholders"]["telegram_bot_username"]
+        == "@aiva_asistente_1_bot"
+    )
 
 
 async def test_config_flow_pairing_step_falls_back_to_manual_telegram_instructions(hass):

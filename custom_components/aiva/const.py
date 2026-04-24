@@ -36,10 +36,10 @@ MIN_SCAN_INTERVAL_SECONDS = 30
 DEFAULT_API_BASE_URL = "http://187.77.44.118:8080"
 DEFAULT_API_TIMEOUT_SECONDS = 10
 
-# Optional Telegram bot username used by the pairing onboarding flow. Keep it
+# Telegram bot username used by the pairing onboarding flow. Keep it
 # centralized so the config flow can expose a direct deep link without adding
-# custom frontend code. Leave empty until the production username is confirmed.
-TELEGRAM_BOT_USERNAME = "Coquitod_bot"
+# custom frontend code.
+TELEGRAM_BOT_USERNAME = "aiva_asistente_1_bot"
 
 # Keep backend paths relative so base_url can point to a local backend today or
 # to a future domain/reverse proxy without changing the integration architecture.
