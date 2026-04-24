@@ -30,10 +30,10 @@ ACTIVATION_STATES = (
 
 DEFAULT_SCAN_INTERVAL_SECONDS = 300
 MIN_SCAN_INTERVAL_SECONDS = 30
-# Current deployment default. Keep this configurable from the UI so the
-# integration can later point to a direct domain or reverse proxy without code
-# changes.
-DEFAULT_API_BASE_URL = "http://187.77.44.118:8080"
+# Keep the backend URL user-configurable from the UI. Do not hardcode a
+# deployment-specific domain or IP so the same package can work with a direct
+# URL today and a reverse proxy tomorrow.
+DEFAULT_API_BASE_URL = ""
 DEFAULT_API_TIMEOUT_SECONDS = 10
 
 # Telegram bot username used by the pairing onboarding flow. Keep it

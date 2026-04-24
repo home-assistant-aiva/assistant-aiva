@@ -54,10 +54,11 @@ La integración usa endpoints relativos al backend, por lo que la misma configur
 
 Después de iniciar la configuración, AIVA genera un código de vinculación.
 
-1. Ingresá el código en el canal de activación indicado por AIVA.
-2. Volvé a Home Assistant.
-3. Continuá el flujo de activación.
-4. Cuando AIVA confirme la vinculación y el estado comercial, la integración queda activa.
+1. Abrí el bot de Telegram `@aiva_asistente_1_bot` desde el enlace directo que muestra Home Assistant o buscándolo manualmente en Telegram.
+2. Enviá el código de vinculación exacto al bot.
+3. Volvé a Home Assistant.
+4. Marcá la confirmación y continuá el flujo.
+5. Cuando AIVA confirme la vinculación y el estado comercial, la integración queda activa.
 
 Al finalizar, Home Assistant guarda internamente los identificadores y credenciales necesarios para operar con AIVA. No publiques `secret`, códigos completos de vinculación ni credenciales en logs, issues o capturas.
 

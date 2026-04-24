@@ -27,10 +27,10 @@
 
 ```bash
 git add .
-git commit -m "Release v0.2.1"
-git tag v0.2.1
+git commit -m "Release v0.2.9"
+git tag v0.2.9
 git push origin main
-git push origin v0.2.1
+git push origin v0.2.9
 ```
 
 ## Después de publicar

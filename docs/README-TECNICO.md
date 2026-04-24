@@ -19,7 +19,7 @@ Ajustes > Dispositivos y servicios > Anadir integracion > AIVA
 El config flow solicita al iniciar la activacion:
 
 - `base_url`: URL base del backend AIVA.
-- `home_name`: nombre visible de la casa, opcional.
+- `home_name`: nombre visible de la casa.
 - `plan`: `base`, `smart` o `premium`.
 
 Luego el backend genera el `pairing_code` y la integracion muestra los estados:
@@ -28,6 +28,8 @@ Luego el backend genera el `pairing_code` y la integracion muestra los estados:
 - `awaiting_pairing`: se genero el codigo y falta completar la vinculacion externa.
 - `awaiting_payment`: la vinculacion ya fue recibida y falta confirmar el pago de instalacion.
 - `active`: el backend ya confirmo la activacion y devolvio las credenciales finales.
+
+En `awaiting_pairing`, la UI expone un enlace directo al bot `@aiva_asistente_1_bot` y una alternativa manual para buscarlo en Telegram.
 
 La integracion guarda:
 

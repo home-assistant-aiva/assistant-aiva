@@ -37,6 +37,8 @@ Campos principales:
 - `plan`: plan comercial de AIVA.
 - `scan_interval`: intervalo de actualización en segundos.
 
+Durante la activación, Home Assistant genera un código de vinculación y muestra un acceso directo al bot `@aiva_asistente_1_bot` para completar el paso externo sin frontend adicional.
+
 Al activarse, la integración guarda los datos necesarios para operar con AIVA. No publiques credenciales, secrets ni códigos completos en logs, issues o capturas.
 
 ## Compatibilidad HACS

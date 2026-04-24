@@ -26,11 +26,16 @@ Custom Home Assistant integration to connect a real AIVA backend with Home Assis
 During setup, Home Assistant will ask for:
 
 - `AIVA backend URL`
-- `Pairing code`
 - `Home name`
-- `Sync interval in seconds`
+- `AIVA plan`
 
-If pairing succeeds, the integration stores the backend URL, home metadata, polling interval, `home_id`, secret, and plan.
+After the initial request, Home Assistant shows a linking code and a direct link to the Telegram bot `@aiva_asistente_1_bot`.
+
+1. Open the bot from the link shown in Home Assistant, or search for `@aiva_asistente_1_bot` in Telegram.
+2. Send the exact linking code to the bot.
+3. Return to Home Assistant and continue the activation flow.
+
+If activation succeeds, the integration stores the backend URL, home metadata, `home_id`, secret, and plan. The polling interval can be adjusted later in the integration options.
 
 ## Updates
 
