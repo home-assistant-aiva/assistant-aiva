@@ -460,13 +460,20 @@ async def test_get_activation_status_awaiting_payment(hass, monkeypatch):
         monkeypatch,
         FakeResponse(200, {"ok": True, "activation_state": STATE_AWAITING_PAYMENT}),
     )
-    client = AivaApiClient(hass, base_url="https://api.example.com")
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
 
-    result = await client.get_activation_status(pairing_code="<pairing-code>")
+    result = await client.get_activation_status()
 
     assert result.state == STATE_AWAITING_PAYMENT
-    assert session.calls[0]["url"] == "https://api.example.com/pairing/status"
-    assert session.calls[0]["json"] == {"pairing_code": "<pairing-code>"}
+    assert session.calls[0]["method"] == "get"
+    assert session.calls[0]["url"] == "https://api.example.com/activation/status"
+    assert session.calls[0]["params"] == {"home_id": "home-1"}
+    assert session.calls[0]["headers"]["x-aiva-secret"] == "<redacted-secret>"
 
 
 @pytest.mark.asyncio
@@ -497,15 +504,20 @@ async def test_start_activation_raises_backend_client_error_with_message(hass, m
 async def test_get_activation_status_active_requires_credentials(hass, monkeypatch):
     """Reject active responses without final credentials."""
     _patch_session(monkeypatch, FakeResponse(200, {"ok": True, "state": STATE_ACTIVE}))
-    client = AivaApiClient(hass, base_url="https://api.example.com")
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
 
     with pytest.raises(AivaMissingRequiredDataError):
-        await client.get_activation_status(pairing_code="<pairing-code>")
+        await client.get_activation_status()
 
 
 @pytest.mark.asyncio
 async def test_get_activation_status_active_success(hass, monkeypatch):
-    """Parse final active credentials from activation status."""
+    """Parse final active status and keep known activation credentials."""
     _patch_session(
         monkeypatch,
         FakeResponse(
@@ -513,16 +525,19 @@ async def test_get_activation_status_active_success(hass, monkeypatch):
             {
                 "ok": True,
                 "state": STATE_ACTIVE,
-                "home_id": "home-1",
                 "home_name": "Casa Principal",
-                "secret": "<redacted-secret>",
                 "plan": "smart",
             },
         ),
     )
-    client = AivaApiClient(hass, base_url="https://api.example.com")
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
 
-    result = await client.get_activation_status(pairing_code="<pairing-code>")
+    result = await client.get_activation_status()
 
     assert result.state == STATE_ACTIVE
     assert result.home_id == "home-1"

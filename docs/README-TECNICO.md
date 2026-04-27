@@ -55,7 +55,7 @@ Home Assistant recarga la config entry al guardar opciones para aplicar el nuevo
 Los endpoints son relativos a `base_url`:
 
 - `POST /pairing/start`
-- `POST /pairing/status`
+- `GET /activation/status?home_id=...`
 - `POST /pair`
 - `POST /heartbeat`
 - `POST /entities/sync`
@@ -99,14 +99,8 @@ Response:
 Consulta de estado:
 
 ```http
-POST /pairing/status
-Content-Type: application/json
-```
-
-```json
-{
-  "pairing_code": "<redacted>"
-}
+GET /activation/status?home_id=uuid-del-hogar
+x-aiva-secret: <redacted>
 ```
 
 Mientras falta pago:

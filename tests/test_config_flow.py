@@ -58,7 +58,7 @@ async def test_config_flow_activation_valid_creates_entry(hass):
                 plan="smart",
             ),
         ],
-    ), patch(
+    ) as get_status, patch(
         "custom_components.aiva.async_setup_entry",
         AsyncMock(return_value=True),
     ):
@@ -88,6 +88,12 @@ async def test_config_flow_activation_valid_creates_entry(hass):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Casa Principal"
+    assert get_status.call_args_list[0].kwargs == {
+        "base_url": "https://api.example.com",
+        "home_id": "home-1",
+        "secret": "<redacted-secret>",
+        "home_name": "Casa Principal",
+    }
     assert result["data"] == {
         CONF_BASE_URL: "https://api.example.com",
         CONF_HOME_ID: "home-1",

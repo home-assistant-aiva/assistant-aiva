@@ -135,15 +135,19 @@ async def _get_activation_status(
     hass: HomeAssistant,
     *,
     base_url: str,
-    pairing_code: str,
+    home_id: str,
+    secret: str,
+    home_name: str | None = None,
 ) -> AivaActivationStatus:
     """Fetch the commercial activation state."""
     client = AivaApiClient(
         hass=hass,
         base_url=base_url,
-        pairing_code=pairing_code,
+        home_id=home_id,
+        secret=secret,
+        home_name=home_name,
     )
-    return await client.get_activation_status(pairing_code=pairing_code)
+    return await client.get_activation_status()
 
 
 class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -297,7 +301,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         treat_not_found_as_pending: bool = False,
     ) -> AivaActivationStatus | None:
         """Poll activation status and translate backend errors for the flow."""
-        if not self._base_url or not self._pairing_code:
+        if not self._base_url or not self._home_id or not self._secret:
             errors["base"] = "missing_required_data"
             return None
 
@@ -305,7 +309,9 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await _get_activation_status(
                 self.hass,
                 base_url=self._base_url,
-                pairing_code=self._pairing_code,
+                home_id=self._home_id,
+                secret=self._secret,
+                home_name=self._home_name,
             )
         except AivaApiError as err:
             if (

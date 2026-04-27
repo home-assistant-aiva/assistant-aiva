@@ -22,6 +22,7 @@ from .const import (
     DEFAULT_API_TIMEOUT_SECONDS,
     ENDPOINT_ACTIVATION_PAIRING_CODE,
     ENDPOINT_ACTIVATION_REQUEST,
+    ENDPOINT_ACTIVATION_STATUS,
     ENDPOINT_ENTITIES_EFFECTIVE,
     ENDPOINT_ENTITIES_SYNC,
     ENDPOINT_HEARTBEAT,
@@ -29,7 +30,6 @@ from .const import (
     ENDPOINT_HOME_SETTINGS,
     ENDPOINT_PAIR,
     ENDPOINT_PAIRING_START,
-    ENDPOINT_PAIRING_STATUS,
     FIELD_ACTIVATION_STATE,
     FIELD_AUTOMATIONS,
     FIELD_ENTITIES,
@@ -428,19 +428,63 @@ class AivaApiClient:
     async def get_activation_status(
         self,
         *,
-        pairing_code: str | None = None,
+        home_id: str | None = None,
+        secret: str | None = None,
     ) -> AivaActivationStatus:
-        """Return the current activation state for a generated pairing code."""
-        code = (pairing_code or self._pairing_code).strip()
-        if not code:
-            raise AivaInvalidPairingCodeError("El codigo de vinculacion es obligatorio")
+        """Return the current activation state for a home."""
+        resolved_home_id = (home_id or self._home_id or "").strip()
+        resolved_secret = (secret or self._secret or "").strip()
+        if not resolved_home_id:
+            raise AivaMissingRequiredDataError("AIVA no devolvio home_id")
+        if not resolved_secret:
+            raise AivaMissingRequiredDataError("AIVA no devolvio secret")
+
+        self._home_id = resolved_home_id
+        self._secret = resolved_secret
 
         data = await self._request(
-            "post",
-            ENDPOINT_PAIRING_STATUS,
-            json={FIELD_PAIRING_CODE: code},
+            "get",
+            ENDPOINT_ACTIVATION_STATUS,
+            params={FIELD_HOME_ID: resolved_home_id},
+            authenticated=True,
         )
         result = self._parse_activation_status(data)
+        _LOGGER.debug(
+            "AIVA activation status parsed: endpoint=%s state=%s "
+            "home_id=%s response_home_id=%s",
+            ENDPOINT_ACTIVATION_STATUS,
+            result.state,
+            self._mask_token(resolved_home_id),
+            self._mask_token(result.home_id) if result.home_id else None,
+        )
+
+        if result.home_id is None:
+            result = AivaActivationStatus(
+                state=result.state,
+                pairing_code=result.pairing_code,
+                home_id=resolved_home_id,
+                secret=result.secret,
+                home_name=result.home_name,
+                plan=result.plan,
+            )
+        if result.secret is None:
+            result = AivaActivationStatus(
+                state=result.state,
+                pairing_code=result.pairing_code,
+                home_id=result.home_id,
+                secret=resolved_secret,
+                home_name=result.home_name,
+                plan=result.plan,
+            )
+        if result.home_name is None and self._home_name:
+            result = AivaActivationStatus(
+                state=result.state,
+                pairing_code=result.pairing_code,
+                home_id=result.home_id,
+                secret=result.secret,
+                home_name=self._home_name,
+                plan=result.plan,
+            )
 
         if result.state == STATE_ACTIVE:
             if not result.home_id or not result.secret or not result.home_name:
@@ -546,6 +590,7 @@ class AivaApiClient:
         endpoint: str,
         *,
         json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         authenticated: bool = False,
     ) -> dict[str, Any]:
         """Call the AIVA backend and return a JSON object."""
@@ -559,11 +604,13 @@ class AivaApiClient:
             headers[HEADER_AIVA_SECRET] = self._secret
 
         _LOGGER.debug(
-            "AIVA request starting: method=%s base_url=%s endpoint=%s url=%s payload=%s headers=%s",
+            "AIVA request starting: method=%s base_url=%s endpoint=%s url=%s "
+            "params=%s payload=%s headers=%s",
             method.upper(),
             self._base_url,
             endpoint,
             url,
+            self._sanitize_for_log(params),
             self._sanitize_for_log(json),
             self._sanitize_for_log(headers),
         )
@@ -572,6 +619,7 @@ class AivaApiClient:
             async with session.request(
                 method,
                 url,
+                params=params,
                 json=json,
                 headers=headers,
                 timeout=ClientTimeout(total=self._timeout),
