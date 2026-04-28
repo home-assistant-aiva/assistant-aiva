@@ -51,6 +51,7 @@ from .const import (
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
     STATE_INSTALLED,
+    STATE_SUSPENDED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ DISPLAY_STATES = {
     STATE_AWAITING_PAIRING: "Esperando vinculación",
     STATE_AWAITING_PAYMENT: "Esperando confirmación de pago",
     STATE_ACTIVE: "Activo",
+    STATE_SUSPENDED: "Suspendido",
 }
 
 
@@ -143,7 +145,7 @@ class AivaPairingResult:
 class AivaActivationStartResult:
     """Data returned when AIVA starts the commercial activation flow."""
 
-    pairing_code: str
+    pairing_code: str | None
     home_name: str
     plan: str
     state: str
@@ -343,6 +345,16 @@ class AivaApiClient:
             self._pairing_code = activation.pairing_code
             return AivaActivationStartResult(
                 pairing_code=activation.pairing_code,
+                home_name=activation.home_name,
+                plan=activation.plan,
+                state=activation.state,
+                home_id=activation.home_id,
+                secret=activation.secret,
+            )
+
+        if activation.state not in {STATE_INSTALLED, STATE_AWAITING_PAIRING}:
+            return AivaActivationStartResult(
+                pairing_code=None,
                 home_name=activation.home_name,
                 plan=activation.plan,
                 state=activation.state,
@@ -689,6 +701,17 @@ class AivaApiClient:
                 request_id=request_id,
             ) from err
 
+        if isinstance(data, dict) and endpoint in {
+            ENDPOINT_ACTIVATION_REQUEST,
+            ENDPOINT_PAIRING_START,
+        }:
+            self._log_activation_response_contract(
+                data,
+                endpoint=endpoint,
+                status=response.status,
+                request_id=request_id,
+            )
+
         if not isinstance(data, dict):
             raise AivaInvalidResponseError(
                 "AIVA devolvio una respuesta invalida",
@@ -966,29 +989,43 @@ class AivaApiClient:
     ) -> str:
         """Read activation state from either state or activation_state."""
         source, state = self._get_activation_state_candidate(data, default=default)
+        source_payload = self._activation_payload_by_source(data, source) or {}
+        raw_state = source_payload.get(FIELD_STATE)
+        raw_activation_state = source_payload.get(FIELD_ACTIVATION_STATE)
         _LOGGER.debug(
             "AIVA activation state detected: endpoint=%s response_keys=%s source=%s "
-            "source_keys=%s raw_state=%s",
+            "source_keys=%s raw_state=%s raw_activation_state=%s selected_raw_state=%s",
             endpoint,
             self._sorted_keys(data),
             source,
-            self._sorted_keys(self._activation_payload_by_source(data, source) or {}),
-            state.strip() if isinstance(state, str) else self._sanitize_for_log(state),
+            self._sorted_keys(source_payload),
+            self._safe_raw_state_for_log(raw_state),
+            self._safe_raw_state_for_log(raw_activation_state),
+            self._safe_raw_state_for_log(state),
         )
         if not isinstance(state, str):
             _LOGGER.debug(
-                "AIVA activation state rejected: endpoint=%s source=%s reason=not_string raw_type=%s",
+                "AIVA activation state rejected: endpoint=%s source=%s reason=not_string "
+                "raw_state=%s raw_activation_state=%s selected_raw_state=%s raw_type=%s",
                 endpoint,
                 source,
+                self._safe_raw_state_for_log(raw_state),
+                self._safe_raw_state_for_log(raw_activation_state),
+                self._safe_raw_state_for_log(state),
                 type(state).__name__,
             )
             raise AivaInvalidResponseError("AIVA devolvio estado invalido")
         normalized_state = state.strip().lower()
         if normalized_state not in ACTIVATION_STATES:
             _LOGGER.debug(
-                "AIVA activation state rejected: endpoint=%s source=%s reason=unknown_state normalized_state=%s valid_states=%s",
+                "AIVA activation state rejected: endpoint=%s source=%s reason=unknown_state "
+                "raw_state=%s raw_activation_state=%s selected_raw_state=%s "
+                "normalized_state=%s valid_states=%s",
                 endpoint,
                 source,
+                self._safe_raw_state_for_log(raw_state),
+                self._safe_raw_state_for_log(raw_activation_state),
+                self._safe_raw_state_for_log(state),
                 normalized_state,
                 ACTIVATION_STATES,
             )
@@ -1040,9 +1077,49 @@ class AivaApiClient:
         value = data.get(source)
         return value if isinstance(value, dict) else None
 
+    def _log_activation_response_contract(
+        self,
+        data: dict[str, Any],
+        *,
+        endpoint: str,
+        status: int,
+        request_id: str | None,
+    ) -> None:
+        """Log safe activation response shape details for contract debugging."""
+        nested_keys = {
+            key: self._sorted_keys(value) if isinstance(value, dict) else None
+            for key in _ACTIVATION_PAYLOAD_KEYS
+            for value in (data.get(key),)
+        }
+        raw_state_fields = {
+            source: {
+                FIELD_STATE: self._safe_raw_state_for_log(payload.get(FIELD_STATE)),
+                FIELD_ACTIVATION_STATE: self._safe_raw_state_for_log(
+                    payload.get(FIELD_ACTIVATION_STATE)
+                ),
+            }
+            for source, payload in self._iter_activation_payloads(data)
+        }
+        _LOGGER.debug(
+            "AIVA activation response contract: endpoint=%s status=%s request_id=%s "
+            "root_keys=%s nested_keys=%s raw_state_fields=%s",
+            endpoint,
+            status,
+            request_id,
+            self._sorted_keys(data),
+            nested_keys,
+            raw_state_fields,
+        )
+
     def _sorted_keys(self, data: dict[str, Any]) -> list[str]:
         """Return stable key names for debug logs."""
         return sorted(str(key) for key in data)
+
+    def _safe_raw_state_for_log(self, value: Any) -> Any:
+        """Return raw state-like values without leaking unrelated nested data."""
+        if isinstance(value, str):
+            return value
+        return self._sanitize_for_log(value)
 
     def _resolve_activation_plan(
         self,

@@ -40,6 +40,7 @@ from .const import (
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
+    STATE_SUSPENDED,
     TELEGRAM_BOT_USERNAME,
 )
 
@@ -223,8 +224,16 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._secret = activation.secret
 
                     if activation.state == STATE_ACTIVE:
-                        return await self.async_step_awaiting_payment()
-                    if activation.state == STATE_AWAITING_PAYMENT:
+                        return await self._create_active_entry(
+                            AivaActivationStatus(
+                                state=activation.state,
+                                home_id=activation.home_id,
+                                secret=activation.secret,
+                                home_name=activation.home_name,
+                                plan=activation.plan,
+                            )
+                        )
+                    if activation.state in {STATE_AWAITING_PAYMENT, STATE_SUSPENDED}:
                         return await self.async_step_awaiting_payment()
                     return await self.async_step_awaiting_pairing()
 

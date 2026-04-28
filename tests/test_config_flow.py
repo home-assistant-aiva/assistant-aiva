@@ -31,6 +31,7 @@ from custom_components.aiva.const import (
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
+    STATE_SUSPENDED,
 )
 
 
@@ -143,6 +144,70 @@ async def test_config_flow_pairing_step_exposes_direct_bot_link_when_configured(
         result["description_placeholders"]["telegram_bot_username"]
         == "@aiva_asistente_1_bot"
     )
+
+
+async def test_config_flow_creates_entry_when_activation_request_is_active(hass):
+    """Create the entry directly when the first activation step is already active."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code=None,
+            home_name="Casa Principal",
+            plan="premium",
+            state=STATE_ACTIVE,
+            home_id="home-1",
+            secret="<redacted-secret>",
+        ),
+    ), patch(
+        "custom_components.aiva.async_setup_entry",
+        AsyncMock(return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com/",
+                CONF_PLAN: "premium",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Casa Principal"
+    assert result["data"] == {
+        CONF_BASE_URL: "https://api.example.com",
+        CONF_HOME_ID: "home-1",
+        CONF_SECRET: "<redacted-secret>",
+        CONF_HOME_NAME: "Casa Principal",
+        CONF_PLAN: "premium",
+    }
+
+
+async def test_config_flow_routes_suspended_activation_to_payment_step(hass):
+    """Keep suspended backend responses out of the pairing step."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code=None,
+            home_name="Casa Principal",
+            plan="premium",
+            state=STATE_SUSPENDED,
+            home_id="home-1",
+            secret="<redacted-secret>",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                CONF_BASE_URL: "https://api.example.com",
+                CONF_PLAN: "premium",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "awaiting_payment"
 
 
 async def test_config_flow_pairing_step_falls_back_to_manual_telegram_instructions(hass):

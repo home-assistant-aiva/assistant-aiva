@@ -22,6 +22,7 @@ from custom_components.aiva.const import (
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
+    STATE_SUSPENDED,
 )
 
 
@@ -538,6 +539,106 @@ async def test_get_activation_status_awaiting_payment(hass, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_activation_does_not_generate_pairing_code_when_awaiting_payment(
+    hass, monkeypatch
+):
+    """Respect repeated activation/request responses that already passed pairing."""
+    _patch_installation_id(monkeypatch)
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "created": False,
+                "home_id": "home-1",
+                "installation_id": "ha-installation-1",
+                "home_name": "Casa Principal",
+                "secret": "<redacted-secret>",
+                "plan": None,
+                "activation_state": STATE_AWAITING_PAYMENT,
+                "active": False,
+                "next_step": "wait_payment",
+            },
+        ),
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    result = await client.start_activation(home_name="Casa Principal", plan="premium")
+
+    assert result.state == STATE_AWAITING_PAYMENT
+    assert result.pairing_code is None
+    assert result.home_id == "home-1"
+    assert result.secret == "<redacted-secret>"
+    assert len(session.calls) == 1
+    assert session.calls[0]["url"] == "https://api.example.com/activation/request"
+
+
+@pytest.mark.asyncio
+async def test_start_activation_does_not_generate_pairing_code_when_active(
+    hass, monkeypatch
+):
+    """Respect activation/request responses that are already active."""
+    _patch_installation_id(monkeypatch)
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "created": False,
+                "home_id": "home-1",
+                "home_name": "Casa Principal",
+                "secret": "<redacted-secret>",
+                "plan": "premium",
+                "activation_state": STATE_ACTIVE,
+                "active": True,
+            },
+        ),
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    result = await client.start_activation(home_name="Casa Principal", plan="premium")
+
+    assert result.state == STATE_ACTIVE
+    assert result.pairing_code is None
+    assert result.home_id == "home-1"
+    assert result.secret == "<redacted-secret>"
+    assert len(session.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_activation_accepts_suspended_without_pairing_generation(
+    hass, monkeypatch
+):
+    """Accept the backend suspended state without treating it as invalid."""
+    _patch_installation_id(monkeypatch)
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "created": False,
+                "home_id": "home-1",
+                "home_name": "Casa Principal",
+                "secret": "<redacted-secret>",
+                "plan": "premium",
+                "activation_state": STATE_SUSPENDED,
+                "active": False,
+            },
+        ),
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    result = await client.start_activation(home_name="Casa Principal", plan="premium")
+
+    assert result.state == STATE_SUSPENDED
+    assert result.pairing_code is None
+    assert len(session.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_start_activation_raises_backend_client_error_with_message(hass, monkeypatch):
     """Expose useful backend messages for 4xx activation failures."""
     _patch_session(
@@ -586,8 +687,18 @@ async def test_start_activation_logs_invalid_activation_state_reason(
             await client.start_activation(home_name="Casa Principal", plan="premium")
 
     assert "AIVA activation state detected" in caplog.text
+    assert "AIVA activation response contract" in caplog.text
     assert "endpoint=/activation/request" in caplog.text
+    assert "status=200" in caplog.text
     assert "response_keys=['activation_state', 'home_name', 'ok', 'plan']" in caplog.text
+    assert "root_keys=['activation_state', 'home_name', 'ok', 'plan']" in caplog.text
+    assert "nested_keys={'data': None, 'result': None, 'activation': None}" in caplog.text
+    assert "'state': None" in caplog.text
+    assert "'activation_state': 'success'" in caplog.text
+    assert "source=root" in caplog.text
+    assert "raw_state=None" in caplog.text
+    assert "raw_activation_state=success" in caplog.text
+    assert "selected_raw_state=success" in caplog.text
     assert "reason=unknown_state" in caplog.text
     assert "normalized_state=success" in caplog.text
     assert "<redacted-secret>" not in caplog.text
