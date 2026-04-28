@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from aiohttp import ClientError
 import json
 import pytest
@@ -191,7 +193,7 @@ async def test_start_activation_success(hass, monkeypatch):
                 "secret": "<redacted-secret>",
                 "home_name": "Casa Principal",
                 "plan": "premium",
-                "activation_state": "installed",
+                "activation_state": " Installed ",
             },
         ),
         FakeResponse(
@@ -360,6 +362,65 @@ async def test_start_activation_accepts_pairing_code_in_first_response(hass, mon
 
 
 @pytest.mark.asyncio
+async def test_start_activation_accepts_nested_activation_request_payload(
+    hass, monkeypatch
+):
+    """Parse activation/request when the backend wraps the activation payload."""
+    responses = [
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "state": "success",
+                "data": {
+                    "home_id": "home-1",
+                    "secret": "<redacted-secret>",
+                    "home_name": "Casa Principal",
+                    "plan": "premium",
+                    "activation_state": "installed",
+                },
+            },
+        ),
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "data": {
+                    "pairing_code": "<pairing-code>",
+                    "activation_state": STATE_AWAITING_PAIRING,
+                },
+            },
+        ),
+    ]
+
+    class SequencedSession(FakeSession):
+        def request(self, method, url, **kwargs):
+            self.calls.append({"method": method, "url": url, **kwargs})
+            return responses.pop(0)
+
+    _patch_installation_id(monkeypatch)
+    session = SequencedSession(None)
+    monkeypatch.setattr(
+        "custom_components.aiva.api.async_get_clientsession",
+        lambda hass: session,
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    result = await client.start_activation(home_name="Casa Principal", plan="base")
+
+    assert result.pairing_code == "<pairing-code>"
+    assert result.home_name == "Casa Principal"
+    assert result.plan == "premium"
+    assert result.state == STATE_AWAITING_PAIRING
+    assert result.home_id == "home-1"
+    assert result.secret == "<redacted-secret>"
+    assert [call["url"] for call in session.calls] == [
+        "https://api.example.com/activation/request",
+        "https://api.example.com/activation/pairing-code",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_start_activation_accepts_backend_valid_plan_override(hass, monkeypatch):
     """Use the backend plan when it returns a valid explicit value."""
     _patch_installation_id(monkeypatch)
@@ -498,6 +559,39 @@ async def test_start_activation_raises_backend_client_error_with_message(hass, m
     assert err.value.user_message == "El plan seleccionado no está disponible"
     assert err.value.status == 422
     assert err.value.request_id == "req-123"
+
+
+@pytest.mark.asyncio
+async def test_start_activation_logs_invalid_activation_state_reason(
+    hass, monkeypatch, caplog
+):
+    """Log safe diagnostics when activation/request returns an unusable state."""
+    _patch_installation_id(monkeypatch)
+    _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "home_name": "Casa Principal",
+                "plan": "premium",
+                "activation_state": "success",
+            },
+        ),
+    )
+    client = AivaApiClient(hass, base_url="https://api.example.com")
+
+    with caplog.at_level(logging.DEBUG, logger="custom_components.aiva.api"):
+        with pytest.raises(AivaInvalidResponseError):
+            await client.start_activation(home_name="Casa Principal", plan="premium")
+
+    assert "AIVA activation state detected" in caplog.text
+    assert "endpoint=/activation/request" in caplog.text
+    assert "response_keys=['activation_state', 'home_name', 'ok', 'plan']" in caplog.text
+    assert "reason=unknown_state" in caplog.text
+    assert "normalized_state=success" in caplog.text
+    assert "<redacted-secret>" not in caplog.text
+    assert "<pairing-code>" not in caplog.text
 
 
 @pytest.mark.asyncio

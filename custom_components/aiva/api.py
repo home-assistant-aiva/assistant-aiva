@@ -54,6 +54,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_ACTIVATION_PAYLOAD_KEYS = ("data", "result", "activation")
 
 DISPLAY_STATES = {
     STATE_INSTALLED: "Instalado",
@@ -827,16 +828,20 @@ class AivaApiClient:
         requested_plan: str,
     ) -> AivaActivationRequestResult:
         """Parse the initial activation request response."""
-        home_id = data.get(FIELD_HOME_ID)
-        secret = data.get(FIELD_SECRET)
-        pairing_code = data.get(FIELD_PAIRING_CODE)
-        home_name = data.get(FIELD_HOME_NAME)
+        home_id = self._get_activation_field(data, FIELD_HOME_ID)
+        secret = self._get_activation_field(data, FIELD_SECRET)
+        pairing_code = self._get_activation_field(data, FIELD_PAIRING_CODE)
+        home_name = self._get_activation_field(data, FIELD_HOME_NAME)
         plan = self._resolve_activation_plan(
-            data.get(FIELD_PLAN),
+            self._get_activation_field(data, FIELD_PLAN),
             requested_plan=requested_plan,
             endpoint=ENDPOINT_ACTIVATION_REQUEST,
         )
-        state = self._extract_activation_state(data, default=STATE_INSTALLED)
+        state = self._extract_activation_state(
+            data,
+            default=STATE_INSTALLED,
+            endpoint=ENDPOINT_ACTIVATION_REQUEST,
+        )
 
         if not isinstance(home_name, str) or not home_name:
             raise AivaMissingRequiredDataError("AIVA no devolvio home_name")
@@ -864,14 +869,18 @@ class AivaApiClient:
         requested_plan: str,
     ) -> AivaActivationStartResult:
         """Parse the legacy endpoint that already returns pairing_code."""
-        pairing_code = data.get(FIELD_PAIRING_CODE)
-        home_name = data.get(FIELD_HOME_NAME)
+        pairing_code = self._get_activation_field(data, FIELD_PAIRING_CODE)
+        home_name = self._get_activation_field(data, FIELD_HOME_NAME)
         plan = self._resolve_activation_plan(
-            data.get(FIELD_PLAN),
+            self._get_activation_field(data, FIELD_PLAN),
             requested_plan=requested_plan,
             endpoint=ENDPOINT_PAIRING_START,
         )
-        state = self._extract_activation_state(data, default=STATE_AWAITING_PAIRING)
+        state = self._extract_activation_state(
+            data,
+            default=STATE_AWAITING_PAIRING,
+            endpoint=ENDPOINT_PAIRING_START,
+        )
 
         if not isinstance(pairing_code, str) or not pairing_code:
             raise AivaMissingRequiredDataError("AIVA no devolvio pairing_code")
@@ -890,8 +899,12 @@ class AivaApiClient:
         data: dict[str, Any],
     ) -> AivaPairingCodeResult:
         """Parse the pairing-code generation response."""
-        pairing_code = data.get(FIELD_PAIRING_CODE)
-        state = self._extract_activation_state(data, default=STATE_AWAITING_PAIRING)
+        pairing_code = self._get_activation_field(data, FIELD_PAIRING_CODE)
+        state = self._extract_activation_state(
+            data,
+            default=STATE_AWAITING_PAIRING,
+            endpoint=ENDPOINT_ACTIVATION_PAIRING_CODE,
+        )
 
         if not isinstance(pairing_code, str) or not pairing_code:
             raise AivaMissingRequiredDataError(
@@ -907,13 +920,16 @@ class AivaApiClient:
 
     def _parse_activation_status(self, data: dict[str, Any]) -> AivaActivationStatus:
         """Parse the activation status response."""
-        state = self._extract_activation_state(data)
+        state = self._extract_activation_state(
+            data,
+            endpoint=ENDPOINT_ACTIVATION_STATUS,
+        )
 
-        pairing_code = data.get(FIELD_PAIRING_CODE)
-        home_id = data.get(FIELD_HOME_ID)
-        secret = data.get(FIELD_SECRET)
-        home_name = data.get(FIELD_HOME_NAME)
-        plan = data.get(FIELD_PLAN)
+        pairing_code = self._get_activation_field(data, FIELD_PAIRING_CODE)
+        home_id = self._get_activation_field(data, FIELD_HOME_ID)
+        secret = self._get_activation_field(data, FIELD_SECRET)
+        home_name = self._get_activation_field(data, FIELD_HOME_NAME)
+        plan = self._get_activation_field(data, FIELD_PLAN)
 
         for field_name, value in (
             (FIELD_PAIRING_CODE, pairing_code),
@@ -946,12 +962,87 @@ class AivaApiClient:
         data: dict[str, Any],
         *,
         default: str | None = None,
+        endpoint: str | None = None,
     ) -> str:
         """Read activation state from either state or activation_state."""
-        state = data.get(FIELD_ACTIVATION_STATE, data.get(FIELD_STATE, default))
-        if not isinstance(state, str) or state not in ACTIVATION_STATES:
+        source, state = self._get_activation_state_candidate(data, default=default)
+        _LOGGER.debug(
+            "AIVA activation state detected: endpoint=%s response_keys=%s source=%s "
+            "source_keys=%s raw_state=%s",
+            endpoint,
+            self._sorted_keys(data),
+            source,
+            self._sorted_keys(self._activation_payload_by_source(data, source) or {}),
+            state.strip() if isinstance(state, str) else self._sanitize_for_log(state),
+        )
+        if not isinstance(state, str):
+            _LOGGER.debug(
+                "AIVA activation state rejected: endpoint=%s source=%s reason=not_string raw_type=%s",
+                endpoint,
+                source,
+                type(state).__name__,
+            )
             raise AivaInvalidResponseError("AIVA devolvio estado invalido")
-        return state
+        normalized_state = state.strip().lower()
+        if normalized_state not in ACTIVATION_STATES:
+            _LOGGER.debug(
+                "AIVA activation state rejected: endpoint=%s source=%s reason=unknown_state normalized_state=%s valid_states=%s",
+                endpoint,
+                source,
+                normalized_state,
+                ACTIVATION_STATES,
+            )
+            raise AivaInvalidResponseError("AIVA devolvio estado invalido")
+        return normalized_state
+
+    def _get_activation_field(self, data: dict[str, Any], field: str) -> Any:
+        """Return activation fields from supported backend response shapes."""
+        for _source, payload in self._iter_activation_payloads(data):
+            if field in payload:
+                return payload[field]
+        return None
+
+    def _get_activation_state_candidate(
+        self,
+        data: dict[str, Any],
+        *,
+        default: str | None,
+    ) -> tuple[str, Any]:
+        """Return the first activation state candidate and where it came from."""
+        for source, payload in self._iter_activation_payloads(data):
+            if FIELD_ACTIVATION_STATE in payload:
+                return source, payload[FIELD_ACTIVATION_STATE]
+            if FIELD_STATE in payload:
+                return source, payload[FIELD_STATE]
+        return "default", default
+
+    def _iter_activation_payloads(
+        self,
+        data: dict[str, Any],
+    ) -> tuple[tuple[str, dict[str, Any]], ...]:
+        """Yield nested activation payloads first, then the response root."""
+        payloads: list[tuple[str, dict[str, Any]]] = []
+        for key in _ACTIVATION_PAYLOAD_KEYS:
+            value = data.get(key)
+            if isinstance(value, dict):
+                payloads.append((key, value))
+        payloads.append(("root", data))
+        return tuple(payloads)
+
+    def _activation_payload_by_source(
+        self,
+        data: dict[str, Any],
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Return the payload for debug metadata."""
+        if source == "root":
+            return data
+        value = data.get(source)
+        return value if isinstance(value, dict) else None
+
+    def _sorted_keys(self, data: dict[str, Any]) -> list[str]:
+        """Return stable key names for debug logs."""
+        return sorted(str(key) for key in data)
 
     def _resolve_activation_plan(
         self,
