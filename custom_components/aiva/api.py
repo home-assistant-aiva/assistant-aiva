@@ -30,6 +30,7 @@ from .const import (
     ENDPOINT_HOME_SETTINGS,
     ENDPOINT_PAIR,
     ENDPOINT_PAIRING_START,
+    FIELD_ACTIVE,
     FIELD_ACTIVATION_STATE,
     FIELD_AUTOMATIONS,
     FIELD_ENTITIES,
@@ -183,6 +184,7 @@ class AivaActivationStatus:
     secret: str | None = None
     home_name: str | None = None
     plan: str | None = None
+    active: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -464,11 +466,12 @@ class AivaApiClient:
         result = self._parse_activation_status(data)
         _LOGGER.debug(
             "AIVA activation status parsed: endpoint=%s state=%s "
-            "home_id=%s response_home_id=%s",
+            "home_id=%s response_home_id=%s active=%s",
             ENDPOINT_ACTIVATION_STATUS,
             result.state,
             self._mask_token(resolved_home_id),
             self._mask_token(result.home_id) if result.home_id else None,
+            result.active,
         )
 
         if result.home_id is None:
@@ -479,6 +482,7 @@ class AivaApiClient:
                 secret=result.secret,
                 home_name=result.home_name,
                 plan=result.plan,
+                active=result.active,
             )
         if result.secret is None:
             result = AivaActivationStatus(
@@ -488,6 +492,7 @@ class AivaApiClient:
                 secret=resolved_secret,
                 home_name=result.home_name,
                 plan=result.plan,
+                active=result.active,
             )
         if result.home_name is None and self._home_name:
             result = AivaActivationStatus(
@@ -497,6 +502,7 @@ class AivaApiClient:
                 secret=result.secret,
                 home_name=self._home_name,
                 plan=result.plan,
+                active=result.active,
             )
 
         if result.state == STATE_ACTIVE:
@@ -703,6 +709,7 @@ class AivaApiClient:
 
         if isinstance(data, dict) and endpoint in {
             ENDPOINT_ACTIVATION_REQUEST,
+            ENDPOINT_ACTIVATION_STATUS,
             ENDPOINT_PAIRING_START,
         }:
             self._log_activation_response_contract(
@@ -943,10 +950,23 @@ class AivaApiClient:
 
     def _parse_activation_status(self, data: dict[str, Any]) -> AivaActivationStatus:
         """Parse the activation status response."""
+        active = self._get_activation_field(data, FIELD_ACTIVE)
+        if active is not None and not isinstance(active, bool):
+            raise AivaInvalidResponseError("AIVA devolvio active invalido")
         state = self._extract_activation_state(
             data,
+            default=STATE_ACTIVE if active is True else None,
             endpoint=ENDPOINT_ACTIVATION_STATUS,
         )
+        if active is True and state != STATE_ACTIVE:
+            _LOGGER.debug(
+                "AIVA activation status active flag overrides state: endpoint=%s "
+                "parsed_state=%s active=%s",
+                ENDPOINT_ACTIVATION_STATUS,
+                state,
+                active,
+            )
+            state = STATE_ACTIVE
 
         pairing_code = self._get_activation_field(data, FIELD_PAIRING_CODE)
         home_id = self._get_activation_field(data, FIELD_HOME_ID)
@@ -971,6 +991,7 @@ class AivaApiClient:
             secret=secret,
             home_name=home_name,
             plan=plan,
+            active=active,
         )
 
     async def _get_installation_id(self) -> str:
@@ -1096,6 +1117,9 @@ class AivaApiClient:
                 FIELD_STATE: self._safe_raw_state_for_log(payload.get(FIELD_STATE)),
                 FIELD_ACTIVATION_STATE: self._safe_raw_state_for_log(
                     payload.get(FIELD_ACTIVATION_STATE)
+                ),
+                FIELD_ACTIVE: self._safe_raw_state_for_log(
+                    payload.get(FIELD_ACTIVE)
                 ),
             }
             for source, payload in self._iter_activation_payloads(data)
@@ -1315,6 +1339,8 @@ class AivaApiClient:
             return self._mask_token(value, keep_start=2, keep_end=2)
         if "pairing_code" in lowered or "linking_code" in lowered:
             return self._mask_token(value, keep_start=2, keep_end=2)
+        if "home_id" in lowered:
+            return self._mask_token(value, keep_start=2, keep_end=2)
         return value
 
     def _sanitize_text_for_log(self, text: str) -> str:
@@ -1323,7 +1349,7 @@ class AivaApiClient:
             return "<empty>"
 
         sanitized = text
-        for field in (FIELD_SECRET, FIELD_PAIRING_CODE):
+        for field in (FIELD_SECRET, FIELD_PAIRING_CODE, FIELD_HOME_ID):
             marker = f'"{field}"'
             index = sanitized.find(marker)
             while index != -1:

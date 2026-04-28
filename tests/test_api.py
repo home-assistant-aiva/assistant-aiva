@@ -752,6 +752,77 @@ async def test_get_activation_status_active_success(hass, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_activation_status_active_flag_overrides_stale_state(
+    hass, monkeypatch, caplog
+):
+    """Treat active=true from activation/status as the final payment confirmation."""
+    _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "activation_state": STATE_AWAITING_PAYMENT,
+                "active": True,
+                "home_name": "Casa Principal",
+                "plan": "smart",
+            },
+        ),
+    )
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="custom_components.aiva.api"):
+        result = await client.get_activation_status()
+
+    assert result.state == STATE_ACTIVE
+    assert result.active is True
+    assert result.home_id == "home-1"
+    assert result.home_name == "Casa Principal"
+    assert result.secret == "<redacted-secret>"
+    assert "endpoint=/activation/status" in caplog.text
+    assert "status=200" in caplog.text
+    assert "'activation_state': 'awaiting_payment'" in caplog.text
+    assert "'active': True" in caplog.text
+    assert "active flag overrides state" in caplog.text
+    assert "<redacted-secret>" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_get_activation_status_active_flag_without_state(hass, monkeypatch):
+    """Accept status responses that expose payment completion only via active=true."""
+    _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "active": True,
+                "home_name": "Casa Principal",
+            },
+        ),
+    )
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+
+    result = await client.get_activation_status()
+
+    assert result.state == STATE_ACTIVE
+    assert result.active is True
+    assert result.home_id == "home-1"
+    assert result.home_name == "Casa Principal"
+    assert result.secret == "<redacted-secret>"
+
+
+@pytest.mark.asyncio
 async def test_get_home_settings_success(hass, monkeypatch):
     """Fetch and parse home settings without exposing them in config data."""
     session = _patch_session(

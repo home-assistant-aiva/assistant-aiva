@@ -35,6 +35,7 @@ from .const import (
     DEFAULT_API_BASE_URL,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
+    ENDPOINT_ACTIVATION_STATUS,
     MIN_SCAN_INTERVAL_SECONDS,
     PLANS,
     STATE_ACTIVE,
@@ -84,6 +85,20 @@ def _format_user_error_detail(message: str | None) -> str:
     if not message:
         return ""
     return f"Detalle del error: {message}"
+
+
+def _mask_token(
+    value: str | None,
+    *,
+    keep_start: int = 2,
+    keep_end: int = 2,
+) -> str | None:
+    """Mask identifiers in config flow diagnostics."""
+    if not value:
+        return None
+    if len(value) <= keep_start + keep_end:
+        return "***"
+    return f"{value[:keep_start]}***{value[-keep_end:]}"
 
 
 def _build_telegram_pairing_placeholders(pairing_code: str | None) -> dict[str, str]:
@@ -289,11 +304,34 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             status = await self._poll_activation_status(errors)
             if status:
                 self._last_error_detail = ""
+                _LOGGER.debug(
+                    "AIVA awaiting_payment decision: endpoint=%s home_id=%s "
+                    "activation_state=%s active=%s branch=%s",
+                    ENDPOINT_ACTIVATION_STATUS,
+                    _mask_token(status.home_id or self._home_id),
+                    status.state,
+                    status.active,
+                    (
+                        "create_entry"
+                        if status.state == STATE_ACTIVE
+                        else "awaiting_pairing"
+                        if status.state == STATE_AWAITING_PAIRING
+                        else "payment_pending"
+                    ),
+                )
                 if status.state == STATE_ACTIVE:
                     return await self._create_active_entry(status)
                 if status.state == STATE_AWAITING_PAIRING:
                     return await self.async_step_awaiting_pairing()
 
+                _LOGGER.debug(
+                    "AIVA awaiting_payment remains pending: endpoint=%s home_id=%s "
+                    "reason=state_not_active activation_state=%s active=%s",
+                    ENDPOINT_ACTIVATION_STATUS,
+                    _mask_token(status.home_id or self._home_id),
+                    status.state,
+                    status.active,
+                )
                 errors["base"] = "payment_pending"
 
         return self.async_show_form(
@@ -311,10 +349,24 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> AivaActivationStatus | None:
         """Poll activation status and translate backend errors for the flow."""
         if not self._base_url or not self._home_id or not self._secret:
+            _LOGGER.debug(
+                "AIVA activation status poll skipped: endpoint=%s reason=missing_required_data "
+                "has_base_url=%s has_home_id=%s has_secret=%s home_id=%s",
+                ENDPOINT_ACTIVATION_STATUS,
+                bool(self._base_url),
+                bool(self._home_id),
+                bool(self._secret),
+                _mask_token(self._home_id),
+            )
             errors["base"] = "missing_required_data"
             return None
 
         try:
+            _LOGGER.debug(
+                "AIVA activation status poll starting: endpoint=%s home_id=%s",
+                ENDPOINT_ACTIVATION_STATUS,
+                _mask_token(self._home_id),
+            )
             return await _get_activation_status(
                 self.hass,
                 base_url=self._base_url,
@@ -330,8 +382,22 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ):
                 self._last_error_detail = ""
                 errors["base"] = "pairing_pending"
+                _LOGGER.debug(
+                    "AIVA activation status poll treated as pending: endpoint=%s "
+                    "home_id=%s reason=not_found_during_pairing",
+                    ENDPOINT_ACTIVATION_STATUS,
+                    _mask_token(self._home_id),
+                )
                 return None
             self._apply_api_error(errors, err)
+            _LOGGER.debug(
+                "AIVA activation status poll failed: endpoint=%s home_id=%s "
+                "error=%s mapped_error=%s",
+                ENDPOINT_ACTIVATION_STATUS,
+                _mask_token(self._home_id),
+                type(err).__name__,
+                errors.get("base"),
+            )
 
         return None
 
