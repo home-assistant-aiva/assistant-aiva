@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_ALLOWED_COUNT,
     ATTR_ASSISTANT_NAME,
+    ATTR_ACTIVATION_STATE,
     ATTR_CONNECTED,
     ATTR_COUNTRY_CODE,
     ATTR_CUSTOM_PROMPT_CONFIGURED,
@@ -31,7 +32,14 @@ from .const import (
     ATTR_INCLUDED_DOMAINS,
     ATTR_INTEGRATION_VERSION,
     ATTR_LANGUAGE,
+    ATTR_LAST_HEARTBEAT_ERROR,
+    ATTR_LAST_HEARTBEAT_SUCCESS_AT,
+    ATTR_LAST_RECONNECT_ATTEMPT_AT,
+    ATTR_LAST_RECONNECT_SUCCESS_AT,
+    ATTR_LAST_SYNC_ERROR,
+    ATTR_LAST_SYNC_SUCCESS_AT,
     ATTR_LOCALE,
+    ATTR_RECONNECT_STATE,
     ATTR_REQUIRES_CONFIRMATION_COUNT,
     ATTR_RESPONSE_STYLE,
     ATTR_SAMPLE,
@@ -41,6 +49,7 @@ from .const import (
     ATTR_TOTAL_ENTITIES_SEEN,
     ATTR_VISIBLE_COUNT,
     DOMAIN,
+    DISPLAY_SENSOR_STATES,
     MAX_SUMMARY_ITEMS,
 )
 from .coordinator import AivaDataUpdateCoordinator
@@ -59,9 +68,17 @@ class AivaSensorEntityDescription(SensorEntityDescription):
 
 def _settings_value(coordinator: AivaDataUpdateCoordinator) -> str | None:
     """Return a compact settings state."""
+    if not coordinator.data:
+        return "Sin datos"
+    required = (
+        getattr(getattr(coordinator, "client", None), "home_name", None)
+        or coordinator.data.home_name
+    )
+    if coordinator.data.connected and required:
+        return "Configurada"
     settings = coordinator.data.home_settings
     if settings is None:
-        return "Sin datos" if coordinator.data.connected else "Pendiente"
+        return "Pendiente" if required else "Sin datos"
 
     return settings.assistant_name or settings.language or "Configurada"
 
@@ -159,7 +176,10 @@ SENSORS: tuple[AivaSensorEntityDescription, ...] = (
     AivaSensorEntityDescription(
         key="status",
         translation_key="status",
-        value_fn=lambda coordinator: coordinator.data.state,
+        value_fn=lambda coordinator: DISPLAY_SENSOR_STATES.get(
+            coordinator.data.state,
+            coordinator.data.state or "Sin conexión con AIVA",
+        ),
     ),
     AivaSensorEntityDescription(
         key="last_sync",
@@ -247,4 +267,32 @@ class AivaSensor(CoordinatorEntity[AivaDataUpdateCoordinator], SensorEntity):
             ATTR_CONNECTED: self.coordinator.data.connected,
             ATTR_HOME_NAME: self.coordinator.data.home_name,
             ATTR_INTEGRATION_VERSION: self._integration_version,
+            ATTR_RECONNECT_STATE: getattr(self.coordinator, "reconnect_state", None),
+            ATTR_ACTIVATION_STATE: getattr(self.coordinator, "activation_state", None),
+            ATTR_LAST_RECONNECT_ATTEMPT_AT: getattr(
+                self.coordinator,
+                "last_reconnect_attempt_at",
+                None,
+            ),
+            ATTR_LAST_RECONNECT_SUCCESS_AT: getattr(
+                self.coordinator,
+                "last_reconnect_success_at",
+                None,
+            ),
+            ATTR_LAST_HEARTBEAT_SUCCESS_AT: getattr(
+                self.coordinator,
+                "last_heartbeat_success_at",
+                None,
+            ),
+            ATTR_LAST_HEARTBEAT_ERROR: getattr(
+                self.coordinator,
+                "last_heartbeat_error",
+                None,
+            ),
+            ATTR_LAST_SYNC_SUCCESS_AT: getattr(
+                self.coordinator,
+                "last_sync_success_at",
+                None,
+            ),
+            ATTR_LAST_SYNC_ERROR: getattr(self.coordinator, "last_sync_error", None),
         }

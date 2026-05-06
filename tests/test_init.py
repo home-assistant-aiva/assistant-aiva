@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant import config_entries
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -30,6 +30,9 @@ class FakeCoordinator:
         self.client = client
         self.scan_interval_seconds = scan_interval_seconds
         self.async_config_entry_first_refresh = AsyncMock()
+        self.async_start_auto_reconnect = Mock()
+        self.async_stop_auto_reconnect = Mock()
+        self.async_schedule_reconnect = Mock()
 
 
 async def test_setup_entry_reads_legacy_linking_code(hass, monkeypatch):
@@ -104,3 +107,39 @@ async def test_setup_entry_logs_loaded_integration_version(hass, monkeypatch, ca
         f"Cargando integración AIVA version {get_integration_version()} "
         "para 'Casa Principal'"
     ) in caplog.text
+
+
+async def test_setup_entry_does_not_block_on_first_refresh(hass, monkeypatch):
+    """Load the config entry and schedule reconnect instead of requiring backend IO."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Casa Principal",
+        data={
+            CONF_BASE_URL: "https://api.example.com",
+            CONF_PAIRING_CODE: "<pairing-code>",
+            CONF_HOME_ID: "home-1",
+            CONF_SECRET: "<redacted-secret>",
+            CONF_HOME_NAME: "Casa Principal",
+        },
+        source=config_entries.SOURCE_USER,
+        entry_id="startup-entry",
+        unique_id="home-1",
+    )
+    entry.add_to_hass(hass)
+    monkeypatch.setattr(
+        hass.config_entries,
+        "async_forward_entry_setups",
+        AsyncMock(return_value=True),
+    )
+
+    with (
+        patch("custom_components.aiva.AivaApiClient") as client_cls,
+        patch("custom_components.aiva.AivaDataUpdateCoordinator", FakeCoordinator),
+    ):
+        client_cls.return_value = object()
+        assert await async_setup_entry(hass, entry) is True
+
+    coordinator = hass.data[DOMAIN][entry.entry_id].coordinator
+    coordinator.async_config_entry_first_refresh.assert_not_awaited()
+    coordinator.async_start_auto_reconnect.assert_called_once()
+    coordinator.async_schedule_reconnect.assert_called_once_with(reason="setup")

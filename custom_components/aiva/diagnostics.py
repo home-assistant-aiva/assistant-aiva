@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -96,6 +97,25 @@ def _entity_sync_diagnostics(stats: Any) -> dict[str, Any]:
     }
 
 
+def _safe_datetime(value: Any) -> str | None:
+    """Return a safe ISO timestamp for diagnostics."""
+    if value is None:
+        return None
+    isoformat = getattr(value, "isoformat", None)
+    return isoformat() if callable(isoformat) else str(value)
+
+
+def _sanitize_base_url(value: Any) -> str | None:
+    """Return backend base_url without credentials, query, or fragment."""
+    if not isinstance(value, str) or not value:
+        return None
+    parts = urlsplit(value)
+    netloc = parts.hostname or ""
+    if parts.port:
+        netloc = f"{netloc}:{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path.rstrip("/"), "", ""))
+
+
 def _home_automations_diagnostics(automations: tuple[Any, ...]) -> dict[str, Any]:
     """Return bounded diagnostics for home automations."""
     return {
@@ -127,7 +147,9 @@ async def async_get_config_entry_diagnostics(
         get_integration_version(),
     )
     coordinator = getattr(runtime_data, "coordinator", None)
+    client = getattr(runtime_data, "client", None)
     coordinator_data = getattr(coordinator, "data", None)
+    entity_sync = getattr(coordinator_data, "entity_sync", None)
 
     return {
         "integration": {
@@ -146,6 +168,30 @@ async def async_get_config_entry_diagnostics(
                 if coordinator and coordinator.update_interval
                 else None
             ),
+            "reconnect_state": getattr(coordinator, "reconnect_state", None),
+            "last_reconnect_attempt_at": _safe_datetime(
+                getattr(coordinator, "last_reconnect_attempt_at", None)
+            ),
+            "last_reconnect_success_at": _safe_datetime(
+                getattr(coordinator, "last_reconnect_success_at", None)
+            ),
+            "last_heartbeat_success_at": _safe_datetime(
+                getattr(coordinator, "last_heartbeat_success_at", None)
+            ),
+            "last_heartbeat_error": getattr(coordinator, "last_heartbeat_error", None),
+            "last_sync_success_at": _safe_datetime(
+                getattr(coordinator, "last_sync_success_at", None)
+            ),
+            "last_sync_error": getattr(coordinator, "last_sync_error", None),
+            "backend_base_url": _sanitize_base_url(
+                getattr(client, "base_url", config_entry.data.get("base_url"))
+            ),
+            "activation_state": getattr(coordinator, "activation_state", None),
+            "effective_entities_count": getattr(
+                entity_sync,
+                "effective_entities_count",
+                None,
+            ),
         },
         "home_settings": _home_settings_diagnostics(
             getattr(coordinator_data, "home_settings", None)
@@ -153,9 +199,7 @@ async def async_get_config_entry_diagnostics(
         "effective_entities": _effective_entities_diagnostics(
             getattr(coordinator_data, "effective_entities", ())
         ),
-        "entity_sync": _entity_sync_diagnostics(
-            getattr(coordinator_data, "entity_sync", None)
-        ),
+        "entity_sync": _entity_sync_diagnostics(entity_sync),
         "home_automations": _home_automations_diagnostics(
             getattr(coordinator_data, "home_automations", ())
         ),

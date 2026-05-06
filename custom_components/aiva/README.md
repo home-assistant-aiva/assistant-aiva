@@ -9,8 +9,18 @@ Integración custom de Home Assistant para conectar una casa con AIVA.
 - Dirección `base_url` configurable.
 - Heartbeat periódico hacia el backend de AIVA.
 - Sincronización de entidades permitidas.
+- Auto-reconexión después de reinicio o pérdida temporal del backend.
+- Sync automático de entidades después de reconectar.
 - Sensores de estado y última sincronización.
 - Botones para verificar conexión y actualizar dispositivos.
+
+## Reconexión
+
+Al cargar la config entry, AIVA deja sensores disponibles y arranca una recuperación en segundo plano. El flujo envía heartbeat, consulta `activation/status` y, si la casa está `active`, sincroniza entidades automáticamente.
+
+Si el backend no responde durante el arranque, la integración no bloquea Home Assistant. El estado pasa a `Reconectando` o `Sin conexión con AIVA` y se reintenta cada 30 segundos durante los primeros minutos; luego baja la frecuencia. Cuando la red o el backend vuelven, AIVA se marca como `Activo` sin intervención del usuario.
+
+Los botones `Verificar conexión` y `Actualizar dispositivos` siguen disponibles como respaldo manual, pero no deberían ser necesarios después de cada reinicio.
 
 ## Sincronización de entidades
 
@@ -36,7 +46,7 @@ Los helpers `input_boolean` e `input_select` cuentan como entidades efectivas au
 
 No se sincronizan entidades internas de AIVA (`sensor.aiva_*`, `button.aiva_*` o integración `aiva`) ni dominios internos o sensibles como `update`, `persistent_notification`, `zone`, `person`, `device_tracker`, `sun` y `weather`.
 
-Para probar, creá helpers como `input_boolean.luz_living_prueba`, `input_boolean.alarma_de_prueba` e `input_select.modo_casa_prueba`, tocá `Actualizar dispositivos` y revisá el sensor `Entidades efectivas`.
+Para probar, creá helpers como `input_boolean.luz_living_prueba`, `input_boolean.alarma_de_prueba` e `input_select.modo_casa_prueba`, reiniciá Home Assistant o tocá `Actualizar dispositivos` y revisá el sensor `Entidades efectivas`.
 
 ## Instalación
 

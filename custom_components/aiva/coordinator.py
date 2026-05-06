@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
@@ -11,11 +12,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import (
+    AivaActivationStatus,
     AivaApiClient,
     AivaApiError,
+    AivaBackendServerError,
+    AivaCannotConnectError,
     AivaEffectiveEntity,
     AivaHomeAutomation,
     AivaHomeSettings,
@@ -25,6 +30,12 @@ from .const import (
     DOMAIN,
     EXCLUDED_ENTITY_DOMAINS,
     MAX_SUMMARY_ITEMS,
+    STATE_ACTIVE,
+    STATE_AWAITING_PAYMENT,
+    STATE_ERROR,
+    STATE_RECONNECTING,
+    STATE_SUSPENDED,
+    STATE_UNAVAILABLE,
     SYNC_ENTITY_DOMAINS,
 )
 
@@ -59,6 +70,8 @@ class AivaCoordinatorData:
     effective_entities: tuple[AivaEffectiveEntity, ...] = ()
     home_automations: tuple[AivaHomeAutomation, ...] = ()
     entity_sync: AivaEntitySyncStats = field(default_factory=AivaEntitySyncStats)
+    activation_state: str | None = None
+    reconnect_state: str = STATE_RECONNECTING
 
     @classmethod
     def from_status(
@@ -69,6 +82,8 @@ class AivaCoordinatorData:
         effective_entities: tuple[AivaEffectiveEntity, ...] = (),
         home_automations: tuple[AivaHomeAutomation, ...] = (),
         entity_sync: AivaEntitySyncStats | None = None,
+        activation_state: str | None = None,
+        reconnect_state: str | None = None,
     ) -> "AivaCoordinatorData":
         """Build enriched coordinator data from the base status."""
         return cls(
@@ -80,6 +95,71 @@ class AivaCoordinatorData:
             effective_entities=effective_entities,
             home_automations=home_automations,
             entity_sync=entity_sync or AivaEntitySyncStats(),
+            activation_state=activation_state,
+            reconnect_state=(
+                reconnect_state
+                or (STATE_ACTIVE if status.connected else STATE_RECONNECTING)
+            ),
+        )
+
+    @classmethod
+    def reconnecting(
+        cls,
+        *,
+        home_name: str | None,
+        previous: "AivaCoordinatorData | None" = None,
+        error: str | None = None,
+    ) -> "AivaCoordinatorData":
+        """Build data for a safe startup or retrying state."""
+        entity_sync = previous.entity_sync if previous else AivaEntitySyncStats(
+            sync_last_error=error
+        )
+        if previous and error:
+            entity_sync = AivaEntitySyncStats(
+                total_entities_seen=previous.entity_sync.total_entities_seen,
+                effective_entities_count=previous.entity_sync.effective_entities_count,
+                included_domains=previous.entity_sync.included_domains,
+                excluded_domains_count=previous.entity_sync.excluded_domains_count,
+                sample_effective_entities=previous.entity_sync.sample_effective_entities,
+                has_input_boolean=previous.entity_sync.has_input_boolean,
+                has_input_select=previous.entity_sync.has_input_select,
+                sync_last_error=error,
+            )
+        return cls(
+            state=STATE_RECONNECTING,
+            connected=False,
+            home_name=home_name or (previous.home_name if previous else None),
+            last_sync=previous.last_sync if previous else None,
+            home_settings=previous.home_settings if previous else None,
+            effective_entities=previous.effective_entities if previous else (),
+            home_automations=previous.home_automations if previous else (),
+            entity_sync=entity_sync,
+            activation_state=previous.activation_state if previous else None,
+            reconnect_state=STATE_RECONNECTING,
+        )
+
+    @classmethod
+    def unavailable(
+        cls,
+        *,
+        home_name: str | None,
+        previous: "AivaCoordinatorData | None" = None,
+        error: str | None = None,
+        state: str = STATE_UNAVAILABLE,
+    ) -> "AivaCoordinatorData":
+        """Build data for an unreachable backend without losing cached details."""
+        data = cls.reconnecting(home_name=home_name, previous=previous, error=error)
+        return cls(
+            state=state,
+            connected=False,
+            home_name=data.home_name,
+            last_sync=data.last_sync,
+            home_settings=data.home_settings,
+            effective_entities=data.effective_entities,
+            home_automations=data.home_automations,
+            entity_sync=data.entity_sync,
+            activation_state=data.activation_state,
+            reconnect_state=state,
         )
 
 
@@ -102,26 +182,54 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
         self.client = client
         self._last_entity_sync_stats = AivaEntitySyncStats()
         self._sync_last_error: str | None = None
+        self._reconnect_lock = asyncio.Lock()
+        self._reconnect_task: asyncio.Task[None] | None = None
+        self._unsub_reconnect_retry: Any = None
+        self._next_reconnect_at: datetime | None = None
+        self._reconnect_failures = 0
+        self.reconnect_state = STATE_RECONNECTING
+        self.activation_state: str | None = None
+        self.last_reconnect_attempt_at: datetime | None = None
+        self.last_reconnect_success_at: datetime | None = None
+        self.last_heartbeat_success_at: datetime | None = None
+        self.last_heartbeat_error: str | None = None
+        self.last_sync_success_at: datetime | None = None
+        self.last_sync_error: str | None = None
+
+        self.async_set_updated_data(
+            AivaCoordinatorData.reconnecting(home_name=self._client_home_name())
+        )
 
     async def _async_update_data(self) -> AivaCoordinatorData:
         """Fetch data from AIVA."""
         try:
             status = await self.client.get_status()
+            self._mark_heartbeat_success()
+            activation_status = await self._async_get_activation_status()
         except AivaApiError as err:
-            raise UpdateFailed(str(err)) from err
+            self._mark_connection_failure(err)
+            return AivaCoordinatorData.unavailable(
+                home_name=self._client_home_name(),
+                previous=self.data,
+                error=str(err),
+                state=self.reconnect_state,
+            )
 
-        return AivaCoordinatorData.from_status(
+        status = self._status_with_activation(status, activation_status)
+        data = AivaCoordinatorData.from_status(
             status,
             home_settings=await self._async_load_home_settings(),
             effective_entities=await self._async_load_effective_entities(),
             home_automations=await self._async_load_home_automations(),
             entity_sync=self._snapshot_entity_sync_stats(),
+            activation_state=self.activation_state,
+            reconnect_state=self.reconnect_state,
         )
+        return data
 
     async def async_retry_connection(self) -> None:
         """Retry the AIVA connection and refresh data."""
-        await self.client.heartbeat()
-        await self.async_request_refresh()
+        await self.async_reconnect(reason="manual")
 
     async def async_sync_entities(self) -> None:
         """Ask AIVA to synchronize entities and refresh data."""
@@ -130,6 +238,7 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
             await self.client.sync_entities(entities)
         except AivaApiError as err:
             self._sync_last_error = str(err)
+            self.last_sync_error = str(err)
             self._last_entity_sync_stats = self._last_entity_sync_stats_with_error(err)
             _LOGGER.warning(
                 "No se pudieron sincronizar entidades con AIVA: %s",
@@ -139,6 +248,8 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
             return
 
         self._sync_last_error = None
+        self.last_sync_error = None
+        self.last_sync_success_at = _utcnow()
         self._last_entity_sync_stats = self._last_entity_sync_stats_with_error(None)
         _LOGGER.info(
             "Entidades sincronizadas con AIVA: total=%s efectivas=%s dominios=%s",
@@ -147,6 +258,183 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
             ", ".join(self._last_entity_sync_stats.included_domains) or "ninguno",
         )
         await self.async_request_refresh()
+
+    def async_start_auto_reconnect(self) -> None:
+        """Start the low-frequency retry loop used while AIVA is unavailable."""
+        if self._unsub_reconnect_retry is not None:
+            return
+
+        self._unsub_reconnect_retry = async_track_time_interval(
+            self.hass,
+            self._async_retry_timer,
+            timedelta(seconds=30),
+        )
+
+    def async_stop_auto_reconnect(self) -> None:
+        """Stop retry timers and pending background reconnect work."""
+        if self._unsub_reconnect_retry is not None:
+            self._unsub_reconnect_retry()
+            self._unsub_reconnect_retry = None
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+        self._reconnect_task = None
+
+    def async_schedule_reconnect(self, *, reason: str) -> None:
+        """Schedule a reconnect attempt without duplicating concurrent work."""
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        self._reconnect_task = self.hass.async_create_task(
+            self.async_reconnect(reason=reason)
+        )
+
+    async def async_reconnect(self, *, reason: str) -> None:
+        """Reconnect to AIVA, verify activation, and sync entities if active."""
+        async with self._reconnect_lock:
+            self.last_reconnect_attempt_at = _utcnow()
+            self.reconnect_state = STATE_RECONNECTING
+            self.async_set_updated_data(
+                AivaCoordinatorData.reconnecting(
+                    home_name=self._client_home_name(),
+                    previous=self.data,
+                )
+            )
+
+            try:
+                await self.client.heartbeat()
+                self._mark_heartbeat_success()
+                activation_status = await self._async_get_activation_status()
+                status = await self.client.get_status()
+                self._mark_heartbeat_success()
+            except AivaApiError as err:
+                self._mark_connection_failure(err)
+                self._schedule_next_retry()
+                self.async_set_updated_data(
+                    AivaCoordinatorData.unavailable(
+                        home_name=self._client_home_name(),
+                        previous=self.data,
+                        error=str(err),
+                        state=self.reconnect_state,
+                    )
+                )
+                if self._reconnect_failures in {1, 3, 6}:
+                    _LOGGER.warning(
+                        "AIVA no pudo reconectar (%s). Se reintentará automáticamente: %s",
+                        reason,
+                        err,
+                    )
+                return
+
+            status = self._status_with_activation(status, activation_status)
+            self.last_reconnect_success_at = _utcnow()
+            self.reconnect_state = (
+                STATE_ACTIVE
+                if status.connected
+                else (self.activation_state or STATE_ERROR)
+            )
+            self._reconnect_failures = 0
+            self._next_reconnect_at = None
+
+            self.async_set_updated_data(
+                AivaCoordinatorData.from_status(
+                    status,
+                    home_settings=await self._async_load_home_settings(),
+                    effective_entities=await self._async_load_effective_entities(),
+                    home_automations=await self._async_load_home_automations(),
+                    entity_sync=self._snapshot_entity_sync_stats(),
+                    activation_state=self.activation_state,
+                    reconnect_state=self.reconnect_state,
+                )
+            )
+
+            if status.connected:
+                await self.async_sync_entities()
+
+    async def _async_retry_timer(self, _now: datetime) -> None:
+        """Retry reconnects using a simple backoff while disconnected."""
+        if self.data and self.data.connected:
+            return
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        now = _utcnow()
+        if self._next_reconnect_at and now < self._next_reconnect_at:
+            return
+        self.async_schedule_reconnect(reason="retry")
+
+    async def _async_get_activation_status(self) -> AivaActivationStatus | None:
+        """Load activation status and keep diagnostics updated."""
+        activation_status = await self.client.get_activation_status()
+        if not isinstance(activation_status, AivaActivationStatus):
+            return None
+        self.activation_state = activation_status.state
+        return activation_status
+
+    def _status_with_activation(
+        self,
+        status: AivaStatus,
+        activation_status: AivaActivationStatus | None,
+    ) -> AivaStatus:
+        """Resolve user-visible status from heartbeat and activation state."""
+        if activation_status is None:
+            self.reconnect_state = (
+                STATE_ACTIVE if status.connected else STATE_UNAVAILABLE
+            )
+            return status
+
+        activation_state = activation_status.state
+        home_name = (
+            activation_status.home_name
+            or status.home_name
+            or self._client_home_name()
+        )
+        if activation_state == STATE_ACTIVE:
+            self.reconnect_state = STATE_ACTIVE
+            return AivaStatus(
+                state=STATE_ACTIVE,
+                connected=status.connected,
+                home_name=home_name,
+                last_sync=status.last_sync,
+            )
+        if activation_state in {STATE_AWAITING_PAYMENT, STATE_SUSPENDED}:
+            self.reconnect_state = activation_state
+            return AivaStatus(
+                state=activation_state,
+                connected=False,
+                home_name=home_name,
+                last_sync=status.last_sync,
+            )
+
+        self.reconnect_state = activation_state
+        return AivaStatus(
+            state=activation_state,
+            connected=False,
+            home_name=home_name,
+            last_sync=status.last_sync,
+        )
+
+    def _mark_heartbeat_success(self) -> None:
+        """Record a successful heartbeat without exposing credentials."""
+        self.last_heartbeat_success_at = _utcnow()
+        self.last_heartbeat_error = None
+
+    def _mark_connection_failure(self, err: Exception) -> None:
+        """Record a failed reconnect/heartbeat attempt."""
+        self.last_heartbeat_error = str(err)
+        self.reconnect_state = (
+            STATE_UNAVAILABLE
+            if isinstance(err, (AivaCannotConnectError, AivaBackendServerError))
+            else STATE_ERROR
+        )
+        self._reconnect_failures += 1
+
+    def _schedule_next_retry(self) -> None:
+        """Schedule the next reconnect using a bounded simple backoff."""
+        delay = 30 if self._reconnect_failures <= 6 else 120
+        self._next_reconnect_at = _utcnow() + timedelta(seconds=delay)
+
+    def _client_home_name(self) -> str | None:
+        """Return a concrete client home name if available."""
+        home_name = getattr(self.client, "home_name", None)
+        return home_name if isinstance(home_name, str) and home_name else None
 
     async def _async_load_home_settings(self) -> AivaHomeSettings | None:
         """Load optional home settings without failing the base integration."""
@@ -298,3 +586,8 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
             return True
 
         return getattr(registry_entry, "platform", None) == DOMAIN
+
+
+def _utcnow() -> datetime:
+    """Return an aware UTC timestamp for diagnostics."""
+    return datetime.now(timezone.utc)

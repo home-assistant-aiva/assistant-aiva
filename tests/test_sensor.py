@@ -12,7 +12,13 @@ from custom_components.aiva.api import (
     AivaHomeSettings,
 )
 from custom_components.aiva.coordinator import AivaCoordinatorData, AivaEntitySyncStats
-from custom_components.aiva.const import DOMAIN
+from custom_components.aiva.const import (
+    DOMAIN,
+    STATE_ACTIVE,
+    STATE_ERROR,
+    STATE_RECONNECTING,
+    STATE_UNAVAILABLE,
+)
 from custom_components.aiva.sensor import AivaSensor, SENSORS
 from custom_components.aiva.version import get_integration_version
 
@@ -43,7 +49,7 @@ def test_home_settings_sensor_is_summarized_and_safe():
     coordinator = SimpleNamespace(data=data)
     description = _description("home_settings")
 
-    assert description.value_fn(coordinator) == "AIVA"
+    assert description.value_fn(coordinator) == "Configurada"
     attributes = description.attributes_fn(coordinator)
 
     assert attributes["language"] == "es"
@@ -54,12 +60,27 @@ def test_home_settings_sensor_is_summarized_and_safe():
     assert "voice_id" not in attributes
 
 
-def test_home_settings_sensor_uses_clear_empty_state():
-    """Avoid unknown-looking state when settings are not available."""
+def test_home_settings_sensor_uses_configured_state_when_entry_data_exists():
+    """Show configured when minimal entry data exists even without settings."""
     data = AivaCoordinatorData(
         state="Activo",
         connected=True,
         home_name="Casa Principal",
+        last_sync=None,
+        home_settings=None,
+    )
+    coordinator = SimpleNamespace(data=data)
+    description = _description("home_settings")
+
+    assert description.value_fn(coordinator) == "Configurada"
+
+
+def test_home_settings_sensor_uses_clear_empty_state():
+    """Avoid unknown-looking state when settings and entry data are unavailable."""
+    data = AivaCoordinatorData(
+        state="Reconectando",
+        connected=False,
+        home_name=None,
         last_sync=None,
         home_settings=None,
     )
@@ -185,8 +206,52 @@ def test_status_sensor_exposes_runtime_integration_version():
         get_integration_version(),
     )
 
-    assert sensor.extra_state_attributes == {
-        "connected": True,
-        "home_name": "Casa Principal",
-        "integration_version": get_integration_version(),
-    }
+    attributes = sensor.extra_state_attributes
+
+    assert attributes["connected"] is True
+    assert attributes["home_name"] == "Casa Principal"
+    assert attributes["integration_version"] == get_integration_version()
+    assert "last_heartbeat_error" in attributes
+
+
+def test_status_sensor_uses_clear_reconnect_states():
+    """Show useful Spanish states instead of unknown-looking values."""
+    description = _description("status")
+
+    reconnecting = SimpleNamespace(
+        data=AivaCoordinatorData(
+            state=STATE_RECONNECTING,
+            connected=False,
+            home_name="Casa Principal",
+            last_sync=None,
+        )
+    )
+    unavailable = SimpleNamespace(
+        data=AivaCoordinatorData(
+            state=STATE_UNAVAILABLE,
+            connected=False,
+            home_name="Casa Principal",
+            last_sync=None,
+        )
+    )
+    active = SimpleNamespace(
+        data=AivaCoordinatorData(
+            state=STATE_ACTIVE,
+            connected=True,
+            home_name="Casa Principal",
+            last_sync=None,
+        )
+    )
+    error = SimpleNamespace(
+        data=AivaCoordinatorData(
+            state=STATE_ERROR,
+            connected=False,
+            home_name="Casa Principal",
+            last_sync=None,
+        )
+    )
+
+    assert description.value_fn(reconnecting) == "Reconectando"
+    assert description.value_fn(unavailable) == "Sin conexión con AIVA"
+    assert description.value_fn(active) == "Activo"
+    assert description.value_fn(error) == "Error"

@@ -87,10 +87,21 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
         ),
     )
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SimpleNamespace(
+        client=SimpleNamespace(
+            base_url="https://user:pass@api.example.com/aiva?secret=bad"
+        ),
         coordinator=SimpleNamespace(
             data=coordinator_data,
             last_update_success=True,
             update_interval=None,
+            reconnect_state="active",
+            activation_state="active",
+            last_reconnect_attempt_at=None,
+            last_reconnect_success_at=None,
+            last_heartbeat_success_at=None,
+            last_heartbeat_error=None,
+            last_sync_success_at=None,
+            last_sync_error=None,
         )
     )
 
@@ -107,3 +118,9 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
     assert diagnostics["entity_sync"]["has_input_boolean"] is True
     assert diagnostics["entity_sync"]["has_input_select"] is True
     assert diagnostics["home_automations"]["enabled_count"] == 1
+    assert diagnostics["coordinator"]["reconnect_state"] == "active"
+    assert diagnostics["coordinator"]["activation_state"] == "active"
+    assert diagnostics["coordinator"]["effective_entities_count"] == 3
+    assert diagnostics["coordinator"]["backend_base_url"] == "https://api.example.com/aiva"
+    assert "pass" not in str(diagnostics)
+    assert "secret=bad" not in str(diagnostics)

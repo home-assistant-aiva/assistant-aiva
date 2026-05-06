@@ -17,6 +17,8 @@ La integración permite activar el servicio desde la UI de Home Assistant, mante
 - Sensor de entidades efectivas.
 - Botón para verificar conexión.
 - Botón para actualizar dispositivos.
+- Auto-reconexión después de reiniciar Home Assistant.
+- Sync automático de entidades al reconectar.
 - Diagnósticos con datos sensibles redactados.
 
 ## Requisitos
@@ -81,14 +83,24 @@ Si la integración no conecta:
 - Verificá que el backend de AIVA esté disponible.
 - Revisá que el flujo de activación haya sido completado.
 - Reiniciá Home Assistant después de instalar o actualizar desde HACS.
-- Usá el botón `Verificar conexión` desde la integración.
+- Esperá unos minutos: AIVA reintenta automáticamente después del arranque.
+- Usá el botón `Verificar conexión` como respaldo manual si necesitás forzar un intento.
 
 Si la sincronización no se actualiza:
 
-- Usá el botón `Actualizar dispositivos`.
+- AIVA sincroniza entidades automáticamente después de reconectar.
+- Usá el botón `Actualizar dispositivos` como respaldo manual.
 - Revisá el sensor `Última sincronización`.
 - Revisá el sensor `Entidades efectivas`.
 - Confirmá que la integración esté cargada sin errores en Home Assistant.
+
+## Reconexión automática
+
+Cuando Home Assistant arranca, AIVA carga la config entry sin bloquear el inicio aunque el backend todavía no responda. La integración queda en `Reconectando`, envía heartbeat, consulta `activation/status` y, si la casa está activa, queda como `Activo`.
+
+Si el backend está caído o Home Assistant todavía no tiene red, el sensor `Estado de AIVA` muestra `Sin conexión con AIVA` y la integración reintenta automáticamente cada 30 segundos durante los primeros minutos. Después reduce la frecuencia para evitar loops agresivos. Cuando el backend vuelve, AIVA se recupera sola y ejecuta una sincronización inicial de entidades.
+
+El heartbeat periódico usa los datos guardados de la config entry y no expone `secret` ni códigos completos. Si el heartbeat falla, el error queda disponible en diagnostics y en los atributos del sensor de estado.
 
 ## Sincronización de entidades
 
@@ -118,7 +130,7 @@ Para probar helpers:
 
 1. Creá o verificá helpers como `input_boolean.luz_living_prueba`, `input_boolean.alarma_de_prueba` e `input_select.modo_casa_prueba`.
 2. Abrí `Ajustes > Dispositivos y servicios > AIVA`.
-3. Tocá `Actualizar dispositivos`.
+3. Reiniciá Home Assistant o tocá `Actualizar dispositivos`.
 4. Verificá que `Entidades efectivas` sea mayor a `0`.
 5. Descargá diagnósticos y revisá `entity_sync.effective_entities_count`, `has_input_boolean`, `has_input_select` y `sample_effective_entities`.
 

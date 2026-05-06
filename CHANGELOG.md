@@ -2,6 +2,15 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.16 - Auto reconnect after Home Assistant restart
+
+- Added automatic reconnect on config entry setup and when Home Assistant finishes starting.
+- Added bounded retry/backoff when the AIVA backend is unavailable at startup.
+- Made heartbeat and activation status checks part of the reconnect path.
+- Added automatic entity sync after a successful reconnect.
+- Added reconnect, heartbeat and sync diagnostics without exposing secrets.
+- Improved status sensor states for reconnecting, unavailable, active, awaiting payment and suspended homes.
+
 ## 0.2.15 - Entity sync helpers
 
 - Added `input_boolean` and `input_select` helpers to the useful entity sync set.

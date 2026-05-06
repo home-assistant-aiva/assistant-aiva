@@ -266,6 +266,16 @@ class AivaApiClient:
         """Normalize a backend base URL for relative endpoint joins."""
         return base_url.strip().rstrip("/")
 
+    @property
+    def base_url(self) -> str:
+        """Return the configured backend base URL."""
+        return self._base_url
+
+    @property
+    def home_name(self) -> str | None:
+        """Return the configured home name."""
+        return self._home_name
+
     async def validate_pairing_code(
         self,
         pairing_code: str,

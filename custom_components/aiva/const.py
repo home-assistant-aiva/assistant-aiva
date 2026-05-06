@@ -22,6 +22,9 @@ STATE_AWAITING_PAIRING = "awaiting_pairing"
 STATE_AWAITING_PAYMENT = "awaiting_payment"
 STATE_ACTIVE = "active"
 STATE_SUSPENDED = "suspended"
+STATE_RECONNECTING = "reconnecting"
+STATE_UNAVAILABLE = "unavailable"
+STATE_ERROR = "error"
 ACTIVATION_STATES = (
     STATE_INSTALLED,
     STATE_AWAITING_PAIRING,
@@ -100,6 +103,23 @@ ATTR_EXCLUDED_DOMAINS_COUNT = "excluded_domains_count"
 ATTR_HAS_INPUT_BOOLEAN = "has_input_boolean"
 ATTR_HAS_INPUT_SELECT = "has_input_select"
 ATTR_SYNC_LAST_ERROR = "sync_last_error"
+ATTR_RECONNECT_STATE = "reconnect_state"
+ATTR_ACTIVATION_STATE = "activation_state"
+ATTR_LAST_RECONNECT_ATTEMPT_AT = "last_reconnect_attempt_at"
+ATTR_LAST_RECONNECT_SUCCESS_AT = "last_reconnect_success_at"
+ATTR_LAST_HEARTBEAT_SUCCESS_AT = "last_heartbeat_success_at"
+ATTR_LAST_HEARTBEAT_ERROR = "last_heartbeat_error"
+ATTR_LAST_SYNC_SUCCESS_AT = "last_sync_success_at"
+ATTR_LAST_SYNC_ERROR = "last_sync_error"
+
+DISPLAY_SENSOR_STATES = {
+    STATE_ACTIVE: "Activo",
+    STATE_AWAITING_PAYMENT: "Pendiente de pago",
+    STATE_SUSPENDED: "Suspendido",
+    STATE_RECONNECTING: "Reconectando",
+    STATE_UNAVAILABLE: "Sin conexión con AIVA",
+    STATE_ERROR: "Error",
+}
 
 MAX_SUMMARY_ITEMS = 10
 

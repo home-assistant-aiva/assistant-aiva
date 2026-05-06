@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from custom_components.aiva.api import (
+    AivaActivationStatus,
+    AivaConnectionError,
     AivaEffectiveEntity,
     AivaHomeAutomation,
     AivaHomeSettings,
@@ -14,6 +16,7 @@ from custom_components.aiva.api import (
     AivaStatus,
 )
 from custom_components.aiva.coordinator import AivaDataUpdateCoordinator
+from custom_components.aiva.const import STATE_ACTIVE, STATE_UNAVAILABLE
 
 
 @pytest.mark.asyncio
@@ -25,6 +28,12 @@ async def test_coordinator_loads_enriched_data(hass):
         connected=True,
         home_name="Casa Principal",
         last_sync=None,
+    )
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_ACTIVE,
+        home_name="Casa Principal",
+        home_id="home-1",
+        secret="<redacted-secret>",
     )
     client.get_home_settings.return_value = AivaHomeSettings(
         language="es",
@@ -49,7 +58,7 @@ async def test_coordinator_loads_enriched_data(hass):
 
     data = await coordinator._async_update_data()
 
-    assert data.state == "Activo"
+    assert data.state == STATE_ACTIVE
     assert data.connected is True
     assert data.home_settings.assistant_name == "AIVA"
     assert data.effective_entities[0].entity_id == "light.living"
@@ -66,6 +75,12 @@ async def test_coordinator_keeps_base_data_when_optional_endpoint_fails(hass):
         home_name="Casa Principal",
         last_sync=None,
     )
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_ACTIVE,
+        home_name="Casa Principal",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
     client.get_home_settings.side_effect = AivaInvalidResponseError("bad settings")
     client.get_effective_entities.side_effect = AivaInvalidResponseError("bad entities")
     client.get_home_automations.side_effect = AivaInvalidResponseError(
@@ -75,11 +90,96 @@ async def test_coordinator_keeps_base_data_when_optional_endpoint_fails(hass):
 
     data = await coordinator._async_update_data()
 
-    assert data.state == "Activo"
+    assert data.state == STATE_ACTIVE
     assert data.connected is True
     assert data.home_settings is None
     assert data.effective_entities == ()
     assert data.home_automations == ()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_returns_unavailable_when_backend_fails_at_startup(hass):
+    """Do not break setup/update when AIVA is temporarily unreachable."""
+    client = AsyncMock()
+    client.get_status.side_effect = AivaConnectionError("backend down")
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+
+    data = await coordinator._async_update_data()
+
+    assert data.state == STATE_UNAVAILABLE
+    assert data.connected is False
+    assert coordinator.reconnect_state == STATE_UNAVAILABLE
+    assert coordinator.last_heartbeat_error == "backend down"
+
+
+@pytest.mark.asyncio
+async def test_reconnect_success_marks_connected_and_syncs_entities(hass, monkeypatch):
+    """A successful reconnect sends heartbeat, checks activation, then syncs."""
+    client = AsyncMock()
+    client.heartbeat.return_value = {"ok": True}
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_ACTIVE,
+        home_name="Casa Principal",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+    client.get_status.return_value = AivaStatus(
+        state="Activo",
+        connected=True,
+        home_name="Casa Principal",
+        last_sync=None,
+    )
+    client.get_home_settings.return_value = AivaHomeSettings(language="es")
+    client.get_effective_entities.return_value = ()
+    client.get_home_automations.return_value = ()
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+    refresh = AsyncMock()
+    monkeypatch.setattr(coordinator, "async_request_refresh", refresh)
+    hass.states.async_set("input_boolean.luz_living_prueba", "on")
+
+    await coordinator.async_reconnect(reason="test")
+
+    client.heartbeat.assert_awaited_once()
+    client.get_activation_status.assert_awaited_once()
+    client.sync_entities.assert_awaited_once()
+    assert coordinator.data.connected is True
+    assert coordinator.reconnect_state == STATE_ACTIVE
+    assert coordinator.last_reconnect_success_at is not None
+    assert coordinator.last_heartbeat_success_at is not None
+    assert coordinator.last_sync_success_at is not None
+
+
+@pytest.mark.asyncio
+async def test_reconnect_keeps_connected_when_entity_sync_fails(hass, monkeypatch):
+    """Entity sync failures are recorded without losing a working connection."""
+    client = AsyncMock()
+    client.heartbeat.return_value = {"ok": True}
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_ACTIVE,
+        home_name="Casa Principal",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+    client.get_status.return_value = AivaStatus(
+        state="Activo",
+        connected=True,
+        home_name="Casa Principal",
+        last_sync=None,
+    )
+    client.get_home_settings.return_value = AivaHomeSettings(language="es")
+    client.get_effective_entities.return_value = ()
+    client.get_home_automations.return_value = ()
+    client.sync_entities.side_effect = AivaInvalidResponseError("sync failed")
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+    refresh = AsyncMock()
+    monkeypatch.setattr(coordinator, "async_request_refresh", refresh)
+
+    await coordinator.async_reconnect(reason="test")
+
+    assert coordinator.data.connected is True
+    assert coordinator.reconnect_state == STATE_ACTIVE
+    assert coordinator.last_sync_error == "sync failed"
+    refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio

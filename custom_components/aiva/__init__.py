@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
+from homeassistant.core import Event, HomeAssistant
 
 from .api import AivaApiClient
 from .const import (
@@ -65,8 +65,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         secret=entry.data.get(CONF_SECRET),
     )
     coordinator = AivaDataUpdateCoordinator(hass, client, scan_interval)
-
-    await coordinator.async_config_entry_first_refresh()
+    coordinator.async_start_auto_reconnect()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = AivaRuntimeData(
         client=client,
@@ -81,7 +80,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    entry.async_on_unload(coordinator.async_stop_auto_reconnect)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    coordinator.async_schedule_reconnect(reason="setup")
+    entry.async_on_unload(
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED,
+            _schedule_started_reconnect(coordinator),
+        )
+    )
     return True
 
 
@@ -98,3 +105,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload AIVA when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+def _schedule_started_reconnect(
+    coordinator: AivaDataUpdateCoordinator,
+):
+    """Return a HA-started callback that schedules one reconnect attempt."""
+
+    def _handle_started(_event: Event) -> None:
+        coordinator.async_schedule_reconnect(reason="homeassistant_started")
+
+    return _handle_started
