@@ -23,15 +23,22 @@ from .const import (
     ATTR_CUSTOM_PROMPT_CONFIGURED,
     ATTR_DISABLED_COUNT,
     ATTR_ENABLED_COUNT,
+    ATTR_EFFECTIVE_ENTITIES_COUNT,
+    ATTR_EXCLUDED_DOMAINS_COUNT,
+    ATTR_HAS_INPUT_BOOLEAN,
+    ATTR_HAS_INPUT_SELECT,
     ATTR_HOME_NAME,
+    ATTR_INCLUDED_DOMAINS,
     ATTR_INTEGRATION_VERSION,
     ATTR_LANGUAGE,
     ATTR_LOCALE,
     ATTR_REQUIRES_CONFIRMATION_COUNT,
     ATTR_RESPONSE_STYLE,
     ATTR_SAMPLE,
+    ATTR_SYNC_LAST_ERROR,
     ATTR_TIMEZONE,
     ATTR_TOTAL_COUNT,
+    ATTR_TOTAL_ENTITIES_SEEN,
     ATTR_VISIBLE_COUNT,
     DOMAIN,
     MAX_SUMMARY_ITEMS,
@@ -54,9 +61,9 @@ def _settings_value(coordinator: AivaDataUpdateCoordinator) -> str | None:
     """Return a compact settings state."""
     settings = coordinator.data.home_settings
     if settings is None:
-        return None
+        return "Sin datos" if coordinator.data.connected else "Pendiente"
 
-    return settings.assistant_name or settings.language or "Configurado"
+    return settings.assistant_name or settings.language or "Configurada"
 
 
 def _settings_attributes(
@@ -78,19 +85,38 @@ def _settings_attributes(
     }
 
 
+def _effective_entities_value(coordinator: AivaDataUpdateCoordinator) -> int:
+    """Return local useful entity count when a local snapshot exists."""
+    sync_stats = coordinator.data.entity_sync
+    if sync_stats.total_entities_seen or sync_stats.included_domains:
+        return sync_stats.effective_entities_count
+
+    return len(coordinator.data.effective_entities)
+
+
 def _effective_entities_attributes(
     coordinator: AivaDataUpdateCoordinator,
 ) -> dict[str, Any]:
     """Return compact effective entity counts and a small sample."""
     entities = coordinator.data.effective_entities
+    sync_stats = coordinator.data.entity_sync
+    effective_count = _effective_entities_value(coordinator)
     return {
         ATTR_TOTAL_COUNT: len(entities),
+        ATTR_TOTAL_ENTITIES_SEEN: sync_stats.total_entities_seen,
+        ATTR_EFFECTIVE_ENTITIES_COUNT: effective_count,
+        ATTR_INCLUDED_DOMAINS: list(sync_stats.included_domains),
+        ATTR_EXCLUDED_DOMAINS_COUNT: sync_stats.excluded_domains_count or {},
+        ATTR_HAS_INPUT_BOOLEAN: sync_stats.has_input_boolean,
+        ATTR_HAS_INPUT_SELECT: sync_stats.has_input_select,
+        ATTR_SYNC_LAST_ERROR: sync_stats.sync_last_error,
         ATTR_ALLOWED_COUNT: sum(entity.is_allowed is True for entity in entities),
         ATTR_VISIBLE_COUNT: sum(entity.is_visible is True for entity in entities),
         ATTR_REQUIRES_CONFIRMATION_COUNT: sum(
             entity.requires_confirmation is True for entity in entities
         ),
-        ATTR_SAMPLE: [
+        ATTR_SAMPLE: list(sync_stats.sample_effective_entities)
+        or [
             {
                 "entity_id": entity.entity_id,
                 "display_name": entity.display_name,
@@ -150,7 +176,7 @@ SENSORS: tuple[AivaSensorEntityDescription, ...] = (
     AivaSensorEntityDescription(
         key="effective_entities",
         translation_key="effective_entities",
-        value_fn=lambda coordinator: len(coordinator.data.effective_entities),
+        value_fn=_effective_entities_value,
         attributes_fn=_effective_entities_attributes,
     ),
     AivaSensorEntityDescription(

@@ -93,6 +93,13 @@ ATTR_REQUIRES_CONFIRMATION_COUNT = "requires_confirmation_count"
 ATTR_ENABLED_COUNT = "enabled_count"
 ATTR_DISABLED_COUNT = "disabled_count"
 ATTR_SAMPLE = "sample"
+ATTR_TOTAL_ENTITIES_SEEN = "total_entities_seen"
+ATTR_EFFECTIVE_ENTITIES_COUNT = "effective_entities_count"
+ATTR_INCLUDED_DOMAINS = "included_domains"
+ATTR_EXCLUDED_DOMAINS_COUNT = "excluded_domains_count"
+ATTR_HAS_INPUT_BOOLEAN = "has_input_boolean"
+ATTR_HAS_INPUT_SELECT = "has_input_select"
+ATTR_SYNC_LAST_ERROR = "sync_last_error"
 
 MAX_SUMMARY_ITEMS = 10
 
@@ -101,6 +108,9 @@ SYNC_ENTITY_DOMAINS = (
     "binary_sensor",
     "climate",
     "cover",
+    "fan",
+    "input_boolean",
+    "input_select",
     "light",
     "lock",
     "media_player",
@@ -108,4 +118,15 @@ SYNC_ENTITY_DOMAINS = (
     "script",
     "sensor",
     "switch",
+    "automation",
+)
+
+EXCLUDED_ENTITY_DOMAINS = (
+    "device_tracker",
+    "persistent_notification",
+    "person",
+    "sun",
+    "update",
+    "weather",
+    "zone",
 )

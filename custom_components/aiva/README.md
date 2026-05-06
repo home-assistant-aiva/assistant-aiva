@@ -12,6 +12,32 @@ Integración custom de Home Assistant para conectar una casa con AIVA.
 - Sensores de estado y última sincronización.
 - Botones para verificar conexión y actualizar dispositivos.
 
+## Sincronización de entidades
+
+AIVA incluye entidades útiles de estos dominios:
+
+- `input_boolean`
+- `input_select`
+- `alarm_control_panel`
+- `light`
+- `switch`
+- `sensor`
+- `binary_sensor`
+- `cover`
+- `climate`
+- `lock`
+- `media_player`
+- `fan`
+- `scene`
+- `script`
+- `automation`
+
+Los helpers `input_boolean` e `input_select` cuentan como entidades efectivas aunque no tengan `device_id`.
+
+No se sincronizan entidades internas de AIVA (`sensor.aiva_*`, `button.aiva_*` o integración `aiva`) ni dominios internos o sensibles como `update`, `persistent_notification`, `zone`, `person`, `device_tracker`, `sun` y `weather`.
+
+Para probar, creá helpers como `input_boolean.luz_living_prueba`, `input_boolean.alarma_de_prueba` e `input_select.modo_casa_prueba`, tocá `Actualizar dispositivos` y revisá el sensor `Entidades efectivas`.
+
 ## Instalación
 
 La forma recomendada es instalar desde HACS como custom repository.

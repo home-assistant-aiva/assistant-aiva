@@ -80,6 +80,22 @@ def _effective_entities_diagnostics(entities: tuple[Any, ...]) -> dict[str, Any]
     }
 
 
+def _entity_sync_diagnostics(stats: Any) -> dict[str, Any]:
+    """Return safe diagnostics for the local entity sync snapshot."""
+    return {
+        "total_entities_seen": getattr(stats, "total_entities_seen", 0),
+        "effective_entities_count": getattr(stats, "effective_entities_count", 0),
+        "included_domains": list(getattr(stats, "included_domains", ())),
+        "excluded_domains_count": getattr(stats, "excluded_domains_count", None) or {},
+        "sample_effective_entities": list(
+            getattr(stats, "sample_effective_entities", ())
+        )[:MAX_SUMMARY_ITEMS],
+        "has_input_boolean": getattr(stats, "has_input_boolean", False),
+        "has_input_select": getattr(stats, "has_input_select", False),
+        "sync_last_error": getattr(stats, "sync_last_error", None),
+    }
+
+
 def _home_automations_diagnostics(automations: tuple[Any, ...]) -> dict[str, Any]:
     """Return bounded diagnostics for home automations."""
     return {
@@ -136,6 +152,9 @@ async def async_get_config_entry_diagnostics(
         ),
         "effective_entities": _effective_entities_diagnostics(
             getattr(coordinator_data, "effective_entities", ())
+        ),
+        "entity_sync": _entity_sync_diagnostics(
+            getattr(coordinator_data, "entity_sync", None)
         ),
         "home_automations": _home_automations_diagnostics(
             getattr(coordinator_data, "home_automations", ())

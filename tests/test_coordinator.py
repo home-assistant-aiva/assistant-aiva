@@ -94,3 +94,94 @@ async def test_sync_entities_keeps_existing_refresh_path(hass, monkeypatch):
 
     client.sync_entities.assert_awaited_once()
     refresh.assert_awaited_once()
+
+
+def test_collect_entities_includes_useful_helpers_without_device_id(hass):
+    """Helpers are useful entities even when they do not have a device entry."""
+    client = AsyncMock()
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+    hass.states.async_set(
+        "input_boolean.luz_living_prueba",
+        "on",
+        {"friendly_name": "Luz living prueba"},
+    )
+    hass.states.async_set(
+        "input_boolean.alarma_de_prueba",
+        "off",
+        {"friendly_name": "Alarma de prueba"},
+    )
+    hass.states.async_set(
+        "input_select.modo_casa_prueba",
+        "Dia",
+        {
+            "friendly_name": "Modo casa prueba",
+            "options": ["Dia", "Noche"],
+            "icon": "mdi:home",
+        },
+    )
+
+    entities = coordinator._collect_entities()
+    entity_ids = {entity["entity_id"] for entity in entities}
+
+    assert "input_boolean.luz_living_prueba" in entity_ids
+    assert "input_boolean.alarma_de_prueba" in entity_ids
+    assert "input_select.modo_casa_prueba" in entity_ids
+    assert coordinator._last_entity_sync_stats.effective_entities_count == 3
+    assert coordinator._last_entity_sync_stats.has_input_boolean is True
+    assert coordinator._last_entity_sync_stats.has_input_select is True
+
+    input_select_payload = next(
+        entity
+        for entity in entities
+        if entity["entity_id"] == "input_select.modo_casa_prueba"
+    )
+    assert input_select_payload["options"] == ["Dia", "Noche"]
+    assert input_select_payload["area"] is None
+
+
+def test_collect_entities_excludes_aiva_internal_entities(hass):
+    """AIVA must not count its own sensors or buttons as useful entities."""
+    client = AsyncMock()
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+    hass.states.async_set("sensor.aiva_estado", "Activo")
+    hass.states.async_set("button.aiva_actualizar_dispositivos", "unknown")
+    hass.states.async_set("light.living", "on")
+
+    entities = coordinator._collect_entities()
+    entity_ids = {entity["entity_id"] for entity in entities}
+
+    assert "light.living" in entity_ids
+    assert "sensor.aiva_estado" not in entity_ids
+    assert "button.aiva_actualizar_dispositivos" not in entity_ids
+    assert coordinator._last_entity_sync_stats.effective_entities_count == 1
+
+
+def test_collect_entities_sends_unavailable_but_does_not_count_effective(hass):
+    """Unavailable useful entities stay diagnostic-only in the payload."""
+    client = AsyncMock()
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+    hass.states.async_set("switch.bomba", "unavailable")
+
+    entities = coordinator._collect_entities()
+
+    assert entities[0]["entity_id"] == "switch.bomba"
+    assert entities[0]["available"] is False
+    assert entities[0]["effective"] is False
+    assert coordinator._last_entity_sync_stats.effective_entities_count == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_entities_recalculates_current_entities(hass, monkeypatch):
+    """The sync button path sends the current local snapshot."""
+    client = AsyncMock()
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+    refresh = AsyncMock()
+    monkeypatch.setattr(coordinator, "async_request_refresh", refresh)
+    hass.states.async_set("input_boolean.luz_living_prueba", "on")
+
+    await coordinator.async_sync_entities()
+
+    payload = client.sync_entities.await_args.args[0]
+    assert payload[0]["entity_id"] == "input_boolean.luz_living_prueba"
+    assert coordinator._last_entity_sync_stats.effective_entities_count == 1
+    refresh.assert_awaited_once()

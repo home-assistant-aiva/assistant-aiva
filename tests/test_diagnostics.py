@@ -12,7 +12,7 @@ from custom_components.aiva.api import (
     AivaHomeAutomation,
     AivaHomeSettings,
 )
-from custom_components.aiva.coordinator import AivaCoordinatorData
+from custom_components.aiva.coordinator import AivaCoordinatorData, AivaEntitySyncStats
 from custom_components.aiva.const import (
     CONF_HOME_ID,
     CONF_HOME_NAME,
@@ -61,6 +61,23 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
                 requires_confirmation=False,
             ),
         ),
+        entity_sync=AivaEntitySyncStats(
+            total_entities_seen=4,
+            effective_entities_count=3,
+            included_domains=("input_boolean", "input_select", "light"),
+            excluded_domains_count={"sensor": 1},
+            sample_effective_entities=(
+                {
+                    "entity_id": "input_boolean.luz_living_prueba",
+                    "domain": "input_boolean",
+                    "friendly_name": "Luz living prueba",
+                    "area": None,
+                    "state": "on",
+                },
+            ),
+            has_input_boolean=True,
+            has_input_select=True,
+        ),
         home_automations=(
             AivaHomeAutomation(
                 automation_id="auto-1",
@@ -86,4 +103,7 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
     assert diagnostics["home_settings"]["custom_prompt_configured"] is True
     assert "custom_prompt" not in diagnostics["home_settings"]
     assert diagnostics["effective_entities"]["total_count"] == 1
+    assert diagnostics["entity_sync"]["effective_entities_count"] == 3
+    assert diagnostics["entity_sync"]["has_input_boolean"] is True
+    assert diagnostics["entity_sync"]["has_input_select"] is True
     assert diagnostics["home_automations"]["enabled_count"] == 1

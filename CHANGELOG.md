@@ -2,6 +2,13 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.15 - Entity sync helpers
+
+- Added `input_boolean` and `input_select` helpers to the useful entity sync set.
+- Excluded AIVA internal entities from local entity sync counts.
+- Enriched `/entities/sync` payloads with metadata such as icon, options, supported features and availability.
+- Added local sync diagnostics and effective entity counts.
+
 ## 0.2.9 - HACS release cleanup
 
 - Confirmed the onboarding flow points to `@aiva_asistente_1_bot`.

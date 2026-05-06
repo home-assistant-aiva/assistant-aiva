@@ -535,8 +535,7 @@ class AivaApiClient:
         data = await self.heartbeat()
         heartbeat_at = data.get(FIELD_HEARTBEAT_AT)
         last_sync = self._last_sync
-
-        if isinstance(heartbeat_at, str):
+        if last_sync is None and isinstance(heartbeat_at, str):
             last_sync = dt_util.parse_datetime(heartbeat_at) or self._last_sync
 
         return AivaStatus(

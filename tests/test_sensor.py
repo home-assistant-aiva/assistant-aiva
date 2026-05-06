@@ -11,7 +11,7 @@ from custom_components.aiva.api import (
     AivaHomeAutomation,
     AivaHomeSettings,
 )
-from custom_components.aiva.coordinator import AivaCoordinatorData
+from custom_components.aiva.coordinator import AivaCoordinatorData, AivaEntitySyncStats
 from custom_components.aiva.const import DOMAIN
 from custom_components.aiva.sensor import AivaSensor, SENSORS
 from custom_components.aiva.version import get_integration_version
@@ -54,6 +54,21 @@ def test_home_settings_sensor_is_summarized_and_safe():
     assert "voice_id" not in attributes
 
 
+def test_home_settings_sensor_uses_clear_empty_state():
+    """Avoid unknown-looking state when settings are not available."""
+    data = AivaCoordinatorData(
+        state="Activo",
+        connected=True,
+        home_name="Casa Principal",
+        last_sync=None,
+        home_settings=None,
+    )
+    coordinator = SimpleNamespace(data=data)
+    description = _description("home_settings")
+
+    assert description.value_fn(coordinator) == "Sin datos"
+
+
 def test_effective_entities_sensor_is_bounded_summary():
     """Expose effective entity counts and a small sample."""
     data = AivaCoordinatorData(
@@ -61,6 +76,23 @@ def test_effective_entities_sensor_is_bounded_summary():
         connected=True,
         home_name="Casa Principal",
         last_sync=None,
+        entity_sync=AivaEntitySyncStats(
+            total_entities_seen=3,
+            effective_entities_count=3,
+            included_domains=("input_boolean", "input_select"),
+            excluded_domains_count={"sensor": 1},
+            sample_effective_entities=(
+                {
+                    "entity_id": "input_boolean.luz_living_prueba",
+                    "domain": "input_boolean",
+                    "friendly_name": "Luz living prueba",
+                    "area": None,
+                    "state": "on",
+                },
+            ),
+            has_input_boolean=True,
+            has_input_select=True,
+        ),
         effective_entities=(
             AivaEffectiveEntity(
                 entity_id="light.living",
@@ -83,14 +115,20 @@ def test_effective_entities_sensor_is_bounded_summary():
     coordinator = SimpleNamespace(data=data)
     description = _description("effective_entities")
 
-    assert description.value_fn(coordinator) == 2
+    assert description.value_fn(coordinator) == 3
     attributes = description.attributes_fn(coordinator)
 
     assert attributes["total_count"] == 2
+    assert attributes["total_entities_seen"] == 3
+    assert attributes["effective_entities_count"] == 3
+    assert attributes["included_domains"] == ["input_boolean", "input_select"]
+    assert attributes["excluded_domains_count"] == {"sensor": 1}
+    assert attributes["has_input_boolean"] is True
+    assert attributes["has_input_select"] is True
     assert attributes["allowed_count"] == 2
     assert attributes["visible_count"] == 1
     assert attributes["requires_confirmation_count"] == 1
-    assert attributes["sample"][0]["entity_id"] == "light.living"
+    assert attributes["sample"][0]["entity_id"] == "input_boolean.luz_living_prueba"
 
 
 def test_home_automations_sensor_is_bounded_summary():

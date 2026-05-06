@@ -14,6 +14,7 @@ La integración permite activar el servicio desde la UI de Home Assistant, mante
 - `base_url` configurable desde la UI.
 - Sensor de estado de AIVA.
 - Sensor de última sincronización.
+- Sensor de entidades efectivas.
 - Botón para verificar conexión.
 - Botón para actualizar dispositivos.
 - Diagnósticos con datos sensibles redactados.
@@ -86,7 +87,42 @@ Si la sincronización no se actualiza:
 
 - Usá el botón `Actualizar dispositivos`.
 - Revisá el sensor `Última sincronización`.
+- Revisá el sensor `Entidades efectivas`.
 - Confirmá que la integración esté cargada sin errores en Home Assistant.
+
+## Sincronización de entidades
+
+AIVA sincroniza entidades útiles de Home Assistant sin exigir que tengan `device_id`, por lo que también detecta helpers creados desde la UI.
+
+Dominios incluidos:
+
+- `input_boolean`
+- `input_select`
+- `alarm_control_panel`
+- `light`
+- `switch`
+- `sensor`
+- `binary_sensor`
+- `cover`
+- `climate`
+- `lock`
+- `media_player`
+- `fan`
+- `scene`
+- `script`
+- `automation`
+
+Dominios internos o poco adecuados para control quedan fuera del snapshot, incluyendo `update`, `persistent_notification`, `zone`, `person`, `device_tracker`, `sun` y `weather`. La integración también excluye sus propias entidades `sensor.aiva_*`, `button.aiva_*` y cualquier entidad registrada por la integración `aiva` para no auto-contarse.
+
+Para probar helpers:
+
+1. Creá o verificá helpers como `input_boolean.luz_living_prueba`, `input_boolean.alarma_de_prueba` e `input_select.modo_casa_prueba`.
+2. Abrí `Ajustes > Dispositivos y servicios > AIVA`.
+3. Tocá `Actualizar dispositivos`.
+4. Verificá que `Entidades efectivas` sea mayor a `0`.
+5. Descargá diagnósticos y revisá `entity_sync.effective_entities_count`, `has_input_boolean`, `has_input_select` y `sample_effective_entities`.
+
+Si `Entidades efectivas` sigue en `0`, confirmá que las entidades existan en Home Assistant, que no estén todas en estado `unknown` o `unavailable`, que pertenezcan a los dominios incluidos y que el backend configurado en `base_url` responda a la sincronización.
 
 Para reportar un problema en GitHub, incluí versión de Home Assistant, versión de AIVA y logs redactados. No incluyas credenciales ni códigos completos.
 
