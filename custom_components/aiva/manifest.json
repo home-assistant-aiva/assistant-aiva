@@ -4,10 +4,11 @@
   "codeowners": ["@home-assistant-aiva"],
   "config_flow": true,
   "documentation": "https://github.com/home-assistant-aiva/assistant-aiva",
+  "dependencies": ["conversation"],
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/home-assistant-aiva/assistant-aiva/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.2.16"
+  "version": "0.2.17"
 }

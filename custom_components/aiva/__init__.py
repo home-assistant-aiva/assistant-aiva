@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -26,7 +27,7 @@ from .const import (
 from .coordinator import AivaDataUpdateCoordinator
 from .version import get_integration_version
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON, Platform.CONVERSATION]
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -37,6 +38,10 @@ class AivaRuntimeData:
     client: AivaApiClient
     coordinator: AivaDataUpdateCoordinator
     integration_version: str
+    conversation_entity_id: str | None = "conversation.aiva"
+    conversation_last_request_at: datetime | None = None
+    conversation_last_error: str | None = None
+    conversation_backend_status: str | None = None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

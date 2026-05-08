@@ -102,7 +102,11 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
             last_heartbeat_error=None,
             last_sync_success_at=None,
             last_sync_error=None,
-        )
+        ),
+        conversation_entity_id="conversation.aiva",
+        conversation_last_request_at=None,
+        conversation_last_error="AivaConnectionError",
+        conversation_backend_status="error",
     )
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
@@ -122,5 +126,11 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
     assert diagnostics["coordinator"]["activation_state"] == "active"
     assert diagnostics["coordinator"]["effective_entities_count"] == 3
     assert diagnostics["coordinator"]["backend_base_url"] == "https://api.example.com/aiva"
+    assert diagnostics["conversation"]["conversation_agent_enabled"] is True
+    assert diagnostics["conversation"]["conversation_entity_id"] == "conversation.aiva"
+    assert (
+        diagnostics["conversation"]["conversation_last_error"]
+        == "AivaConnectionError"
+    )
     assert "pass" not in str(diagnostics)
     assert "secret=bad" not in str(diagnostics)

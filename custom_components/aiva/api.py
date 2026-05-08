@@ -23,6 +23,7 @@ from .const import (
     ENDPOINT_ACTIVATION_PAIRING_CODE,
     ENDPOINT_ACTIVATION_REQUEST,
     ENDPOINT_ACTIVATION_STATUS,
+    ENDPOINT_CONVERSATION_HANDLE,
     ENDPOINT_ENTITIES_EFFECTIVE,
     ENDPOINT_ENTITIES_SYNC,
     ENDPOINT_HEARTBEAT,
@@ -33,6 +34,7 @@ from .const import (
     FIELD_ACTIVE,
     FIELD_ACTIVATION_STATE,
     FIELD_AUTOMATIONS,
+    FIELD_CONVERSATION_ID,
     FIELD_ENTITIES,
     FIELD_EFFECTIVE_ENTITIES,
     FIELD_HEARTBEAT_AT,
@@ -41,12 +43,16 @@ from .const import (
     FIELD_HOME_NAME,
     FIELD_HOME_SETTINGS,
     FIELD_INSTALLATION_ID,
+    FIELD_LANGUAGE,
     FIELD_OK,
     FIELD_PAIRING_CODE,
     FIELD_PLAN,
+    FIELD_RESPONSE,
     FIELD_SECRET,
     FIELD_SETTINGS,
+    FIELD_SOURCE,
     FIELD_STATE,
+    FIELD_TEXT,
     HEADER_AIVA_SECRET,
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
@@ -600,6 +606,33 @@ class AivaApiClient:
         )
         return self._parse_home_automations(data)
 
+    async def process_conversation(
+        self,
+        *,
+        text: str,
+        language: str,
+        conversation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Send a Home Assistant Assist utterance to AIVA."""
+        self._ensure_paired()
+        payload: dict[str, Any] = {
+            FIELD_HOME_ID: self._home_id,
+            FIELD_TEXT: text,
+            FIELD_SOURCE: "home_assistant_assist",
+            FIELD_LANGUAGE: language,
+        }
+        if conversation_id:
+            payload[FIELD_CONVERSATION_ID] = conversation_id
+
+        data = await self._request(
+            "post",
+            ENDPOINT_CONVERSATION_HANDLE,
+            json=payload,
+            authenticated=True,
+            require_ok=False,
+        )
+        return self._parse_conversation_response(data)
+
     async def async_get_status(self) -> AivaStatus:
         """Return the current AIVA status."""
         return await self.get_status()
@@ -620,6 +653,7 @@ class AivaApiClient:
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         authenticated: bool = False,
+        require_ok: bool = True,
     ) -> dict[str, Any]:
         """Call the AIVA backend and return a JSON object."""
         session = async_get_clientsession(self._hass)
@@ -749,12 +783,25 @@ class AivaApiClient:
                 request_id=request_id,
             )
 
-        if data.get(FIELD_OK) is not True:
+        if require_ok and data.get(FIELD_OK) is not True:
             raise AivaInvalidResponseError(
                 "AIVA devolvio una respuesta sin ok=true",
                 user_message=(
                     self._extract_backend_message(data)
                     or "AIVA respondió sin confirmar la operación."
+                ),
+                status=response.status,
+                endpoint=endpoint,
+                url=url,
+                response_body=sanitized_body,
+                request_id=request_id,
+            )
+        if not require_ok and data.get(FIELD_OK) is False:
+            raise AivaInvalidResponseError(
+                "AIVA devolvio una respuesta ok=false",
+                user_message=(
+                    self._extract_backend_message(data)
+                    or "AIVA no pudo procesar la conversación."
                 ),
                 status=response.status,
                 endpoint=endpoint,
@@ -1273,6 +1320,35 @@ class AivaApiClient:
             )
 
         return tuple(parsed)
+
+    def _parse_conversation_response(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Parse supported conversation response shapes."""
+        payload = data
+        for key in ("data", "result", "conversation"):
+            value = data.get(key)
+            if isinstance(value, dict):
+                payload = value
+                break
+
+        speech = (
+            payload.get(FIELD_RESPONSE)
+            or payload.get("speech")
+            or payload.get("message")
+            or payload.get(FIELD_TEXT)
+        )
+        if not isinstance(speech, str):
+            raise AivaInvalidResponseError(
+                "AIVA devolvio una respuesta de conversacion invalida"
+            )
+
+        result: dict[str, Any] = {"speech": speech.strip()}
+        conversation_id = payload.get(FIELD_CONVERSATION_ID)
+        if isinstance(conversation_id, str) and conversation_id:
+            result[FIELD_CONVERSATION_ID] = conversation_id
+        continue_conversation = payload.get("continue_conversation")
+        if isinstance(continue_conversation, bool):
+            result["continue_conversation"] = continue_conversation
+        return result
 
     def _optional_str(self, data: dict[str, Any], field: str) -> str | None:
         """Return an optional string field or reject incompatible values."""

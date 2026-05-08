@@ -193,6 +193,27 @@ async def async_get_config_entry_diagnostics(
                 None,
             ),
         },
+        "conversation": {
+            "conversation_agent_enabled": runtime_data is not None,
+            "conversation_entity_id": getattr(
+                runtime_data,
+                "conversation_entity_id",
+                "conversation.aiva" if runtime_data is not None else None,
+            ),
+            "conversation_last_request_at": _safe_datetime(
+                getattr(runtime_data, "conversation_last_request_at", None)
+            ),
+            "conversation_last_error": getattr(
+                runtime_data,
+                "conversation_last_error",
+                None,
+            ),
+            "conversation_backend_status": getattr(
+                runtime_data,
+                "conversation_backend_status",
+                None,
+            ),
+        },
         "home_settings": _home_settings_diagnostics(
             getattr(coordinator_data, "home_settings", None)
         ),

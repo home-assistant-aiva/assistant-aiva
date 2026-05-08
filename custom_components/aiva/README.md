@@ -9,6 +9,7 @@ Integración custom de Home Assistant para conectar una casa con AIVA.
 - Dirección `base_url` configurable.
 - Heartbeat periódico hacia el backend de AIVA.
 - Sincronización de entidades permitidas.
+- Agente de conversación para Assist.
 - Auto-reconexión después de reinicio o pérdida temporal del backend.
 - Sync automático de entidades después de reconectar.
 - Sensores de estado y última sincronización.
@@ -47,6 +48,21 @@ Los helpers `input_boolean` e `input_select` cuentan como entidades efectivas au
 No se sincronizan entidades internas de AIVA (`sensor.aiva_*`, `button.aiva_*` o integración `aiva`) ni dominios internos o sensibles como `update`, `persistent_notification`, `zone`, `person`, `device_tracker`, `sun` y `weather`.
 
 Para probar, creá helpers como `input_boolean.luz_living_prueba`, `input_boolean.alarma_de_prueba` e `input_select.modo_casa_prueba`, reiniciá Home Assistant o tocá `Actualizar dispositivos` y revisá el sensor `Entidades efectivas`.
+
+## Assist
+
+AIVA registra la entidad `conversation.aiva` con el nombre `AIVA`. Para usarla:
+
+1. Abrí `Ajustes > Asistentes de voz`.
+2. Editá o creá un pipeline.
+3. Elegí `AIVA` como agente de conversación.
+4. Mantené tu STT y TTS configurados en Home Assistant si querés usar voz hablada.
+
+Requisitos: casa vinculada, activación `active`, plan Smart o Premium y backend accesible desde el `base_url` configurado.
+
+La integración no instala Piper, Whisper, micrófonos, wake word ni cambia `configuration.yaml`. En esta primera versión no ejecuta servicios locales desde texto libre; envía el texto al backend AIVA por `POST /conversation/handle` y devuelve la respuesta textual a Home Assistant.
+
+Si el endpoint de conversación no responde, hay fallback local para preguntas básicas como si AIVA está conectada, estado de la casa y verificación de conexión.
 
 ## Instalación
 

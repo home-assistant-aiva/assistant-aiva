@@ -15,6 +15,7 @@ La integración permite activar el servicio desde la UI de Home Assistant, mante
 - Sensor de estado de AIVA.
 - Sensor de última sincronización.
 - Sensor de entidades efectivas.
+- Agente de conversación AIVA para usar en Assist.
 - Botón para verificar conexión.
 - Botón para actualizar dispositivos.
 - Auto-reconexión después de reiniciar Home Assistant.
@@ -27,6 +28,8 @@ La integración permite activar el servicio desde la UI de Home Assistant, mante
 - HACS instalado en Home Assistant.
 - Backend de AIVA accesible desde la instancia de Home Assistant.
 - Cuenta, instalación o proceso comercial habilitado en AIVA.
+- Plan Smart o Premium para usar voz con Home Assistant.
+- Assist configurado en Home Assistant. Si querés hablar y escuchar, configurá STT y TTS en Home Assistant.
 
 ## Instalación por HACS
 
@@ -74,6 +77,35 @@ La integración permite seleccionar uno de estos planes durante la activación:
 - `premium`
 
 La disponibilidad, precio y alcance de cada plan dependen de la oferta comercial vigente de AIVA.
+
+## AIVA en Assist
+
+Desde la versión `0.2.17`, AIVA registra un agente de conversación para Home Assistant Assist. El flujo es simple: Home Assistant convierte voz a texto, envía el texto a AIVA, AIVA responde con texto y Home Assistant lo muestra o lo habla si tu pipeline ya tiene TTS configurado.
+
+Para elegir AIVA:
+
+1. Abrí `Ajustes > Asistentes de voz`.
+2. Editá o creá un pipeline.
+3. En `Agente de conversación`, seleccioná `AIVA`.
+4. Guardá el pipeline.
+
+Requisitos:
+
+- La casa debe estar vinculada y activa.
+- El plan debe ser Smart o Premium.
+- El backend configurado en `base_url` debe responder desde Home Assistant.
+- Para voz hablada, Home Assistant debe tener STT y TTS configurados por separado.
+
+Qué no hace esta integración:
+
+- No instala Piper.
+- No instala Whisper.
+- No configura micrófonos.
+- No configura wake word.
+- No modifica `configuration.yaml`.
+- No ejecuta servicios locales de Home Assistant desde texto libre.
+
+El agente usa `POST /conversation/handle` con endpoints relativos al `base_url` configurado. Si el backend de conversación no está disponible, AIVA responde localmente algunas preguntas básicas como conexión, estado de la casa y verificación de conexión.
 
 ## Soporte básico
 
@@ -164,6 +196,7 @@ custom_components/aiva/
   manifest.json
   config_flow.py
   api.py
+  conversation.py
   coordinator.py
   sensor.py
   button.py

@@ -19,6 +19,7 @@ from custom_components.aiva.api import (
     AivaTimeoutError,
 )
 from custom_components.aiva.const import (
+    ENDPOINT_CONVERSATION_HANDLE,
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
@@ -120,6 +121,87 @@ async def test_validate_pairing_code_success(hass, monkeypatch):
         "pairing_code": "<pairing-code>",
         "home_name": "Casa Principal",
     }
+
+
+@pytest.mark.asyncio
+async def test_process_conversation_uses_handle_endpoint(hass, monkeypatch):
+    """Send Assist text to the conversation handle endpoint."""
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "response": "Hola desde AIVA",
+                "conversation_id": "conv-2",
+            },
+        ),
+    )
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+
+    result = await client.process_conversation(
+        text="AIVA, estado de la casa",
+        language="es",
+        conversation_id="conv-1",
+    )
+
+    assert result["speech"] == "Hola desde AIVA"
+    assert result["conversation_id"] == "conv-2"
+    assert session.calls[0]["method"] == "post"
+    assert session.calls[0]["url"] == "https://api.example.com/conversation/handle"
+    assert session.calls[0]["url"].endswith(ENDPOINT_CONVERSATION_HANDLE)
+    assert session.calls[0]["json"] == {
+        "home_id": "home-1",
+        "text": "AIVA, estado de la casa",
+        "source": "home_assistant_assist",
+        "language": "es",
+        "conversation_id": "conv-1",
+    }
+    assert session.calls[0]["headers"] == {"x-aiva-secret": "<redacted-secret>"}
+
+
+@pytest.mark.asyncio
+async def test_process_conversation_does_not_log_secret(hass, monkeypatch, caplog):
+    """Do not expose the AIVA secret in request or response debug logs."""
+    _patch_session(
+        monkeypatch,
+        FakeResponse(200, {"ok": True, "response": "OK"}),
+    )
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        await client.process_conversation(text="Hola", language="es")
+
+    assert "<redacted-secret>" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_process_conversation_accepts_response_without_ok(hass, monkeypatch):
+    """Accept a lightweight conversation response shape."""
+    _patch_session(
+        monkeypatch,
+        FakeResponse(200, {"response": "Respuesta simple"}),
+    )
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+
+    result = await client.process_conversation(text="Hola", language="es")
+
+    assert result["speech"] == "Respuesta simple"
 
 
 @pytest.mark.asyncio
