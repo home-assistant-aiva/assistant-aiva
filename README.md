@@ -182,11 +182,14 @@ cp -R custom_components/aiva /config/custom_components/aiva
 Validaciones locales:
 
 ```bash
+python3 -m pip install -r requirements-test.txt
 python3 -m json.tool hacs.json
 python3 -m json.tool custom_components/aiva/manifest.json
-python3 -m compileall custom_components/aiva
+python3 -m compileall custom_components/aiva tests
 python3 -m pytest
 ```
+
+`requirements-test.txt` incluye `hassil` y `home-assistant-intents`, necesarios para importar `homeassistant.components.conversation` y ejecutar los tests del agente de conversación.
 
 Estructura principal:
 

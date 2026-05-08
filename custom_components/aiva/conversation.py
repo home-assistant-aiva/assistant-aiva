@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 import unicodedata
 from typing import Any
 
 from homeassistant.components import conversation
-from homeassistant.components.conversation import ChatLog, ConversationEntity
+from homeassistant.components.conversation import ConversationEntity
+from homeassistant.components.conversation.models import ConversationResult
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import homeassistant.helpers.intent as intent
@@ -57,7 +59,16 @@ class AivaConversationEntity(ConversationEntity):
         self.coordinator = runtime_data.coordinator
         self._attr_unique_id = f"{entry.entry_id}_conversation"
 
-    async def _async_handle_message(self, user_input, chat_log: ChatLog):
+    @property
+    def supported_languages(self) -> list[str]:
+        """Return supported conversation languages."""
+        return self._attr_supported_languages
+
+    async def async_process(self, user_input):
+        """Process a conversation message for Home Assistant versions without ChatLog."""
+        return await self._async_handle_message(user_input, _NullChatLog())
+
+    async def _async_handle_message(self, user_input, chat_log: Any):
         """Handle an Assist message by forwarding safe text to AIVA."""
         language = user_input.language or self.hass.config.language or "es"
         text = (user_input.text or "").strip()
@@ -236,7 +247,7 @@ class AivaConversationEntity(ConversationEntity):
         self,
         *,
         user_input,
-        chat_log: ChatLog,
+        chat_log: Any,
         language: str,
         speech: str,
         conversation_id: str | None,
@@ -245,21 +256,25 @@ class AivaConversationEntity(ConversationEntity):
         """Build a Home Assistant conversation result."""
         add_content = getattr(chat_log, "async_add_assistant_content_without_tools", None)
         if callable(add_content):
-            add_content(
-                conversation.AssistantContent(
-                    agent_id=user_input.agent_id,
-                    content=speech,
-                )
+            assistant_content = getattr(conversation, "AssistantContent", None)
+            content = (
+                assistant_content(agent_id=user_input.agent_id, content=speech)
+                if assistant_content is not None
+                else SimpleNamespace(agent_id=user_input.agent_id, content=speech)
             )
+            add_content(content)
 
         response = intent.IntentResponse(language=language)
         response.async_set_speech(speech)
 
-        return conversation.ConversationResult(
-            conversation_id=conversation_id,
-            response=response,
-            continue_conversation=continue_conversation,
-        )
+        try:
+            return ConversationResult(
+                conversation_id=conversation_id,
+                response=response,
+                continue_conversation=continue_conversation,
+            )
+        except TypeError:
+            return ConversationResult(response=response, conversation_id=conversation_id)
 
     def _mark_request(self) -> None:
         """Store safe request diagnostics."""
@@ -285,3 +300,10 @@ def _normalize_text(text: str) -> str:
     """Normalize user text for small local fallback matching."""
     normalized = unicodedata.normalize("NFKD", text.casefold())
     return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+class _NullChatLog:
+    """Chat log fallback for Home Assistant versions without ChatLog."""
+
+    def async_add_assistant_content_without_tools(self, content) -> None:
+        """Accept assistant content when no Home Assistant chat log exists."""
