@@ -2,6 +2,14 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.20 - AIVA Seguridad Negocios MVP
+
+- Consulta configuración de seguridad desde backend.
+- Escucha sensores configurados.
+- Envía eventos automáticos al backend.
+- Permite prueba sin sensor real con `input_boolean.puerta_negocio_prueba`.
+- No usa `AIVA_INTERNAL_SECRET`.
+
 ## 0.2.17 - Conversation agent for Assist
 
 - Added AIVA as a Home Assistant `conversation` platform so it can be selected as the conversation agent in Assist pipelines.

@@ -107,6 +107,11 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
         conversation_last_request_at=None,
         conversation_last_error="AivaConnectionError",
         conversation_backend_status="error",
+        security_manager=SimpleNamespace(
+            security_enabled=True,
+            security_sensor_entity_ids=("input_boolean.puerta_negocio_prueba",),
+            last_security_config_update=None,
+        ),
     )
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
@@ -132,5 +137,10 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
         diagnostics["conversation"]["conversation_last_error"]
         == "AivaConnectionError"
     )
+    assert diagnostics["security"]["security_enabled"] is True
+    assert diagnostics["security"]["security_sensor_count"] == 1
+    assert diagnostics["security"]["security_sensor_entity_ids"] == [
+        "input_boolean.puerta_negocio_prueba"
+    ]
     assert "pass" not in str(diagnostics)
     assert "secret=bad" not in str(diagnostics)

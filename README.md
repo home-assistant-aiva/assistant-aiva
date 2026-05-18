@@ -168,6 +168,26 @@ Para probar helpers:
 
 Si `Entidades efectivas` sigue en `0`, confirmá que las entidades existan en Home Assistant, que no estén todas en estado `unknown` o `unavailable`, que pertenezcan a los dominios incluidos y que el backend configurado en `base_url` responda a la sincronización.
 
+## Prueba de AIVA Seguridad Negocios sin sensor real
+
+Podés validar el envío automático de eventos sin comprar sensores físicos usando un helper booleano de Home Assistant.
+
+1. Creá un helper booleano en Home Assistant con este `entity_id`: `input_boolean.puerta_negocio_prueba`.
+2. En el Admin AIVA, entrá a `Seguridad Negocios`.
+3. Elegí el home.
+4. Agregá un sensor con estos datos:
+   - `entity_id`: `input_boolean.puerta_negocio_prueba`
+   - `sensor_name`: `Puerta principal`
+   - `sensor_type`: `door`
+   - `area`: `Entrada`
+   - `is_active`: `true`
+5. Configurá el horario permitido.
+6. Esperá hasta 60 segundos para que Home Assistant cargue la configuración de seguridad.
+7. Cambiá el helper desde Home Assistant.
+8. Verificá en Admin AIVA que se registre el evento y, si corresponde por horario, la alerta.
+
+La integración consulta `GET /homes/{home_id}/security/config` y escucha solo las entidades activas devueltas por el backend. Cuando detecta cambios útiles, como `off -> on` u `on -> off`, envía `POST /homes/{home_id}/security/events` con el `secret` propio del home en `x-aiva-secret`. No envía eventos para estados `unknown`, `unavailable` ni cambios duplicados.
+
 Para reportar un problema en GitHub, incluí versión de Home Assistant, versión de AIVA y logs redactados. No incluyas credenciales ni códigos completos.
 
 ## Desarrollo

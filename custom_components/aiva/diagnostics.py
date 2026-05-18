@@ -147,6 +147,7 @@ async def async_get_config_entry_diagnostics(
         get_integration_version(),
     )
     coordinator = getattr(runtime_data, "coordinator", None)
+    security_manager = getattr(runtime_data, "security_manager", None)
     client = getattr(runtime_data, "client", None)
     coordinator_data = getattr(coordinator, "data", None)
     entity_sync = getattr(coordinator_data, "entity_sync", None)
@@ -212,6 +213,22 @@ async def async_get_config_entry_diagnostics(
                 runtime_data,
                 "conversation_backend_status",
                 None,
+            ),
+        },
+        "security": {
+            "security_enabled": getattr(
+                security_manager,
+                "security_enabled",
+                False,
+            ),
+            "security_sensor_count": len(
+                getattr(security_manager, "security_sensor_entity_ids", ())
+            ),
+            "security_sensor_entity_ids": list(
+                getattr(security_manager, "security_sensor_entity_ids", ())
+            ),
+            "last_security_config_update": _safe_datetime(
+                getattr(security_manager, "last_security_config_update", None)
             ),
         },
         "home_settings": _home_settings_diagnostics(

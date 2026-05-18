@@ -12,6 +12,7 @@ Integración custom de Home Assistant para conectar una casa con AIVA.
 - Agente de conversación para Assist.
 - Auto-reconexión después de reinicio o pérdida temporal del backend.
 - Sync automático de entidades después de reconectar.
+- AIVA Seguridad Negocios con sensores configurados desde el backend.
 - Sensores de estado y última sincronización.
 - Botones para verificar conexión y actualizar dispositivos.
 
@@ -48,6 +49,21 @@ Los helpers `input_boolean` e `input_select` cuentan como entidades efectivas au
 No se sincronizan entidades internas de AIVA (`sensor.aiva_*`, `button.aiva_*` o integración `aiva`) ni dominios internos o sensibles como `update`, `persistent_notification`, `zone`, `person`, `device_tracker`, `sun` y `weather`.
 
 Para probar, creá helpers como `input_boolean.luz_living_prueba`, `input_boolean.alarma_de_prueba` e `input_select.modo_casa_prueba`, reiniciá Home Assistant o tocá `Actualizar dispositivos` y revisá el sensor `Entidades efectivas`.
+
+## Seguridad Negocios
+
+La integración consulta periódicamente `GET /homes/{home_id}/security/config` usando el `secret` propio del home en `x-aiva-secret`. Si seguridad está habilitada, escucha solo los `entity_id` activos que devuelve el backend y manda eventos útiles a `POST /homes/{home_id}/security/events`.
+
+Para probar sin sensor físico:
+
+1. Creá el helper `input_boolean.puerta_negocio_prueba`.
+2. En Admin AIVA, entrá a `Seguridad Negocios` y elegí el home.
+3. Agregá el sensor `input_boolean.puerta_negocio_prueba` como `Puerta principal`, tipo `door`, área `Entrada`, activo.
+4. Configurá el horario permitido.
+5. Esperá hasta 60 segundos y cambiá el helper desde Home Assistant.
+6. Revisá en Admin AIVA el evento registrado y la alerta si fue fuera de horario.
+
+AIVA ignora estados `unknown`, `unavailable` y cambios sin diferencia real de estado.
 
 ## Assist
 

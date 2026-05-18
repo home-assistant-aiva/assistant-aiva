@@ -31,11 +31,17 @@ from .const import (
     ENDPOINT_HOME_SETTINGS,
     ENDPOINT_PAIR,
     ENDPOINT_PAIRING_START,
+    ENDPOINT_SECURITY_CONFIG,
+    ENDPOINT_SECURITY_EVENTS,
     FIELD_ACTIVE,
     FIELD_ACTIVATION_STATE,
+    FIELD_AREA,
     FIELD_AUTOMATIONS,
+    FIELD_BUSINESS_NAME,
     FIELD_CONVERSATION_ID,
     FIELD_ENTITIES,
+    FIELD_ENTITY_ID,
+    FIELD_EVENT_TIME,
     FIELD_EFFECTIVE_ENTITIES,
     FIELD_HEARTBEAT_AT,
     FIELD_HOME_AUTOMATIONS,
@@ -49,10 +55,16 @@ from .const import (
     FIELD_PLAN,
     FIELD_RESPONSE,
     FIELD_SECRET,
+    FIELD_SECURITY_ENABLED,
+    FIELD_SENSOR_NAME,
+    FIELD_SENSOR_TYPE,
+    FIELD_SENSORS,
+    FIELD_IS_ACTIVE,
     FIELD_SETTINGS,
     FIELD_SOURCE,
     FIELD_STATE,
     FIELD_TEXT,
+    FIELD_TIMEZONE,
     HEADER_AIVA_SECRET,
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
@@ -243,6 +255,28 @@ class AivaHomeAutomation:
     raw: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AivaSecuritySensor:
+    """Security sensor configured for the home."""
+
+    entity_id: str
+    sensor_name: str | None = None
+    sensor_type: str | None = None
+    area: str | None = None
+    is_active: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AivaSecurityConfig:
+    """Security configuration returned by the backend."""
+
+    security_enabled: bool
+    sensors: tuple[AivaSecuritySensor, ...] = ()
+    home_id: str | None = None
+    business_name: str | None = None
+    timezone: str | None = None
+
+
 class AivaApiClient:
     """Client used to communicate with the AIVA backend."""
 
@@ -281,6 +315,16 @@ class AivaApiClient:
     def home_name(self) -> str | None:
         """Return the configured home name."""
         return self._home_name
+
+    @property
+    def home_id(self) -> str | None:
+        """Return the configured home id."""
+        return self._home_id
+
+    @property
+    def secret(self) -> str | None:
+        """Return the configured home secret."""
+        return self._secret
 
     async def validate_pairing_code(
         self,
@@ -633,6 +677,56 @@ class AivaApiClient:
         )
         return self._parse_conversation_response(data)
 
+    async def async_get_security_config(
+        self,
+        home_id: str | None = None,
+        secret: str | None = None,
+    ) -> AivaSecurityConfig:
+        """Return AIVA security configuration for this home."""
+        resolved_home_id = (home_id or self._home_id or "").strip()
+        resolved_secret = (secret or self._secret or "").strip()
+        if not resolved_home_id:
+            raise AivaMissingRequiredDataError("AIVA no devolvio home_id")
+        if not resolved_secret:
+            raise AivaMissingRequiredDataError("AIVA no devolvio secret")
+
+        data = await self._request(
+            "get",
+            ENDPOINT_SECURITY_CONFIG.format(home_id=resolved_home_id),
+            authenticated=True,
+            auth_secret=resolved_secret,
+        )
+        return self._parse_security_config(data)
+
+    async def async_send_security_event(
+        self,
+        home_id: str | None,
+        secret: str | None,
+        entity_id: str,
+        state: str,
+        event_time: str,
+    ) -> dict[str, Any]:
+        """Send one security state-change event to AIVA."""
+        resolved_home_id = (home_id or self._home_id or "").strip()
+        resolved_secret = (secret or self._secret or "").strip()
+        if not resolved_home_id:
+            raise AivaMissingRequiredDataError("AIVA no devolvio home_id")
+        if not resolved_secret:
+            raise AivaMissingRequiredDataError("AIVA no devolvio secret")
+
+        return await self._request(
+            "post",
+            ENDPOINT_SECURITY_EVENTS.format(home_id=resolved_home_id),
+            json={
+                FIELD_ENTITY_ID: entity_id,
+                FIELD_STATE: state,
+                FIELD_EVENT_TIME: event_time,
+                FIELD_SOURCE: "home_assistant",
+            },
+            authenticated=True,
+            auth_secret=resolved_secret,
+        )
+
     async def async_get_status(self) -> AivaStatus:
         """Return the current AIVA status."""
         return await self.get_status()
@@ -653,6 +747,7 @@ class AivaApiClient:
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         authenticated: bool = False,
+        auth_secret: str | None = None,
         require_ok: bool = True,
     ) -> dict[str, Any]:
         """Call the AIVA backend and return a JSON object."""
@@ -661,9 +756,10 @@ class AivaApiClient:
         headers: dict[str, str] = {}
 
         if authenticated:
-            if not self._secret:
+            resolved_secret = auth_secret or self._secret
+            if not resolved_secret:
                 raise AivaInvalidAuthError("Falta la credencial de AIVA")
-            headers[HEADER_AIVA_SECRET] = self._secret
+            headers[HEADER_AIVA_SECRET] = resolved_secret
 
         _LOGGER.debug(
             "AIVA request starting: method=%s base_url=%s endpoint=%s url=%s "
@@ -1320,6 +1416,53 @@ class AivaApiClient:
             )
 
         return tuple(parsed)
+
+    def _parse_security_config(self, data: dict[str, Any]) -> AivaSecurityConfig:
+        """Parse AIVA security config from the backend response."""
+        enabled = data.get(FIELD_SECURITY_ENABLED, False)
+        if not isinstance(enabled, bool):
+            raise AivaInvalidResponseError("AIVA devolvio security_enabled invalido")
+
+        sensors = data.get(FIELD_SENSORS, [])
+        if sensors is None:
+            sensors = []
+        if not isinstance(sensors, list):
+            raise AivaInvalidResponseError("AIVA devolvio sensores invalidos")
+
+        parsed: list[AivaSecuritySensor] = []
+        for sensor in sensors:
+            if not isinstance(sensor, dict):
+                raise AivaInvalidResponseError("AIVA devolvio un sensor invalido")
+
+            entity_id = sensor.get(FIELD_ENTITY_ID)
+            if not isinstance(entity_id, str) or not entity_id.strip():
+                raise AivaInvalidResponseError("AIVA devolvio entity_id invalido")
+
+            is_active = sensor.get(FIELD_IS_ACTIVE, False)
+            if not isinstance(is_active, bool):
+                raise AivaInvalidResponseError("AIVA devolvio is_active invalido")
+
+            parsed.append(
+                AivaSecuritySensor(
+                    entity_id=entity_id.strip(),
+                    sensor_name=self._optional_str(sensor, FIELD_SENSOR_NAME),
+                    sensor_type=self._optional_str(sensor, FIELD_SENSOR_TYPE),
+                    area=self._optional_str(sensor, FIELD_AREA),
+                    is_active=is_active,
+                )
+            )
+
+        home_id = data.get(FIELD_HOME_ID)
+        if home_id is not None and not isinstance(home_id, str):
+            raise AivaInvalidResponseError("AIVA devolvio home_id invalido")
+
+        return AivaSecurityConfig(
+            security_enabled=enabled,
+            sensors=tuple(parsed),
+            home_id=home_id,
+            business_name=self._optional_str(data, FIELD_BUSINESS_NAME),
+            timezone=self._optional_str(data, FIELD_TIMEZONE),
+        )
 
     def _parse_conversation_response(self, data: dict[str, Any]) -> dict[str, Any]:
         """Parse supported conversation response shapes."""

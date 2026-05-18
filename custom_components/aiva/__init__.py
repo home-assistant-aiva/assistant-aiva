@@ -25,6 +25,7 @@ from .const import (
     MIN_SCAN_INTERVAL_SECONDS,
 )
 from .coordinator import AivaDataUpdateCoordinator
+from .security import AivaSecurityManager
 from .version import get_integration_version
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON, Platform.CONVERSATION]
@@ -37,6 +38,7 @@ class AivaRuntimeData:
 
     client: AivaApiClient
     coordinator: AivaDataUpdateCoordinator
+    security_manager: AivaSecurityManager
     integration_version: str
     conversation_entity_id: str | None = "conversation.aiva"
     conversation_last_request_at: datetime | None = None
@@ -71,10 +73,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinator = AivaDataUpdateCoordinator(hass, client, scan_interval)
     coordinator.async_start_auto_reconnect()
+    security_manager = AivaSecurityManager(hass, client)
+    security_manager.async_start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = AivaRuntimeData(
         client=client,
         coordinator=coordinator,
+        security_manager=security_manager,
         integration_version=integration_version,
     )
 
@@ -86,6 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(coordinator.async_stop_auto_reconnect)
+    entry.async_on_unload(security_manager.async_stop)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     coordinator.async_schedule_reconnect(reason="setup")
     entry.async_on_unload(
@@ -102,7 +108,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        runtime_data = hass.data[DOMAIN].pop(entry.entry_id)
+        runtime_data.security_manager.async_stop()
 
     return unload_ok
 

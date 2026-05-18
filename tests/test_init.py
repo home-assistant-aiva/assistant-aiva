@@ -35,6 +35,17 @@ class FakeCoordinator:
         self.async_schedule_reconnect = Mock()
 
 
+class FakeSecurityManager:
+    """Security manager test double."""
+
+    def __init__(self, hass, client):
+        """Initialize the manager."""
+        self.hass = hass
+        self.client = client
+        self.async_start = Mock()
+        self.async_stop = Mock()
+
+
 async def test_setup_entry_reads_legacy_linking_code(hass, monkeypatch):
     """Read linking_code from old entries and store pairing_code going forward."""
     entry = MockConfigEntry(
@@ -61,6 +72,7 @@ async def test_setup_entry_reads_legacy_linking_code(hass, monkeypatch):
     with (
         patch("custom_components.aiva.AivaApiClient") as client_cls,
         patch("custom_components.aiva.AivaDataUpdateCoordinator", FakeCoordinator),
+        patch("custom_components.aiva.AivaSecurityManager", FakeSecurityManager),
     ):
         client_cls.return_value = object()
         assert await async_setup_entry(hass, entry) is True
@@ -96,6 +108,7 @@ async def test_setup_entry_logs_loaded_integration_version(hass, monkeypatch, ca
         caplog.at_level(logging.INFO),
         patch("custom_components.aiva.AivaApiClient") as client_cls,
         patch("custom_components.aiva.AivaDataUpdateCoordinator", FakeCoordinator),
+        patch("custom_components.aiva.AivaSecurityManager", FakeSecurityManager),
     ):
         client_cls.return_value = object()
         assert await async_setup_entry(hass, entry) is True
@@ -135,6 +148,7 @@ async def test_setup_entry_does_not_block_on_first_refresh(hass, monkeypatch):
     with (
         patch("custom_components.aiva.AivaApiClient") as client_cls,
         patch("custom_components.aiva.AivaDataUpdateCoordinator", FakeCoordinator),
+        patch("custom_components.aiva.AivaSecurityManager", FakeSecurityManager),
     ):
         client_cls.return_value = object()
         assert await async_setup_entry(hass, entry) is True

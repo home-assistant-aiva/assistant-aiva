@@ -20,6 +20,8 @@ from custom_components.aiva.api import (
 )
 from custom_components.aiva.const import (
     ENDPOINT_CONVERSATION_HANDLE,
+    ENDPOINT_SECURITY_CONFIG,
+    ENDPOINT_SECURITY_EVENTS,
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
@@ -202,6 +204,85 @@ async def test_process_conversation_accepts_response_without_ok(hass, monkeypatc
     result = await client.process_conversation(text="Hola", language="es")
 
     assert result["speech"] == "Respuesta simple"
+
+
+@pytest.mark.asyncio
+async def test_get_security_config_uses_home_secret_header(hass, monkeypatch):
+    """Load security config with the per-home secret."""
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "home_id": "home-1",
+                "security_enabled": True,
+                "business_name": "Kiosco San Martin",
+                "timezone": "America/Argentina/Buenos_Aires",
+                "sensors": [
+                    {
+                        "entity_id": "input_boolean.puerta_negocio_prueba",
+                        "sensor_name": "Puerta principal",
+                        "sensor_type": "door",
+                        "area": "Entrada",
+                        "is_active": True,
+                    }
+                ],
+            },
+        ),
+    )
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-home-secret>",
+    )
+
+    result = await client.async_get_security_config("home-1", "<redacted-home-secret>")
+
+    assert result.security_enabled is True
+    assert result.sensors[0].entity_id == "input_boolean.puerta_negocio_prueba"
+    assert session.calls[0]["method"] == "get"
+    assert session.calls[0]["url"] == "https://api.example.com/homes/home-1/security/config"
+    assert session.calls[0]["url"].endswith(
+        ENDPOINT_SECURITY_CONFIG.format(home_id="home-1")
+    )
+    assert session.calls[0]["headers"] == {"x-aiva-secret": "<redacted-home-secret>"}
+    assert "AIVA_INTERNAL_SECRET" not in str(session.calls)
+
+
+@pytest.mark.asyncio
+async def test_send_security_event_uses_home_secret_header(hass, monkeypatch):
+    """Send security events with the per-home secret only."""
+    session = _patch_session(monkeypatch, FakeResponse(200, {"ok": True}))
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-home-secret>",
+    )
+
+    await client.async_send_security_event(
+        "home-1",
+        "<redacted-home-secret>",
+        "input_boolean.puerta_negocio_prueba",
+        "on",
+        "2026-05-18T22:14:00",
+    )
+
+    assert session.calls[0]["method"] == "post"
+    assert session.calls[0]["url"] == "https://api.example.com/homes/home-1/security/events"
+    assert session.calls[0]["url"].endswith(
+        ENDPOINT_SECURITY_EVENTS.format(home_id="home-1")
+    )
+    assert session.calls[0]["headers"] == {"x-aiva-secret": "<redacted-home-secret>"}
+    assert session.calls[0]["json"] == {
+        "entity_id": "input_boolean.puerta_negocio_prueba",
+        "state": "on",
+        "event_time": "2026-05-18T22:14:00",
+        "source": "home_assistant",
+    }
+    assert "AIVA_INTERNAL_SECRET" not in str(session.calls)
 
 
 @pytest.mark.asyncio
