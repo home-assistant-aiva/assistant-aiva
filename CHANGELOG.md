@@ -2,6 +2,13 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.21 - GitHub validation fix
+
+- Corrige el orden de claves del manifest para Hassfest.
+- Mejora el workflow de validación.
+- Mantiene compatibilidad con HACS.
+- No cambia comportamiento funcional de la integración.
+
 ## 0.2.20 - AIVA Seguridad Negocios MVP
 
 - Consulta configuración de seguridad desde backend.
