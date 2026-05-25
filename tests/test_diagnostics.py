@@ -150,5 +150,6 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
     ]
     assert diagnostics["actions"]["action_manager_enabled"] is True
     assert diagnostics["actions"]["processed_action_count"] == 2
+    assert diagnostics["actions"]["processed_cache_size"] == 0
     assert "pass" not in str(diagnostics)
     assert "secret=bad" not in str(diagnostics)

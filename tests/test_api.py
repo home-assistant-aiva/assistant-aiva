@@ -302,7 +302,7 @@ async def test_pending_actions_and_result_use_home_secret_header(hass, monkeypat
     )
 
     actions = await client.async_get_pending_actions()
-    await client.async_send_action_result("action-1", "completed", "done")
+    await client.async_send_action_result("action-1", "lease-1", "completed", "done")
 
     assert actions == [{"action_id": "action-1"}]
     assert session.calls[0]["url"].endswith(ENDPOINT_ACTIONS_PENDING.format(home_id="home-1"))
@@ -311,7 +311,7 @@ async def test_pending_actions_and_result_use_home_secret_header(hass, monkeypat
         ENDPOINT_ACTION_RESULT.format(home_id="home-1", action_id="action-1")
     )
     assert session.calls[1]["headers"] == {"x-aiva-secret": "<redacted-home-secret>"}
-    assert session.calls[1]["json"] == {"status": "completed", "result_message": "done"}
+    assert session.calls[1]["json"] == {"lease_id": "lease-1", "status": "completed", "result_message": "done"}
     assert "AIVA_HA_TOKEN" not in str(session.calls)
 
 

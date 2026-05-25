@@ -239,6 +239,7 @@ async def async_get_config_entry_diagnostics(
             ),
             "last_action_error": getattr(action_manager, "last_action_error", None),
             "processed_action_count": getattr(action_manager, "processed_action_count", 0),
+            "processed_cache_size": len(getattr(action_manager, "_processed", {})),
         },
         "home_settings": _home_settings_diagnostics(
             getattr(coordinator_data, "home_settings", None)

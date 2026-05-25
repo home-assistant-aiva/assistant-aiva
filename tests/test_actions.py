@@ -10,9 +10,15 @@ import pytest
 from custom_components.aiva.actions import AivaActionManager
 
 
-def _action(domain: str = "input_boolean", service: str = "turn_on", action_id: str = "action-1") -> dict:
+def _action(
+    domain: str = "input_boolean",
+    service: str = "turn_on",
+    action_id: str = "action-1",
+    lease_id: str = "lease-1",
+) -> dict:
     return {
         "action_id": action_id,
+        "lease_id": lease_id,
         "domain": domain,
         "service": service,
         "service_data": {"entity_id": f"{domain}.luz_living_prueba"},
@@ -32,7 +38,7 @@ async def test_executes_input_boolean_and_reports_completed(hass):
         "input_boolean", "turn_on", {"entity_id": "input_boolean.luz_living_prueba"}, blocking=True
     )
     client.async_send_action_result.assert_awaited_once_with(
-        "action-1", "completed", "Accion ejecutada localmente.", None
+        "action-1", "lease-1", "completed", "Accion ejecutada localmente.", None
     )
     assert manager.processed_action_count == 1
 
@@ -49,7 +55,7 @@ async def test_service_failure_reports_failed(hass):
     await manager._async_process_action(_action())
 
     client.async_send_action_result.assert_awaited_once_with(
-        "action-1", "failed", None, "Home Assistant no pudo ejecutar el servicio."
+        "action-1", "lease-1", "failed", None, "Home Assistant no pudo ejecutar el servicio."
     )
 
 
@@ -64,7 +70,7 @@ async def test_sensitive_domains_are_blocked_without_execution(hass, domain):
     await manager._async_process_action(_action(domain=domain))
 
     local_hass.services.async_call.assert_not_awaited()
-    assert client.async_send_action_result.await_args.args[1] == "failed"
+    assert client.async_send_action_result.await_args.args[2] == "failed"
 
 
 @pytest.mark.asyncio
@@ -73,14 +79,29 @@ async def test_duplicate_action_is_reported_without_second_execution(hass):
     client = AsyncMock()
     local_hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
     manager = AivaActionManager(local_hass, client)
-    action = _action()
-
-    await manager._async_process_action(action)
-    await manager._async_process_action(action)
+    await manager._async_process_action(_action())
+    await manager._async_process_action(_action(lease_id="lease-2"))
 
     local_hass.services.async_call.assert_awaited_once()
     assert client.async_send_action_result.await_count == 2
     assert manager.processed_action_count == 1
+    assert client.async_send_action_result.await_args_list[1].args[1] == "lease-2"
+
+
+@pytest.mark.asyncio
+async def test_missing_lease_is_ignored_without_local_execution(hass):
+    """Do not execute actions that cannot be acknowledged with a valid lease."""
+    client = AsyncMock()
+    local_hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
+    manager = AivaActionManager(local_hass, client)
+    action = _action()
+    action.pop("lease_id")
+
+    await manager._async_process_action(action)
+
+    local_hass.services.async_call.assert_not_awaited()
+    client.async_send_action_result.assert_not_awaited()
+    assert manager.last_action_error == "missing_lease_id"
 
 
 @pytest.mark.asyncio

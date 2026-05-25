@@ -2,6 +2,13 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.23 - Reliable queued actions
+
+- Agrega `lease_id` para ejecucion idempotente de acciones.
+- Mejora proteccion contra doble ejecucion con cache TTL local.
+- Reporta resultados con lease.
+- Mejora diagnostico del action manager.
+
 ## 0.2.22 - Local action queue execution
 
 - Polls pending AIVA actions through the per-home secret.

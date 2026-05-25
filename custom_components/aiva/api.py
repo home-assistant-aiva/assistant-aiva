@@ -745,13 +745,14 @@ class AivaApiClient:
     async def async_send_action_result(
         self,
         action_id: str,
+        lease_id: str,
         status: str,
         result_message: str | None = None,
         error_message: str | None = None,
     ) -> dict[str, Any]:
         """Report a local service execution result to AIVA."""
         self._ensure_paired()
-        payload: dict[str, Any] = {"status": status}
+        payload: dict[str, Any] = {"lease_id": lease_id, "status": status}
         if result_message:
             payload["result_message"] = result_message
         if error_message:

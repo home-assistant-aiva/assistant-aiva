@@ -16,6 +16,7 @@ from .const import ACTION_POLL_INTERVAL_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
 _RECENT_ACTION_LIMIT = 200
+_PROCESSED_TTL = timedelta(minutes=10)
 _TURN_DOMAINS = {"light", "switch", "fan", "input_boolean"}
 _RUN_DOMAINS = {"scene", "script"}
 _BLOCKED_DOMAINS = {"lock", "alarm_control_panel", "cover", "camera", "siren", "vacuum"}
@@ -34,7 +35,7 @@ class AivaActionManager:
         self.processed_action_count = 0
         self._unsub_poll_timer: Callable[[], None] | None = None
         self._poll_task: Any = None
-        self._processed: dict[str, tuple[str, str | None, str | None]] = {}
+        self._processed: dict[str, tuple[datetime, str, str | None, str | None]] = {}
         self._processed_order: deque[str] = deque()
 
     def async_start(self) -> None:
@@ -82,9 +83,15 @@ class AivaActionManager:
         action_id = str(action.get("action_id") or "").strip()
         if not action_id:
             return
+        lease_id = str(action.get("lease_id") or "").strip()
+        if not lease_id:
+            self.last_action_error = "missing_lease_id"
+            _LOGGER.warning("AIVA action ignored because lease_id is missing: action_id=%s", action_id)
+            return
+        self._purge_expired_processed()
         previous = self._processed.get(action_id)
         if previous:
-            await self._async_report_result(action_id, previous[0], previous[1], previous[2])
+            await self._async_report_result(action_id, lease_id, previous[1], previous[2], previous[3])
             return
 
         try:
@@ -104,17 +111,18 @@ class AivaActionManager:
             error_message = "Home Assistant no pudo ejecutar el servicio."
 
         self._remember_result(action_id, status, result_message, error_message)
-        await self._async_report_result(action_id, status, result_message, error_message)
+        await self._async_report_result(action_id, lease_id, status, result_message, error_message)
 
     async def _async_report_result(
         self,
         action_id: str,
+        lease_id: str,
         status: str,
         result_message: str | None,
         error_message: str | None,
     ) -> None:
         try:
-            await self.client.async_send_action_result(action_id, status, result_message, error_message)
+            await self.client.async_send_action_result(action_id, lease_id, status, result_message, error_message)
         except AivaApiError as err:
             self.last_action_error = err.__class__.__name__
             _LOGGER.warning("AIVA action result backend error: %s", err)
@@ -145,8 +153,18 @@ class AivaActionManager:
         result_message: str | None,
         error_message: str | None,
     ) -> None:
-        self._processed[action_id] = (status, result_message, error_message)
+        self._processed[action_id] = (dt_util.utcnow(), status, result_message, error_message)
         self._processed_order.append(action_id)
         self.processed_action_count += 1
         while len(self._processed_order) > _RECENT_ACTION_LIMIT:
             self._processed.pop(self._processed_order.popleft(), None)
+
+    def _purge_expired_processed(self) -> None:
+        cutoff = dt_util.utcnow() - _PROCESSED_TTL
+        while self._processed_order:
+            action_id = self._processed_order[0]
+            processed = self._processed.get(action_id)
+            if processed is not None and processed[0] > cutoff:
+                break
+            self._processed_order.popleft()
+            self._processed.pop(action_id, None)
