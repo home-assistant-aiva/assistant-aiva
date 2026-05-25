@@ -11,6 +11,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import Event, HomeAssistant
 
 from .api import AivaApiClient
+from .actions import AivaActionManager
 from .const import (
     CONF_BASE_URL,
     CONF_HOME_ID,
@@ -39,6 +40,7 @@ class AivaRuntimeData:
     client: AivaApiClient
     coordinator: AivaDataUpdateCoordinator
     security_manager: AivaSecurityManager
+    action_manager: AivaActionManager
     integration_version: str
     conversation_entity_id: str | None = "conversation.aiva"
     conversation_last_request_at: datetime | None = None
@@ -75,11 +77,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.async_start_auto_reconnect()
     security_manager = AivaSecurityManager(hass, client)
     security_manager.async_start()
+    action_manager = AivaActionManager(hass, client)
+    action_manager.async_start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = AivaRuntimeData(
         client=client,
         coordinator=coordinator,
         security_manager=security_manager,
+        action_manager=action_manager,
         integration_version=integration_version,
     )
 
@@ -92,6 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(coordinator.async_stop_auto_reconnect)
     entry.async_on_unload(security_manager.async_stop)
+    entry.async_on_unload(action_manager.async_stop)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     coordinator.async_schedule_reconnect(reason="setup")
     entry.async_on_unload(
@@ -110,6 +116,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         runtime_data = hass.data[DOMAIN].pop(entry.entry_id)
         runtime_data.security_manager.async_stop()
+        runtime_data.action_manager.async_stop()
 
     return unload_ok
 

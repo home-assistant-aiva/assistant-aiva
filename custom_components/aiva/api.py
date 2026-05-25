@@ -33,6 +33,8 @@ from .const import (
     ENDPOINT_PAIRING_START,
     ENDPOINT_SECURITY_CONFIG,
     ENDPOINT_SECURITY_EVENTS,
+    ENDPOINT_ACTIONS_PENDING,
+    ENDPOINT_ACTION_RESULT,
     FIELD_ACTIVE,
     FIELD_ACTIVATION_STATE,
     FIELD_AREA,
@@ -725,6 +727,40 @@ class AivaApiClient:
             },
             authenticated=True,
             auth_secret=resolved_secret,
+        )
+
+    async def async_get_pending_actions(self) -> list[dict[str, Any]]:
+        """Return executable actions queued for this Home Assistant home."""
+        self._ensure_paired()
+        data = await self._request(
+            "get",
+            ENDPOINT_ACTIONS_PENDING.format(home_id=self._home_id),
+            authenticated=True,
+        )
+        actions = data.get("actions")
+        if not isinstance(actions, list):
+            raise AivaInvalidResponseError("AIVA no devolvio una lista de acciones")
+        return [action for action in actions if isinstance(action, dict)]
+
+    async def async_send_action_result(
+        self,
+        action_id: str,
+        status: str,
+        result_message: str | None = None,
+        error_message: str | None = None,
+    ) -> dict[str, Any]:
+        """Report a local service execution result to AIVA."""
+        self._ensure_paired()
+        payload: dict[str, Any] = {"status": status}
+        if result_message:
+            payload["result_message"] = result_message
+        if error_message:
+            payload["error_message"] = error_message
+        return await self._request(
+            "post",
+            ENDPOINT_ACTION_RESULT.format(home_id=self._home_id, action_id=action_id),
+            json=payload,
+            authenticated=True,
         )
 
     async def async_get_status(self) -> AivaStatus:

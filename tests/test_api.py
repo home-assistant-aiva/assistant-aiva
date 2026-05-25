@@ -22,6 +22,8 @@ from custom_components.aiva.const import (
     ENDPOINT_CONVERSATION_HANDLE,
     ENDPOINT_SECURITY_CONFIG,
     ENDPOINT_SECURITY_EVENTS,
+    ENDPOINT_ACTIONS_PENDING,
+    ENDPOINT_ACTION_RESULT,
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
@@ -283,6 +285,34 @@ async def test_send_security_event_uses_home_secret_header(hass, monkeypatch):
         "source": "home_assistant",
     }
     assert "AIVA_INTERNAL_SECRET" not in str(session.calls)
+
+
+@pytest.mark.asyncio
+async def test_pending_actions_and_result_use_home_secret_header(hass, monkeypatch):
+    """Action polling and reporting authenticate only with the AIVA home secret."""
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(200, {"ok": True, "actions": [{"action_id": "action-1"}]}),
+    )
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-home-secret>",
+    )
+
+    actions = await client.async_get_pending_actions()
+    await client.async_send_action_result("action-1", "completed", "done")
+
+    assert actions == [{"action_id": "action-1"}]
+    assert session.calls[0]["url"].endswith(ENDPOINT_ACTIONS_PENDING.format(home_id="home-1"))
+    assert session.calls[0]["headers"] == {"x-aiva-secret": "<redacted-home-secret>"}
+    assert session.calls[1]["url"].endswith(
+        ENDPOINT_ACTION_RESULT.format(home_id="home-1", action_id="action-1")
+    )
+    assert session.calls[1]["headers"] == {"x-aiva-secret": "<redacted-home-secret>"}
+    assert session.calls[1]["json"] == {"status": "completed", "result_message": "done"}
+    assert "AIVA_HA_TOKEN" not in str(session.calls)
 
 
 @pytest.mark.asyncio

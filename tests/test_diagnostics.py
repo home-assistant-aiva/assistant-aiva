@@ -112,6 +112,12 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
             security_sensor_entity_ids=("input_boolean.puerta_negocio_prueba",),
             last_security_config_update=None,
         ),
+        action_manager=SimpleNamespace(
+            enabled=True,
+            last_action_poll_at=None,
+            last_action_error=None,
+            processed_action_count=2,
+        ),
     )
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
@@ -142,5 +148,7 @@ async def test_diagnostics_redacts_sensitive_enriched_data(hass):
     assert diagnostics["security"]["security_sensor_entity_ids"] == [
         "input_boolean.puerta_negocio_prueba"
     ]
+    assert diagnostics["actions"]["action_manager_enabled"] is True
+    assert diagnostics["actions"]["processed_action_count"] == 2
     assert "pass" not in str(diagnostics)
     assert "secret=bad" not in str(diagnostics)

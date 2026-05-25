@@ -148,6 +148,7 @@ async def async_get_config_entry_diagnostics(
     )
     coordinator = getattr(runtime_data, "coordinator", None)
     security_manager = getattr(runtime_data, "security_manager", None)
+    action_manager = getattr(runtime_data, "action_manager", None)
     client = getattr(runtime_data, "client", None)
     coordinator_data = getattr(coordinator, "data", None)
     entity_sync = getattr(coordinator_data, "entity_sync", None)
@@ -230,6 +231,14 @@ async def async_get_config_entry_diagnostics(
             "last_security_config_update": _safe_datetime(
                 getattr(security_manager, "last_security_config_update", None)
             ),
+        },
+        "actions": {
+            "action_manager_enabled": getattr(action_manager, "enabled", False),
+            "last_action_poll_at": _safe_datetime(
+                getattr(action_manager, "last_action_poll_at", None)
+            ),
+            "last_action_error": getattr(action_manager, "last_action_error", None),
+            "processed_action_count": getattr(action_manager, "processed_action_count", 0),
         },
         "home_settings": _home_settings_diagnostics(
             getattr(coordinator_data, "home_settings", None)

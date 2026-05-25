@@ -2,6 +2,13 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.22 - Local action queue execution
+
+- Polls pending AIVA actions through the per-home secret.
+- Executes allowlisted services locally in Home Assistant and reports results.
+- Blocks sensitive domains and avoids duplicate local execution.
+- Adds action polling diagnostics without Home Assistant tokens or AI calls.
+
 ## 0.2.21 - GitHub validation fix
 
 - Corrige el orden de claves del manifest para Hassfest.
