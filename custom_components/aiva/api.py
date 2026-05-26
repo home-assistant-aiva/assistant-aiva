@@ -628,6 +628,7 @@ class AivaApiClient:
         data = await self._request(
             "get",
             ENDPOINT_HOME_SETTINGS,
+            params={FIELD_HOME_ID: self._home_id},
             authenticated=True,
         )
         return self._parse_home_settings(data)
@@ -638,6 +639,7 @@ class AivaApiClient:
         data = await self._request(
             "get",
             ENDPOINT_ENTITIES_EFFECTIVE,
+            params={FIELD_HOME_ID: self._home_id},
             authenticated=True,
         )
         return self._parse_effective_entities(data)
@@ -648,6 +650,7 @@ class AivaApiClient:
         data = await self._request(
             "get",
             ENDPOINT_HOME_AUTOMATIONS,
+            params={FIELD_HOME_ID: self._home_id},
             authenticated=True,
         )
         return self._parse_home_automations(data)

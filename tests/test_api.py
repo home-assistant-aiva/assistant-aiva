@@ -1052,6 +1052,7 @@ async def test_get_home_settings_success(hass, monkeypatch):
     assert result.custom_prompt == "private prompt"
     assert session.calls[0]["method"] == "get"
     assert session.calls[0]["url"] == "https://api.example.com/home/settings"
+    assert session.calls[0]["params"] == {"home_id": "home-1"}
     assert session.calls[0]["headers"] == {"x-aiva-secret": "<redacted-secret>"}
 
 
@@ -1114,6 +1115,7 @@ async def test_get_effective_entities_success(hass, monkeypatch):
     assert result[0].is_allowed is True
     assert result[0].priority == 10
     assert session.calls[0]["url"] == "https://api.example.com/entities/effective"
+    assert session.calls[0]["params"] == {"home_id": "home-1"}
 
 
 @pytest.mark.asyncio
@@ -1167,6 +1169,7 @@ async def test_get_home_automations_success(hass, monkeypatch):
     assert result[0].enabled is True
     assert result[1].enabled is False
     assert session.calls[0]["url"] == "https://api.example.com/home/automations"
+    assert session.calls[0]["params"] == {"home_id": "home-1"}
 
 
 @pytest.mark.asyncio

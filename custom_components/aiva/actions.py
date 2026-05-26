@@ -83,6 +83,12 @@ class AivaActionManager:
         action_id = str(action.get("action_id") or "").strip()
         if not action_id:
             return
+        _LOGGER.info(
+            "AIVA action received: action_id=%s domain=%s service=%s",
+            action_id,
+            action.get("domain"),
+            action.get("service"),
+        )
         lease_id = str(action.get("lease_id") or "").strip()
         if not lease_id:
             self.last_action_error = "missing_lease_id"
@@ -100,12 +106,14 @@ class AivaActionManager:
             status = "completed"
             result_message = "Accion ejecutada localmente."
             error_message = None
+            _LOGGER.info("AIVA action executed: action_id=%s", action_id)
         except ValueError as err:
             status = "failed"
             result_message = None
             error_message = str(err)
+            _LOGGER.warning("AIVA action failed: action_id=%s error=%s", action_id, error_message)
         except Exception:
-            _LOGGER.exception("AIVA local action service call failed: action_id=%s", action_id)
+            _LOGGER.exception("AIVA action failed: action_id=%s", action_id)
             status = "failed"
             result_message = None
             error_message = "Home Assistant no pudo ejecutar el servicio."
@@ -123,6 +131,7 @@ class AivaActionManager:
     ) -> None:
         try:
             await self.client.async_send_action_result(action_id, lease_id, status, result_message, error_message)
+            _LOGGER.info("AIVA action result reported: action_id=%s status=%s", action_id, status)
         except AivaApiError as err:
             self.last_action_error = err.__class__.__name__
             _LOGGER.warning("AIVA action result backend error: %s", err)

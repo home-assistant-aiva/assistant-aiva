@@ -2,6 +2,12 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.24 - Fix queued action result reporting
+
+- Corrige reporte de acciones con lease_id.
+- Corrige llamadas con home_id a endpoints del backend.
+- Mejora logs del action manager.
+
 ## 0.2.23 - Reliable queued actions
 
 - Agrega `lease_id` para ejecucion idempotente de acciones.
