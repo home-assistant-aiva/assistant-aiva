@@ -35,7 +35,7 @@ class AivaActionManager:
         self.processed_action_count = 0
         self._unsub_poll_timer: Callable[[], None] | None = None
         self._poll_task: Any = None
-        self._processed: dict[str, tuple[datetime, str, str | None, str | None]] = {}
+        self._processed: dict[str, tuple[datetime, str, str | None, str | None, dict[str, Any] | None]] = {}
         self._processed_order: deque[str] = deque()
 
     def async_start(self) -> None:
@@ -97,15 +97,17 @@ class AivaActionManager:
         self._purge_expired_processed()
         previous = self._processed.get(action_id)
         if previous:
-            await self._async_report_result(action_id, lease_id, previous[1], previous[2], previous[3])
+            await self._async_report_result(action_id, lease_id, previous[1], previous[2], previous[3], previous[4])
             return
 
+        entity_state: dict[str, Any] | None = None
         try:
             domain, service, service_data = self._validated_call(action)
             await self.hass.services.async_call(domain, service, service_data, blocking=True)
             status = "completed"
             result_message = "Accion ejecutada localmente."
             error_message = None
+            entity_state = self._read_final_entity_state(action_id, service_data["entity_id"])
             _LOGGER.info("AIVA action executed: action_id=%s", action_id)
         except ValueError as err:
             status = "failed"
@@ -118,8 +120,37 @@ class AivaActionManager:
             result_message = None
             error_message = "Home Assistant no pudo ejecutar el servicio."
 
-        self._remember_result(action_id, status, result_message, error_message)
-        await self._async_report_result(action_id, lease_id, status, result_message, error_message)
+        self._remember_result(action_id, status, result_message, error_message, entity_state)
+        await self._async_report_result(action_id, lease_id, status, result_message, error_message, entity_state)
+
+    def _read_final_entity_state(self, action_id: str, entity_id: str) -> dict[str, Any] | None:
+        """Read a safe entity snapshot after local action execution."""
+        state_obj = self.hass.states.get(entity_id)
+        if state_obj is None:
+            _LOGGER.warning(
+                "AIVA action final state unavailable: action_id=%s entity_id=%s",
+                action_id,
+                entity_id,
+            )
+            return None
+        attributes = {
+            key: state_obj.attributes[key]
+            for key in ("friendly_name", "device_class", "icon")
+            if key in state_obj.attributes
+        }
+        _LOGGER.info(
+            "AIVA action final state read: action_id=%s entity_id=%s state=%s",
+            action_id,
+            entity_id,
+            state_obj.state,
+        )
+        return {
+            "entity_id": entity_id,
+            "state": state_obj.state,
+            "last_changed": state_obj.last_changed.isoformat(),
+            "last_updated": state_obj.last_updated.isoformat(),
+            "attributes": attributes,
+        }
 
     async def _async_report_result(
         self,
@@ -128,10 +159,21 @@ class AivaActionManager:
         status: str,
         result_message: str | None,
         error_message: str | None,
+        entity_state: dict[str, Any] | None,
     ) -> None:
         try:
-            await self.client.async_send_action_result(action_id, lease_id, status, result_message, error_message)
-            _LOGGER.info("AIVA action result reported: action_id=%s status=%s", action_id, status)
+            await self.client.async_send_action_result(
+                action_id, lease_id, status, result_message, error_message, entity_state
+            )
+            if entity_state is not None:
+                _LOGGER.info(
+                    "AIVA action result reported with entity_state: action_id=%s status=%s entity_id=%s",
+                    action_id,
+                    status,
+                    entity_state["entity_id"],
+                )
+            else:
+                _LOGGER.info("AIVA action result reported: action_id=%s status=%s", action_id, status)
         except AivaApiError as err:
             self.last_action_error = err.__class__.__name__
             _LOGGER.warning("AIVA action result backend error: %s", err)
@@ -161,8 +203,9 @@ class AivaActionManager:
         status: str,
         result_message: str | None,
         error_message: str | None,
+        entity_state: dict[str, Any] | None,
     ) -> None:
-        self._processed[action_id] = (dt_util.utcnow(), status, result_message, error_message)
+        self._processed[action_id] = (dt_util.utcnow(), status, result_message, error_message, entity_state)
         self._processed_order.append(action_id)
         self.processed_action_count += 1
         while len(self._processed_order) > _RECENT_ACTION_LIMIT:

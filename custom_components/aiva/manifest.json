@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/home-assistant-aiva/assistant-aiva/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.2.24"
+  "version": "0.2.25"
 }

@@ -2,12 +2,36 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from custom_components.aiva.actions import AivaActionManager
+
+
+def _state(state: str = "on"):
+    instant = datetime(2026, 5, 26, 1, 47, tzinfo=timezone.utc)
+    return SimpleNamespace(
+        state=state,
+        attributes={
+            "friendly_name": "Luz Living Prueba",
+            "device_class": "light",
+            "icon": "mdi:lightbulb",
+            "ignored": "not-sent",
+        },
+        last_changed=instant,
+        last_updated=instant,
+    )
+
+
+def _local_hass(state_obj=None):
+    return SimpleNamespace(
+        services=SimpleNamespace(async_call=AsyncMock()),
+        states=SimpleNamespace(get=Mock(return_value=state_obj)),
+    )
 
 
 def _action(
@@ -29,7 +53,7 @@ def _action(
 async def test_executes_input_boolean_and_reports_completed(hass):
     """Execute an allowed service locally and acknowledge completion."""
     client = AsyncMock()
-    local_hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
+    local_hass = _local_hass(_state())
     manager = AivaActionManager(local_hass, client)
 
     await manager._async_process_action(_action())
@@ -38,9 +62,41 @@ async def test_executes_input_boolean_and_reports_completed(hass):
         "input_boolean", "turn_on", {"entity_id": "input_boolean.luz_living_prueba"}, blocking=True
     )
     client.async_send_action_result.assert_awaited_once_with(
-        "action-1", "lease-1", "completed", "Accion ejecutada localmente.", None
+        "action-1",
+        "lease-1",
+        "completed",
+        "Accion ejecutada localmente.",
+        None,
+        {
+            "entity_id": "input_boolean.luz_living_prueba",
+            "state": "on",
+            "last_changed": "2026-05-26T01:47:00+00:00",
+            "last_updated": "2026-05-26T01:47:00+00:00",
+            "attributes": {
+                "friendly_name": "Luz Living Prueba",
+                "device_class": "light",
+                "icon": "mdi:lightbulb",
+            },
+        },
     )
+    local_hass.states.get.assert_called_once_with("input_boolean.luz_living_prueba")
     assert manager.processed_action_count == 1
+
+
+@pytest.mark.asyncio
+async def test_completed_action_without_local_state_is_reported_without_entity_state(hass, caplog):
+    """Keep action acknowledgement compatible if the entity vanished after execution."""
+    client = AsyncMock()
+    local_hass = _local_hass()
+    manager = AivaActionManager(local_hass, client)
+
+    with caplog.at_level(logging.WARNING):
+        await manager._async_process_action(_action())
+
+    client.async_send_action_result.assert_awaited_once_with(
+        "action-1", "lease-1", "completed", "Accion ejecutada localmente.", None, None
+    )
+    assert "AIVA action final state unavailable" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -55,7 +111,7 @@ async def test_service_failure_reports_failed(hass):
     await manager._async_process_action(_action())
 
     client.async_send_action_result.assert_awaited_once_with(
-        "action-1", "lease-1", "failed", None, "Home Assistant no pudo ejecutar el servicio."
+        "action-1", "lease-1", "failed", None, "Home Assistant no pudo ejecutar el servicio.", None
     )
 
 
@@ -77,7 +133,7 @@ async def test_sensitive_domains_are_blocked_without_execution(hass, domain):
 async def test_duplicate_action_is_reported_without_second_execution(hass):
     """A retried claim does not execute the local service twice."""
     client = AsyncMock()
-    local_hass = SimpleNamespace(services=SimpleNamespace(async_call=AsyncMock()))
+    local_hass = _local_hass(_state())
     manager = AivaActionManager(local_hass, client)
     await manager._async_process_action(_action())
     await manager._async_process_action(_action(lease_id="lease-2"))
@@ -86,6 +142,20 @@ async def test_duplicate_action_is_reported_without_second_execution(hass):
     assert client.async_send_action_result.await_count == 2
     assert manager.processed_action_count == 1
     assert client.async_send_action_result.await_args_list[1].args[1] == "lease-2"
+    assert client.async_send_action_result.await_args_list[1].args[5]["state"] == "on"
+
+
+@pytest.mark.asyncio
+async def test_action_logs_do_not_expose_home_secret(hass, caplog):
+    """Action status logging does not include authentication values."""
+    client = AsyncMock()
+    client.secret = "<redacted-home-secret>"
+    manager = AivaActionManager(_local_hass(_state()), client)
+
+    with caplog.at_level(logging.INFO):
+        await manager._async_process_action(_action())
+
+    assert "<redacted-home-secret>" not in caplog.text
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,12 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.25 - Sync entity state after queued action
+
+- Envía el estado final de la entidad al reportar una acción completada.
+- Actualiza el backend para responder correctamente consultas de luces prendidas.
+- Mantiene compatibilidad con la cola de acciones y lease_id.
+
 ## 0.2.24 - Fix queued action result reporting
 
 - Corrige reporte de acciones con lease_id.

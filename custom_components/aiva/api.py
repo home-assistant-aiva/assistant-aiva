@@ -752,6 +752,7 @@ class AivaApiClient:
         status: str,
         result_message: str | None = None,
         error_message: str | None = None,
+        entity_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Report a local service execution result to AIVA."""
         self._ensure_paired()
@@ -760,6 +761,8 @@ class AivaApiClient:
             payload["result_message"] = result_message
         if error_message:
             payload["error_message"] = error_message
+        if entity_state is not None:
+            payload["entity_state"] = entity_state
         return await self._request(
             "post",
             ENDPOINT_ACTION_RESULT.format(home_id=self._home_id, action_id=action_id),
