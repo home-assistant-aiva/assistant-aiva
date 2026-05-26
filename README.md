@@ -186,7 +186,7 @@ Podés validar el envío automático de eventos sin comprar sensores físicos us
 7. Cambiá el helper desde Home Assistant.
 8. Verificá en Admin AIVA que se registre el evento y, si corresponde por horario, la alerta.
 
-La integración consulta `GET /homes/{home_id}/security/config` y escucha solo las entidades activas devueltas por el backend. Cuando detecta cambios útiles, como `off -> on` u `on -> off`, envía `POST /homes/{home_id}/security/events` con el `secret` propio del home en `x-aiva-secret`. No envía eventos para estados `unknown`, `unavailable` ni cambios duplicados.
+La integración consulta `GET /homes/{home_id}/security/config` y escucha solo las entidades activas devueltas por el backend. Cuando detecta cambios útiles, como `off -> on` u `on -> off`, envía `POST /homes/{home_id}/security/events` con el `secret` propio del home en `x-aiva-secret`. Seguridad Negocios usa la misma activación del home: si el home no está activo, no consulta configuración ni envía eventos. No usa `AIVA_INTERNAL_SECRET` y tampoco envía eventos para estados `unknown`, `unavailable` ni cambios duplicados.
 
 Para reportar un problema en GitHub, incluí versión de Home Assistant, versión de AIVA y logs redactados. No incluyas credenciales ni códigos completos.
 

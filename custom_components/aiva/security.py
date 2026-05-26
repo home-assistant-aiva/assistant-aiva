@@ -13,7 +13,8 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from .api import AivaApiClient, AivaApiError
+from .api import AivaActivationStatus, AivaApiClient, AivaApiError
+from .const import STATE_ACTIVE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,6 +60,10 @@ class AivaSecurityManager:
 
     async def async_refresh_config(self) -> None:
         """Load security config and update state listeners."""
+        if not await self._async_home_is_active():
+            self._disable_security()
+            return
+
         try:
             config = await self.client.async_get_security_config(
                 self.client.home_id,
@@ -73,8 +78,7 @@ class AivaSecurityManager:
 
         if not config.security_enabled:
             _LOGGER.info("AIVA security disabled for this home")
-            self.security_sensor_entity_ids = ()
-            self._clear_state_listener()
+            self._disable_security()
             return
 
         active_entity_ids = tuple(
@@ -141,6 +145,10 @@ class AivaSecurityManager:
         event_time: str,
     ) -> None:
         """Send a state-change event to the backend."""
+        if not await self._async_home_is_active():
+            self._disable_security()
+            return
+
         try:
             await self.client.async_send_security_event(
                 self.client.home_id,
@@ -158,6 +166,32 @@ class AivaSecurityManager:
             entity_id,
             state,
         )
+
+    async def _async_home_is_active(self) -> bool:
+        """Return whether the shared home activation currently permits security."""
+        try:
+            status = await self.client.get_activation_status()
+        except AivaApiError as err:
+            _LOGGER.warning("AIVA security could not confirm activation: %s", err)
+            return False
+
+        if isinstance(status, AivaActivationStatus) and status.state == STATE_ACTIVE:
+            return True
+
+        activation_state = (
+            status.state if isinstance(status, AivaActivationStatus) else "unknown"
+        )
+        _LOGGER.info(
+            "AIVA security waiting for home activation: activation_state=%s",
+            activation_state,
+        )
+        return False
+
+    def _disable_security(self) -> None:
+        """Prevent listeners and events while security cannot run."""
+        self.security_enabled = False
+        self.security_sensor_entity_ids = ()
+        self._clear_state_listener()
 
     def _clear_state_listener(self) -> None:
         """Unregister current state listener if present."""

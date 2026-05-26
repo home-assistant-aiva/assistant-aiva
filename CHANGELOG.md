@@ -2,6 +2,14 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.26 - Activation-aware business security
+
+- Consulta la configuración de AIVA Seguridad Negocios desde el backend.
+- Escucha únicamente sensores activos configurados para el home.
+- Envía eventos automáticos usando el `secret` propio del home en `x-aiva-secret`; no usa `AIVA_INTERNAL_SECRET`.
+- Respeta la activación única de AIVA: un home no activo no consulta configuración ni envía eventos de seguridad.
+- Permite validar el flujo sin sensor físico con `input_boolean.puerta_negocio_prueba`.
+
 ## 0.2.25 - Sync entity state after queued action
 
 - Envía el estado final de la entidad al reportar una acción completada.

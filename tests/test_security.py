@@ -8,10 +8,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from custom_components.aiva.api import (
+    AivaActivationStatus,
     AivaInvalidResponseError,
     AivaSecurityConfig,
     AivaSecuritySensor,
 )
+from custom_components.aiva.const import STATE_ACTIVE, STATE_AWAITING_PAYMENT
 from custom_components.aiva.security import AivaSecurityManager
 
 
@@ -30,6 +32,10 @@ async def test_security_does_not_register_listeners_when_disabled(hass, monkeypa
     client = AsyncMock()
     client.home_id = "home-1"
     client.secret = "<redacted-home-secret>"
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_ACTIVE,
+        active=True,
+    )
     client.async_get_security_config.return_value = AivaSecurityConfig(
         security_enabled=False,
     )
@@ -44,6 +50,7 @@ async def test_security_does_not_register_listeners_when_disabled(hass, monkeypa
 
     assert manager.security_enabled is False
     assert manager.security_sensor_entity_ids == ()
+    client.async_get_security_config.assert_awaited_once()
     track.assert_not_called()
 
 
@@ -60,6 +67,10 @@ async def test_security_registers_only_active_sensors(hass, monkeypatch):
     client = AsyncMock()
     client.home_id = "home-1"
     client.secret = "<redacted-home-secret>"
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_ACTIVE,
+        active=True,
+    )
     client.async_get_security_config.return_value = AivaSecurityConfig(
         security_enabled=True,
         sensors=(
@@ -84,6 +95,10 @@ async def test_security_registers_only_active_sensors(hass, monkeypatch):
     assert manager.security_enabled is True
     assert manager.security_sensor_entity_ids == (
         "input_boolean.puerta_negocio_prueba",
+    )
+    client.async_get_security_config.assert_awaited_once_with(
+        "home-1",
+        "<redacted-home-secret>",
     )
     assert calls[0][1] == ("input_boolean.puerta_negocio_prueba",)
 
@@ -118,6 +133,10 @@ async def test_security_sends_event_for_off_to_on_and_on_to_off(hass):
     client = AsyncMock()
     client.home_id = "home-1"
     client.secret = "<redacted-home-secret>"
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_ACTIVE,
+        active=True,
+    )
     client.async_send_security_event.return_value = {"ok": True}
     manager = AivaSecurityManager(hass, client)
     manager.security_enabled = True
@@ -154,6 +173,10 @@ async def test_security_backend_failure_does_not_raise(hass):
     client = AsyncMock()
     client.home_id = "home-1"
     client.secret = "<redacted-home-secret>"
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_ACTIVE,
+        active=True,
+    )
     client.async_send_security_event.side_effect = AivaInvalidResponseError("boom")
     manager = AivaSecurityManager(hass, client)
     manager.security_enabled = True
@@ -165,3 +188,31 @@ async def test_security_backend_failure_does_not_raise(hass):
     await hass.async_block_till_done()
 
     client.async_send_security_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_security_awaiting_payment_does_not_load_config_or_send_events(hass):
+    """Do not operate Seguridad Negocios until the single home activation is active."""
+    client = AsyncMock()
+    client.home_id = "home-1"
+    client.secret = "<redacted-home-secret>"
+    client.get_activation_status.return_value = AivaActivationStatus(
+        state=STATE_AWAITING_PAYMENT,
+        active=False,
+    )
+    manager = AivaSecurityManager(hass, client)
+    manager.security_enabled = True
+    manager.security_sensor_entity_ids = ("input_boolean.puerta_negocio_prueba",)
+
+    await manager.async_refresh_config()
+    manager.security_enabled = True
+    manager.security_sensor_entity_ids = ("input_boolean.puerta_negocio_prueba",)
+    manager._handle_state_change(
+        _event("input_boolean.puerta_negocio_prueba", "off", "on")
+    )
+    await hass.async_block_till_done()
+
+    assert manager.security_enabled is False
+    assert manager.security_sensor_entity_ids == ()
+    client.async_get_security_config.assert_not_awaited()
+    client.async_send_security_event.assert_not_awaited()

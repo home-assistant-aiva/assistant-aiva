@@ -52,7 +52,7 @@ Para probar, creá helpers como `input_boolean.luz_living_prueba`, `input_boolea
 
 ## Seguridad Negocios
 
-La integración consulta periódicamente `GET /homes/{home_id}/security/config` usando el `secret` propio del home en `x-aiva-secret`. Si seguridad está habilitada, escucha solo los `entity_id` activos que devuelve el backend y manda eventos útiles a `POST /homes/{home_id}/security/events`.
+La integración consulta periódicamente `GET /homes/{home_id}/security/config` usando el `secret` propio del home en `x-aiva-secret`. Si el home está activo y seguridad está habilitada, escucha solo los `entity_id` activos que devuelve el backend y manda eventos útiles a `POST /homes/{home_id}/security/events`. Si el home no está activo, no consulta configuración ni envía eventos; no usa `AIVA_INTERNAL_SECRET`.
 
 Para probar sin sensor físico:
 
