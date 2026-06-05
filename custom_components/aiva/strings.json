@@ -4,6 +4,13 @@
     "step": {
       "user": {
         "title": "Bienvenido a AIVA",
+        "description": "Elegí qué servicio querés configurar.",
+        "data": {
+          "service_type": "Servicio"
+        }
+      },
+      "home": {
+        "title": "AIVA Home",
         "description": "AIVA ya está instalado en Home Assistant. Para dejarlo listo, indicá el nombre de tu hogar, elegí el plan y comenzá la activación.\n\n{error_detail}",
         "data": {
           "base_url": "Dirección de conexión de AIVA",
@@ -34,6 +41,9 @@
       "invalid_pairing_code": "El código de vinculación no es válido o ya venció. Iniciá la activación nuevamente.",
       "invalid_response": "AIVA no pudo completar la solicitud en este momento. Intentá nuevamente en unos minutos.",
       "invalid_scan_interval": "El intervalo mínimo permitido es de 30 segundos.",
+      "invalid_service_type": "Elegí un servicio válido.",
+      "security_coming_soon": "AIVA Seguridad estará disponible próximamente. Por ahora podés configurar AIVA Home.",
+      "rentals_coming_soon": "AIVA Rentals estará disponible próximamente. Por ahora podés configurar AIVA Home.",
       "confirm_pairing_required": "Antes de continuar, enviá el código al bot de AIVA y luego marcá esta confirmación.",
       "missing_required_data": "Faltan datos para completar la activación. Iniciá el proceso nuevamente.",
       "pairing_pending": "Todavía no recibimos la vinculación. Enviá el código al bot de AIVA y volvé a intentarlo.",

@@ -26,13 +26,116 @@ from custom_components.aiva.const import (
     CONF_PLAN,
     CONF_SCAN_INTERVAL,
     CONF_SECRET,
+    CONF_SERVICE_TYPE,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
+    SERVICE_HOME,
+    SERVICE_RENTALS,
+    SERVICE_SECURITY,
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
     STATE_SUSPENDED,
 )
+
+
+async def test_config_flow_shows_service_selection(hass):
+    """Show the service selector as the first onboarding screen."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert any(getattr(key, "schema", key) == CONF_SERVICE_TYPE for key in result["data_schema"].schema)
+
+
+async def test_config_flow_home_service_continues_to_home_setup(hass):
+    """Continue to the existing Home setup when AIVA Home is selected."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={CONF_SERVICE_TYPE: SERVICE_HOME},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "home"
+
+
+async def test_config_flow_sends_home_service_type_to_backend(hass):
+    """Send service_type=home when starting activation."""
+    with patch(
+        "custom_components.aiva.config_flow._start_activation",
+        return_value=AivaActivationStartResult(
+            pairing_code="<pairing-code>",
+            home_name="Casa Principal",
+            plan="base",
+            state=STATE_AWAITING_PAIRING,
+            home_id="home-1",
+            secret="<redacted-secret>",
+        ),
+    ) as start_activation:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_SERVICE_TYPE: SERVICE_HOME},
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_BASE_URL: "https://api.example.com",
+                CONF_PLAN: "base",
+                CONF_HOME_NAME: "Casa Principal",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "awaiting_pairing"
+    assert start_activation.call_args.args[1][CONF_SERVICE_TYPE] == SERVICE_HOME
+
+
+async def test_config_flow_security_is_coming_soon_without_entry(hass):
+    """Do not create an entry for AIVA Seguridad yet."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={CONF_SERVICE_TYPE: SERVICE_SECURITY},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "security_coming_soon"}
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_config_flow_rentals_is_coming_soon_without_entry(hass):
+    """Do not create an entry for AIVA Rentals yet."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={CONF_SERVICE_TYPE: SERVICE_RENTALS},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "rentals_coming_soon"}
+    assert hass.config_entries.async_entries(DOMAIN) == []
 
 
 async def test_config_flow_activation_valid_creates_entry(hass):
@@ -101,6 +204,7 @@ async def test_config_flow_activation_valid_creates_entry(hass):
         CONF_SECRET: "<redacted-secret>",
         CONF_HOME_NAME: "Casa Principal",
         CONF_PLAN: "smart",
+        CONF_SERVICE_TYPE: SERVICE_HOME,
     }
 
 
@@ -180,6 +284,7 @@ async def test_config_flow_creates_entry_when_activation_request_is_active(hass)
         CONF_SECRET: "<redacted-secret>",
         CONF_HOME_NAME: "Casa Principal",
         CONF_PLAN: "premium",
+        CONF_SERVICE_TYPE: SERVICE_HOME,
     }
 
 

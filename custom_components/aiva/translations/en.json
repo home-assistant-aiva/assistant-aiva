@@ -3,6 +3,13 @@
     "step": {
       "user": {
         "title": "Welcome to AIVA",
+        "description": "Choose which service you want to configure.",
+        "data": {
+          "service_type": "Service"
+        }
+      },
+      "home": {
+        "title": "AIVA Home",
         "description": "AIVA is installed in Home Assistant. To finish setup, name your home, choose your plan, and start activation.\n\n{error_detail}",
         "data": {
           "base_url": "AIVA connection address",
@@ -33,6 +40,9 @@
       "invalid_pairing_code": "The linking code is no longer valid. Start activation again.",
       "invalid_response": "AIVA could not complete the request right now. Try again in a few minutes.",
       "invalid_scan_interval": "The minimum allowed interval is 30 seconds.",
+      "invalid_service_type": "Choose a valid service.",
+      "security_coming_soon": "AIVA Security will be available soon. For now, you can configure AIVA Home.",
+      "rentals_coming_soon": "AIVA Rentals will be available soon. For now, you can configure AIVA Home.",
       "confirm_pairing_required": "Before continuing, send the code to the AIVA bot and then confirm it here.",
       "missing_required_data": "Some activation details are missing. Start the process again.",
       "pairing_pending": "We have not received the link yet. Send the code to the AIVA bot and try again.",

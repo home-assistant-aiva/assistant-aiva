@@ -20,10 +20,12 @@ from .const import (
     CONF_PAIRING_CODE,
     CONF_SCAN_INTERVAL,
     CONF_SECRET,
+    CONF_SERVICE_TYPE,
     DEFAULT_API_BASE_URL,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
     MIN_SCAN_INTERVAL_SECONDS,
+    SERVICE_HOME,
 )
 from .coordinator import AivaDataUpdateCoordinator
 from .security import AivaSecurityManager
@@ -52,10 +54,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AIVA from a config entry."""
     integration_version = get_integration_version()
     pairing_code = entry.data.get(CONF_PAIRING_CODE, entry.data.get(CONF_LINKING_CODE))
+    updated_entry_data = dict(entry.data)
     if CONF_PAIRING_CODE not in entry.data and pairing_code:
+        updated_entry_data[CONF_PAIRING_CODE] = pairing_code
+    if CONF_SERVICE_TYPE not in entry.data:
+        updated_entry_data[CONF_SERVICE_TYPE] = SERVICE_HOME
+    if updated_entry_data != dict(entry.data):
         hass.config_entries.async_update_entry(
             entry,
-            data={**entry.data, CONF_PAIRING_CODE: pairing_code},
+            data=updated_entry_data,
         )
 
     base_url = entry.options.get(CONF_BASE_URL, entry.data.get(CONF_BASE_URL))

@@ -61,6 +61,7 @@ from .const import (
     FIELD_SENSOR_NAME,
     FIELD_SENSOR_TYPE,
     FIELD_SENSORS,
+    FIELD_SERVICE_TYPE,
     FIELD_IS_ACTIVE,
     FIELD_SETTINGS,
     FIELD_SOURCE,
@@ -68,6 +69,7 @@ from .const import (
     FIELD_TEXT,
     FIELD_TIMEZONE,
     HEADER_AIVA_SECRET,
+    SERVICE_HOME,
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
@@ -358,6 +360,7 @@ class AivaApiClient:
         *,
         home_name: str,
         plan: str,
+        service_type: str = SERVICE_HOME,
     ) -> AivaActivationStartResult:
         """Start activation and obtain the pairing code using the backend flow."""
         installation_id = await self._get_installation_id()
@@ -365,6 +368,7 @@ class AivaApiClient:
             FIELD_INSTALLATION_ID: installation_id,
             FIELD_HOME_NAME: home_name.strip(),
             FIELD_PLAN: plan.strip(),
+            FIELD_SERVICE_TYPE: (service_type or SERVICE_HOME).strip(),
         }
         try:
             data = await self._request("post", ENDPOINT_ACTIVATION_REQUEST, json=payload)

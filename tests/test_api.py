@@ -19,6 +19,7 @@ from custom_components.aiva.api import (
     AivaTimeoutError,
 )
 from custom_components.aiva.const import (
+    FIELD_SERVICE_TYPE,
     ENDPOINT_CONVERSATION_HANDLE,
     ENDPOINT_SECURITY_CONFIG,
     ENDPOINT_SECURITY_EVENTS,
@@ -28,6 +29,7 @@ from custom_components.aiva.const import (
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
     STATE_SUSPENDED,
+    SERVICE_HOME,
 )
 
 
@@ -450,6 +452,7 @@ async def test_start_activation_success(hass, monkeypatch):
         "installation_id": "ha-installation-1",
         "home_name": "Casa Principal",
         "plan": "premium",
+        FIELD_SERVICE_TYPE: SERVICE_HOME,
     }
     assert session.calls[1]["url"] == "https://api.example.com/activation/pairing-code"
     assert session.calls[1]["json"] == {"home_id": "home-1"}

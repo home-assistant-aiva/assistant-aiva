@@ -2,6 +2,13 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.27 - Service selection onboarding
+
+- Agrega selección inicial de servicio: Home, Seguridad y Rentals.
+- Habilita AIVA Home como servicio disponible.
+- Muestra Seguridad y Rentals como próximamente.
+- Mantiene compatibilidad con instalaciones existentes.
+
 ## 0.2.26 - Activation-aware business security
 
 - Consulta la configuración de AIVA Seguridad Negocios desde el backend.

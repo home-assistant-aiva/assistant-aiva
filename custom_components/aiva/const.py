@@ -11,11 +11,17 @@ CONF_HOME_ID = "home_id"
 CONF_SECRET = "secret"
 CONF_PLAN = "plan"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_SERVICE_TYPE = "service_type"
 
 PLAN_BASE = "base"
 PLAN_SMART = "smart"
 PLAN_PREMIUM = "premium"
 PLANS = (PLAN_BASE, PLAN_SMART, PLAN_PREMIUM)
+
+SERVICE_HOME = "home"
+SERVICE_SECURITY = "security"
+SERVICE_RENTALS = "rentals"
+SERVICES = (SERVICE_HOME, SERVICE_SECURITY, SERVICE_RENTALS)
 
 STATE_INSTALLED = "installed"
 STATE_AWAITING_PAIRING = "awaiting_pairing"
@@ -74,6 +80,7 @@ FIELD_HOME_NAME = "home_name"
 FIELD_HOME_ID = "home_id"
 FIELD_SECRET = "secret"
 FIELD_PLAN = "plan"
+FIELD_SERVICE_TYPE = "service_type"
 FIELD_STATE = "state"
 FIELD_ACTIVATION_STATE = "activation_state"
 FIELD_ACTIVE = "active"

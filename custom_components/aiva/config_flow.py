@@ -32,12 +32,16 @@ from .const import (
     CONF_PLAN,
     CONF_SCAN_INTERVAL,
     CONF_SECRET,
+    CONF_SERVICE_TYPE,
     DEFAULT_API_BASE_URL,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
     ENDPOINT_ACTIVATION_STATUS,
     MIN_SCAN_INTERVAL_SECONDS,
     PLANS,
+    SERVICE_HOME,
+    SERVICE_RENTALS,
+    SERVICE_SECURITY,
     STATE_ACTIVE,
     STATE_AWAITING_PAIRING,
     STATE_AWAITING_PAYMENT,
@@ -49,7 +53,19 @@ _LOGGER = logging.getLogger(__name__)
 CONF_PAIRING_CONFIRMED = "pairing_confirmed"
 
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
+SERVICE_OPTIONS = {
+    SERVICE_HOME: "AIVA Home — Disponible ahora",
+    SERVICE_SECURITY: "AIVA Seguridad — Próximamente",
+    SERVICE_RENTALS: "AIVA Rentals — Próximamente",
+}
+
+STEP_SERVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_SERVICE_TYPE, default=SERVICE_HOME): vol.In(SERVICE_OPTIONS),
+    }
+)
+
+STEP_HOME_DATA_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_BASE_URL, default=DEFAULT_API_BASE_URL): str,
         vol.Required(CONF_HOME_NAME): str,
@@ -144,6 +160,7 @@ async def _start_activation(
     return await client.start_activation(
         home_name=user_input[CONF_HOME_NAME],
         plan=user_input[CONF_PLAN],
+        service_type=user_input.get(CONF_SERVICE_TYPE, SERVICE_HOME),
     )
 
 
@@ -177,6 +194,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._home_name: str | None = None
         self._home_id: str | None = None
         self._plan: str | None = None
+        self._service_type: str = SERVICE_HOME
         self._pairing_code: str | None = None
         self._secret: str | None = None
         self._last_error_detail: str = ""
@@ -191,11 +209,39 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Handle the initial step."""
+        """Handle service selection."""
         errors: dict[str, str] = {}
 
         if self._async_current_entries():
             return self.async_abort(reason="already_configured")
+
+        if user_input is not None:
+            if CONF_HOME_NAME in user_input:
+                self._service_type = SERVICE_HOME
+                return await self.async_step_home(user_input)
+
+            service_type = user_input.get(CONF_SERVICE_TYPE)
+            if service_type == SERVICE_HOME:
+                self._service_type = SERVICE_HOME
+                return await self.async_step_home()
+            if service_type == SERVICE_SECURITY:
+                errors["base"] = "security_coming_soon"
+            elif service_type == SERVICE_RENTALS:
+                errors["base"] = "rentals_coming_soon"
+            else:
+                errors[CONF_SERVICE_TYPE] = "invalid_service_type"
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=STEP_SERVICE_DATA_SCHEMA,
+            errors=errors,
+        )
+
+    async def async_step_home(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Handle AIVA Home setup details."""
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             base_url = _normalize_user_base_url(user_input.get(CONF_BASE_URL))
@@ -216,10 +262,12 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_BASE_URL: base_url,
                     CONF_HOME_NAME: home_name,
                     CONF_PLAN: plan,
+                    CONF_SERVICE_TYPE: SERVICE_HOME,
                 }
                 _LOGGER.debug(
-                    "AIVA activation requested from config flow: base_url=%s plan=%s home_name=%s",
+                    "AIVA activation requested from config flow: base_url=%s service_type=%s plan=%s home_name=%s",
                     base_url,
+                    SERVICE_HOME,
                     plan,
                     home_name,
                 )
@@ -253,8 +301,8 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return await self.async_step_awaiting_pairing()
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            step_id="home",
+            data_schema=STEP_HOME_DATA_SCHEMA,
             errors=errors,
             description_placeholders={"error_detail": self._last_error_detail},
         )
@@ -423,6 +471,7 @@ class AivaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_SECRET: status.secret,
             CONF_HOME_NAME: home_name,
             CONF_PLAN: status.plan or self._plan or "base",
+            CONF_SERVICE_TYPE: self._service_type or SERVICE_HOME,
         }
 
         return self.async_create_entry(

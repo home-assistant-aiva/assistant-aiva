@@ -16,7 +16,9 @@ from custom_components.aiva.const import (
     CONF_LINKING_CODE,
     CONF_PAIRING_CODE,
     CONF_SECRET,
+    CONF_SERVICE_TYPE,
     DOMAIN,
+    SERVICE_HOME,
 )
 from custom_components.aiva.version import get_integration_version
 
@@ -79,6 +81,7 @@ async def test_setup_entry_reads_legacy_linking_code(hass, monkeypatch):
 
     assert client_cls.call_args.kwargs["pairing_code"] == "<legacy-pairing-code>"
     assert entry.data[CONF_PAIRING_CODE] == "<legacy-pairing-code>"
+    assert entry.data[CONF_SERVICE_TYPE] == SERVICE_HOME
 
 
 async def test_setup_entry_logs_loaded_integration_version(hass, monkeypatch, caplog):
