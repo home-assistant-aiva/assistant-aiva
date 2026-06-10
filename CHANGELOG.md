@@ -2,6 +2,14 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.28 - Safe entity attributes sync
+
+- Envía atributos sanitizados de entidades al backend para mejorar rutinas locales.
+- Conserva `input_select.options` para que AIVA use opciones reales y no inventadas.
+- Agrega `entity_category` al payload de sincronización.
+- Agrega soporte para solicitudes de sync completo desde Admin.
+- Excluye tokens, claves, URLs sensibles e imágenes/base64 del sync.
+
 ## 0.2.27 - Service selection onboarding
 
 - Agrega selección inicial de servicio: Home, Seguridad y Rentals.

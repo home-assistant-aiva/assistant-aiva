@@ -33,6 +33,8 @@ from .const import (
     ENDPOINT_PAIRING_START,
     ENDPOINT_SECURITY_CONFIG,
     ENDPOINT_SECURITY_EVENTS,
+    ENDPOINT_SYNC_REQUEST_RESULT,
+    ENDPOINT_SYNC_REQUESTS_PENDING,
     ENDPOINT_ACTIONS_PENDING,
     ENDPOINT_ACTION_RESULT,
     FIELD_ACTIVE,
@@ -770,6 +772,40 @@ class AivaApiClient:
         return await self._request(
             "post",
             ENDPOINT_ACTION_RESULT.format(home_id=self._home_id, action_id=action_id),
+            json=payload,
+            authenticated=True,
+        )
+
+    async def async_get_pending_sync_requests(self) -> list[dict[str, Any]]:
+        """Return backend requests that ask HA to refresh local data."""
+        self._ensure_paired()
+        data = await self._request(
+            "get",
+            ENDPOINT_SYNC_REQUESTS_PENDING.format(home_id=self._home_id),
+            authenticated=True,
+        )
+        requests = data.get("requests")
+        if not isinstance(requests, list):
+            raise AivaInvalidResponseError("AIVA no devolvio una lista de solicitudes")
+        return [request for request in requests if isinstance(request, dict)]
+
+    async def async_send_sync_request_result(
+        self,
+        request_id: str,
+        status: str,
+        error_message: str | None = None,
+    ) -> dict[str, Any]:
+        """Report the result of a backend-requested sync."""
+        self._ensure_paired()
+        payload: dict[str, Any] = {"status": status}
+        if error_message:
+            payload["error_message"] = error_message
+        return await self._request(
+            "post",
+            ENDPOINT_SYNC_REQUEST_RESULT.format(
+                home_id=self._home_id,
+                request_id=request_id,
+            ),
             json=payload,
             authenticated=True,
         )

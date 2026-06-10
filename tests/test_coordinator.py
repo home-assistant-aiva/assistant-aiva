@@ -15,7 +15,10 @@ from custom_components.aiva.api import (
     AivaInvalidResponseError,
     AivaStatus,
 )
-from custom_components.aiva.coordinator import AivaDataUpdateCoordinator
+from custom_components.aiva.coordinator import (
+    AivaDataUpdateCoordinator,
+    sanitize_ha_attributes,
+)
 from custom_components.aiva.const import STATE_ACTIVE, STATE_UNAVAILABLE
 
 
@@ -54,6 +57,7 @@ async def test_coordinator_loads_enriched_data(hass):
             enabled=True,
         ),
     )
+    client.async_get_pending_sync_requests.return_value = []
     coordinator = AivaDataUpdateCoordinator(hass, client, 300)
 
     data = await coordinator._async_update_data()
@@ -63,6 +67,7 @@ async def test_coordinator_loads_enriched_data(hass):
     assert data.home_settings.assistant_name == "AIVA"
     assert data.effective_entities[0].entity_id == "light.living"
     assert data.home_automations[0].automation_id == "auto-1"
+    client.async_get_pending_sync_requests.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -86,6 +91,7 @@ async def test_coordinator_keeps_base_data_when_optional_endpoint_fails(hass):
     client.get_home_automations.side_effect = AivaInvalidResponseError(
         "bad automations"
     )
+    client.async_get_pending_sync_requests.return_value = []
     coordinator = AivaDataUpdateCoordinator(hass, client, 300)
 
     data = await coordinator._async_update_data()
@@ -236,7 +242,38 @@ def test_collect_entities_includes_useful_helpers_without_device_id(hass):
         if entity["entity_id"] == "input_select.modo_casa_prueba"
     )
     assert input_select_payload["options"] == ["Dia", "Noche"]
+    assert input_select_payload["attributes"] == {
+        "friendly_name": "Modo casa prueba",
+        "options": ["Dia", "Noche"],
+        "icon": "mdi:home",
+    }
     assert input_select_payload["area"] is None
+
+
+def test_sanitize_ha_attributes_removes_sensitive_and_large_values():
+    """Entity sync attributes must not expose secrets or heavy payloads."""
+    attributes = sanitize_ha_attributes(
+        {
+            "friendly_name": "Modo casa prueba",
+            "options": ["Dia", "Noche"],
+            "access_token": "secret",
+            "api_key": "secret",
+            "authorization": "Bearer secret",
+            "url": "https://private.local",
+            "webhook": "https://private.local/hook",
+            "safe_url_text": "https://private.local",
+            "safe_bearer_text": "Bearer secret",
+            "entity_picture": "data:image/png;base64,abc",
+            "image_payload": "data:image/png;base64,abc",
+            "nested": {"password": "hidden", "safe": "ok"},
+        }
+    )
+
+    assert attributes == {
+        "friendly_name": "Modo casa prueba",
+        "options": ["Dia", "Noche"],
+        "nested": {"safe": "ok"},
+    }
 
 
 def test_collect_entities_excludes_aiva_internal_entities(hass):
@@ -285,3 +322,56 @@ async def test_sync_entities_recalculates_current_entities(hass, monkeypatch):
     assert payload[0]["entity_id"] == "input_boolean.luz_living_prueba"
     assert coordinator._last_entity_sync_stats.effective_entities_count == 1
     refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_process_sync_request_sends_full_entities_and_marks_completed(hass):
+    """Backend-triggered full sync sends the current snapshot with attributes."""
+    client = AsyncMock()
+    client.async_get_pending_sync_requests.return_value = [
+        {"id": "sync-1", "request_type": "full_entity_sync"}
+    ]
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+    hass.states.async_set(
+        "input_select.modo_casa_prueba",
+        "Dia",
+        {
+            "friendly_name": "Modo casa prueba",
+            "options": ["Dia", "Noche"],
+            "access_token": "hidden",
+        },
+    )
+
+    await coordinator._async_process_sync_requests()
+
+    client.sync_entities.assert_awaited_once()
+    payload = client.sync_entities.await_args.args[0]
+    assert payload[0]["entity_id"] == "input_select.modo_casa_prueba"
+    assert payload[0]["options"] == ["Dia", "Noche"]
+    assert payload[0]["attributes"] == {
+        "friendly_name": "Modo casa prueba",
+        "options": ["Dia", "Noche"],
+    }
+    client.async_send_sync_request_result.assert_awaited_once_with(
+        "sync-1", "completed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_sync_request_marks_failed_when_entity_sync_fails(hass):
+    """Backend-triggered sync failures are reported to AIVA."""
+    client = AsyncMock()
+    client.async_get_pending_sync_requests.return_value = [
+        {"id": "sync-1", "request_type": "full_entity_sync"}
+    ]
+    client.sync_entities.side_effect = AivaInvalidResponseError("sync failed")
+    coordinator = AivaDataUpdateCoordinator(hass, client, 300)
+    hass.states.async_set("input_boolean.luz_living_prueba", "on")
+
+    await coordinator._async_process_sync_requests()
+
+    client.async_send_sync_request_result.assert_awaited_once_with(
+        "sync-1",
+        "failed",
+        error_message="sync failed",
+    )

@@ -69,6 +69,8 @@ ENDPOINT_SECURITY_CONFIG = "/homes/{home_id}/security/config"
 ENDPOINT_SECURITY_EVENTS = "/homes/{home_id}/security/events"
 ENDPOINT_ACTIONS_PENDING = "/homes/{home_id}/actions/pending"
 ENDPOINT_ACTION_RESULT = "/homes/{home_id}/actions/{action_id}/result"
+ENDPOINT_SYNC_REQUESTS_PENDING = "/homes/{home_id}/sync-requests/pending"
+ENDPOINT_SYNC_REQUEST_RESULT = "/homes/{home_id}/sync-requests/{request_id}/result"
 
 ACTION_POLL_INTERVAL_SECONDS = 5
 

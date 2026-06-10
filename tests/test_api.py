@@ -1101,6 +1101,69 @@ async def test_get_home_settings_invalid_response(hass, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_pending_sync_requests_uses_home_secret(hass, monkeypatch):
+    """Fetch backend sync requests with the paired home secret."""
+    session = _patch_session(
+        monkeypatch,
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "requests": [
+                    {"id": "sync-1", "request_type": "full_entity_sync"},
+                    "ignored",
+                ],
+            },
+        ),
+    )
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+
+    result = await client.async_get_pending_sync_requests()
+
+    assert result == [{"id": "sync-1", "request_type": "full_entity_sync"}]
+    assert session.calls[0]["method"] == "get"
+    assert (
+        session.calls[0]["url"]
+        == "https://api.example.com/homes/home-1/sync-requests/pending"
+    )
+    assert session.calls[0]["headers"] == {"x-aiva-secret": "<redacted-secret>"}
+
+
+@pytest.mark.asyncio
+async def test_send_sync_request_result_uses_home_secret(hass, monkeypatch):
+    """Report backend sync request results with the paired home secret."""
+    session = _patch_session(monkeypatch, FakeResponse(200, {"ok": True}))
+    client = AivaApiClient(
+        hass,
+        base_url="https://api.example.com",
+        home_id="home-1",
+        secret="<redacted-secret>",
+    )
+
+    await client.async_send_sync_request_result(
+        "sync-1",
+        "failed",
+        error_message="sync failed",
+    )
+
+    assert session.calls[0]["method"] == "post"
+    assert (
+        session.calls[0]["url"]
+        == "https://api.example.com/homes/home-1/sync-requests/sync-1/result"
+    )
+    assert session.calls[0]["json"] == {
+        "status": "failed",
+        "error_message": "sync failed",
+    }
+    assert session.calls[0]["headers"] == {"x-aiva-secret": "<redacted-secret>"}
+
+
+@pytest.mark.asyncio
 async def test_get_effective_entities_success(hass, monkeypatch):
     """Fetch and parse effective entities."""
     session = _patch_session(

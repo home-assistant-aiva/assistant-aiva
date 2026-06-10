@@ -42,6 +42,36 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 NOT_EFFECTIVE_STATES = {"unavailable", "unknown"}
+MAX_SYNC_ATTRIBUTE_DEPTH = 4
+MAX_SYNC_ATTRIBUTE_ITEMS = 40
+MAX_SYNC_ATTRIBUTE_STRING_CHARS = 500
+SENSITIVE_ATTRIBUTE_KEY_PARTS = {
+    "access_token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "cookie",
+    "key",
+    "password",
+    "refresh_token",
+    "secret",
+    "token",
+    "url",
+    "webhook",
+}
+LARGE_ATTRIBUTE_KEY_PARTS = {
+    "base64",
+    "entity_picture",
+    "image",
+    "media_content_id",
+    "picture",
+}
+SENSITIVE_ATTRIBUTE_VALUE_PARTS = (
+    "bearer ",
+    "data:image/",
+    "base64,",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +246,8 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
             )
 
         status = self._status_with_activation(status, activation_status)
+        if status.connected:
+            await self._async_process_sync_requests()
         data = AivaCoordinatorData.from_status(
             status,
             home_settings=await self._async_load_home_settings(),
@@ -233,6 +265,10 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
 
     async def async_sync_entities(self) -> None:
         """Ask AIVA to synchronize entities and refresh data."""
+        await self._async_send_entity_snapshot(request_refresh=True)
+
+    async def _async_send_entity_snapshot(self, *, request_refresh: bool) -> bool:
+        """Send the current entity snapshot to AIVA."""
         entities = self._collect_entities()
         try:
             await self.client.sync_entities(entities)
@@ -244,8 +280,9 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
                 "No se pudieron sincronizar entidades con AIVA: %s",
                 err,
             )
-            await self.async_request_refresh()
-            return
+            if request_refresh:
+                await self.async_request_refresh()
+            return False
 
         self._sync_last_error = None
         self.last_sync_error = None
@@ -257,7 +294,40 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
             self._last_entity_sync_stats.effective_entities_count,
             ", ".join(self._last_entity_sync_stats.included_domains) or "ninguno",
         )
-        await self.async_request_refresh()
+        if request_refresh:
+            await self.async_request_refresh()
+        return True
+
+    async def _async_process_sync_requests(self) -> None:
+        """Handle backend-triggered full sync requests."""
+        try:
+            requests = await self.client.async_get_pending_sync_requests()
+        except AivaApiError as err:
+            _LOGGER.debug("No se pudieron consultar solicitudes de sync AIVA: %s", err)
+            return
+        if not isinstance(requests, list):
+            return
+
+        for request in requests:
+            request_id = request.get("id")
+            request_type = request.get("request_type")
+            if not isinstance(request_id, str) or request_type != "full_entity_sync":
+                continue
+            sync_ok = await self._async_send_entity_snapshot(request_refresh=False)
+            if not sync_ok:
+                try:
+                    await self.client.async_send_sync_request_result(
+                        request_id,
+                        "failed",
+                        error_message=self.last_sync_error,
+                    )
+                except AivaApiError as err:
+                    _LOGGER.debug("No se pudo reportar sync failed a AIVA: %s", err)
+                continue
+            try:
+                await self.client.async_send_sync_request_result(request_id, "completed")
+            except AivaApiError as err:
+                _LOGGER.debug("No se pudo reportar sync completed a AIVA: %s", err)
 
     def async_start_auto_reconnect(self) -> None:
         """Start the low-frequency retry loop used while AIVA is unavailable."""
@@ -514,6 +584,12 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
                 "last_changed": state.last_changed.isoformat(),
                 "last_updated": state.last_updated.isoformat(),
                 "supported_features": attributes.get("supported_features"),
+                "entity_category": (
+                    str(registry_entry.entity_category)
+                    if registry_entry and registry_entry.entity_category
+                    else None
+                ),
+                "attributes": sanitize_ha_attributes(attributes),
                 "available": is_available,
                 "effective": is_effective,
             }
@@ -591,3 +667,55 @@ class AivaDataUpdateCoordinator(DataUpdateCoordinator[AivaCoordinatorData]):
 def _utcnow() -> datetime:
     """Return an aware UTC timestamp for diagnostics."""
     return datetime.now(timezone.utc)
+
+
+def sanitize_ha_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Return a bounded, non-sensitive subset of Home Assistant attributes."""
+    sanitized = _sanitize_attribute_value(attributes, depth=0)
+    return sanitized if isinstance(sanitized, dict) else {}
+
+
+def _sanitize_attribute_value(value: Any, *, depth: int) -> Any:
+    if depth > MAX_SYNC_ATTRIBUTE_DEPTH:
+        return None
+    if isinstance(value, dict):
+        result = {}
+        for key, item in list(value.items())[:MAX_SYNC_ATTRIBUTE_ITEMS]:
+            key_text = str(key).strip()[:120]
+            if not key_text or _blocked_attribute_key(key_text):
+                continue
+            sanitized = _sanitize_attribute_value(item, depth=depth + 1)
+            if sanitized is not None:
+                result[key_text] = sanitized
+        return result
+    if isinstance(value, list):
+        result = []
+        for item in value[:MAX_SYNC_ATTRIBUTE_ITEMS]:
+            sanitized = _sanitize_attribute_value(item, depth=depth + 1)
+            if sanitized is not None:
+                result.append(sanitized)
+        return result
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        if isinstance(value, str):
+            if _blocked_attribute_string(value):
+                return None
+            return value[:MAX_SYNC_ATTRIBUTE_STRING_CHARS]
+        return value
+    return str(value)[:MAX_SYNC_ATTRIBUTE_STRING_CHARS]
+
+
+def _blocked_attribute_key(key: str) -> bool:
+    lowered = key.casefold()
+    return any(
+        part in lowered
+        for part in SENSITIVE_ATTRIBUTE_KEY_PARTS | LARGE_ATTRIBUTE_KEY_PARTS
+    )
+
+
+def _blocked_attribute_string(value: str) -> bool:
+    stripped = value.strip()
+    lowered = stripped.casefold()
+    return (
+        lowered.startswith(("http://", "https://"))
+        or any(part in lowered for part in SENSITIVE_ATTRIBUTE_VALUE_PARTS)
+    )
