@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime, timedelta
 import logging
+import re
 from typing import Any, Callable
 
 from homeassistant.core import HomeAssistant
@@ -17,9 +18,12 @@ from .const import ACTION_POLL_INTERVAL_SECONDS
 _LOGGER = logging.getLogger(__name__)
 _RECENT_ACTION_LIMIT = 200
 _PROCESSED_TTL = timedelta(minutes=10)
-_TURN_DOMAINS = {"light", "switch", "fan", "input_boolean"}
+_TURN_DOMAINS = {"light", "switch", "input_boolean"}
 _RUN_DOMAINS = {"scene", "script"}
-_BLOCKED_DOMAINS = {"lock", "alarm_control_panel", "cover", "camera", "siren", "vacuum"}
+_BLOCKED_DOMAINS = {"lock", "alarm_control_panel", "camera", "siren", "vacuum"}
+_SENSITIVE_TEXT_PATTERN = re.compile(
+    r"(?i)\b(secret|pairing_code|linking_code|token|api[_-]?key|authorization|password)\b\s*[:=]\s*[^,\s]+"
+)
 
 
 class AivaActionManager:
@@ -114,11 +118,12 @@ class AivaActionManager:
             result_message = None
             error_message = str(err)
             _LOGGER.warning("AIVA action failed: action_id=%s error=%s", action_id, error_message)
-        except Exception:
-            _LOGGER.exception("AIVA action failed: action_id=%s", action_id)
+        except Exception as err:
+            safe_error = self._safe_home_assistant_error(err)
+            _LOGGER.exception("AIVA action failed: action_id=%s error=%s", action_id, safe_error)
             status = "failed"
             result_message = None
-            error_message = "Home Assistant no pudo ejecutar el servicio."
+            error_message = f"Home Assistant no pudo ejecutar el servicio: {safe_error}"
 
         self._remember_result(action_id, status, result_message, error_message, entity_state)
         await self._async_report_result(action_id, lease_id, status, result_message, error_message, entity_state)
@@ -193,9 +198,23 @@ class AivaActionManager:
             return domain, service, dict(service_data)
         if domain in _RUN_DOMAINS and service == "turn_on":
             return domain, service, dict(service_data)
-        if domain == "input_select" and service == "select_option" and isinstance(service_data.get("option"), str):
+        option = service_data.get("option")
+        if domain == "input_select" and service == "select_option" and isinstance(option, str) and option.strip():
+            return domain, service, dict(service_data)
+        if domain == "cover" and service == "close_cover":
             return domain, service, dict(service_data)
         raise ValueError("Servicio o dominio no permitido para ejecucion local.")
+
+    def _safe_home_assistant_error(self, err: Exception) -> str:
+        """Return a useful Home Assistant error without leaking credentials."""
+        message = str(err).strip() or err.__class__.__name__
+        message = _SENSITIVE_TEXT_PATTERN.sub(r"\1=***", message)
+        for value in (getattr(self.client, "secret", None), getattr(self.client, "home_id", None)):
+            if isinstance(value, str) and value:
+                message = message.replace(value, "***")
+        if len(message) > 300:
+            message = f"{message[:297]}..."
+        return message
 
     def _remember_result(
         self,

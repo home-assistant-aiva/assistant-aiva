@@ -2,6 +2,13 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.29 - Safe cover close actions
+
+- Agrega soporte seguro para ejecutar `cover.close_cover` desde acciones autorizadas de AIVA.
+- Mantiene bloqueadas acciones sensibles o riesgosas como cerraduras, alarmas, cámaras, sirenas, aspiradoras y apertura de covers.
+- Mejora el reporte seguro de errores de ejecución hacia el backend.
+- Mantiene compatibilidad con action queue, lease_id y reportes de resultado.
+
 ## 0.2.28 - Safe entity attributes sync
 
 - Envía atributos sanitizados de entidades al backend para mejorar rutinas locales.

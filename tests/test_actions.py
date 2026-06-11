@@ -103,20 +103,30 @@ async def test_completed_action_without_local_state_is_reported_without_entity_s
 async def test_service_failure_reports_failed(hass):
     """Report a safe error if Home Assistant rejects local execution."""
     client = AsyncMock()
+    client.secret = "secret-value"
     local_hass = SimpleNamespace(
-        services=SimpleNamespace(async_call=AsyncMock(side_effect=RuntimeError("private error")))
+        services=SimpleNamespace(
+            async_call=AsyncMock(
+                side_effect=RuntimeError("Invalid service data secret=secret-value detail=bad-domain")
+            )
+        )
     )
     manager = AivaActionManager(local_hass, client)
 
     await manager._async_process_action(_action())
 
     client.async_send_action_result.assert_awaited_once_with(
-        "action-1", "lease-1", "failed", None, "Home Assistant no pudo ejecutar el servicio.", None
+        "action-1",
+        "lease-1",
+        "failed",
+        None,
+        "Home Assistant no pudo ejecutar el servicio: Invalid service data secret=*** detail=bad-domain",
+        None,
     )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("domain", ["lock", "alarm_control_panel"])
+@pytest.mark.parametrize("domain", ["lock", "alarm_control_panel", "camera", "siren", "vacuum"])
 async def test_sensitive_domains_are_blocked_without_execution(hass, domain):
     """Never execute backend actions for sensitive domains."""
     client = AsyncMock()
@@ -124,6 +134,78 @@ async def test_sensitive_domains_are_blocked_without_execution(hass, domain):
     manager = AivaActionManager(local_hass, client)
 
     await manager._async_process_action(_action(domain=domain))
+
+    local_hass.services.async_call.assert_not_awaited()
+    assert client.async_send_action_result.await_args.args[2] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_cover_close_cover_is_allowed_for_non_sensitive_curtains(hass):
+    """Allow the narrow curtain/persiana close service used by local routines."""
+    client = AsyncMock()
+    local_hass = _local_hass(_state("closed"))
+    manager = AivaActionManager(local_hass, client)
+
+    await manager._async_process_action(_action(domain="cover", service="close_cover"))
+
+    local_hass.services.async_call.assert_awaited_once_with(
+        "cover", "close_cover", {"entity_id": "cover.luz_living_prueba"}, blocking=True
+    )
+    assert client.async_send_action_result.await_args.args[2] == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", ["open_cover", "stop_cover"])
+async def test_cover_unsafe_services_remain_blocked(hass, service):
+    """Do not allow unsafe cover services from the backend action queue."""
+    client = AsyncMock()
+    local_hass = _local_hass()
+    manager = AivaActionManager(local_hass, client)
+
+    await manager._async_process_action(_action(domain="cover", service=service))
+
+    local_hass.services.async_call.assert_not_awaited()
+    assert client.async_send_action_result.await_args.args[2] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_unlisted_turn_domain_remains_blocked(hass):
+    """Only explicitly allowed turn domains can execute local actions."""
+    client = AsyncMock()
+    local_hass = _local_hass()
+    manager = AivaActionManager(local_hass, client)
+
+    await manager._async_process_action(_action(domain="fan", service="turn_on"))
+
+    local_hass.services.async_call.assert_not_awaited()
+    assert client.async_send_action_result.await_args.args[2] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_missing_entity_id_is_blocked(hass):
+    """Reject actions without a concrete entity_id."""
+    client = AsyncMock()
+    local_hass = _local_hass()
+    manager = AivaActionManager(local_hass, client)
+    action = _action(domain="light", service="turn_on")
+    action["service_data"].pop("entity_id")
+
+    await manager._async_process_action(action)
+
+    local_hass.services.async_call.assert_not_awaited()
+    assert client.async_send_action_result.await_args.args[2] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_input_select_requires_option(hass):
+    """Reject input_select actions that do not include a non-empty option."""
+    client = AsyncMock()
+    local_hass = _local_hass()
+    manager = AivaActionManager(local_hass, client)
+    action = _action(domain="input_select", service="select_option")
+    action["service_data"]["option"] = " "
+
+    await manager._async_process_action(action)
 
     local_hass.services.async_call.assert_not_awaited()
     assert client.async_send_action_result.await_args.args[2] == "failed"
