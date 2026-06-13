@@ -2,6 +2,13 @@
 
 All notable changes to AIVA for Home Assistant will be documented in this file.
 
+## 0.2.30 - Premium Voice speakers
+
+- Agrega soporte seguro para `media_player.play_media` usado por AIVA Premium Voice.
+- Permite únicamente URLs temporales de AIVA bajo `/premium-voice/audio/`.
+- Mantiene bloqueados otros servicios `media_player`, URLs externas y tipos de contenido no permitidos.
+- Conserva action queue, `lease_id` y reporte seguro de errores al backend.
+
 ## 0.2.29 - Safe cover close actions
 
 - Agrega soporte seguro para ejecutar `cover.close_cover` desde acciones autorizadas de AIVA.

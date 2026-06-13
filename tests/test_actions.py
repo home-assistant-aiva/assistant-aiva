@@ -169,6 +169,68 @@ async def test_cover_unsafe_services_remain_blocked(hass, service):
 
 
 @pytest.mark.asyncio
+async def test_media_player_play_media_allows_aiva_audio_url(hass):
+    """Allow Premium Voice playback only for AIVA temporary audio URLs."""
+    client = AsyncMock()
+    local_hass = _local_hass(_state("playing"))
+    manager = AivaActionManager(local_hass, client)
+    action = _action(domain="media_player", service="play_media")
+    action["service_data"] = {
+        "entity_id": "media_player.living",
+        "media_content_id": "https://api.aiva.local/premium-voice/audio/non-guessable-id",
+        "media_content_type": "music",
+        "announce": True,
+    }
+
+    await manager._async_process_action(action)
+
+    local_hass.services.async_call.assert_awaited_once_with(
+        "media_player",
+        "play_media",
+        {
+            "entity_id": "media_player.living",
+            "media_content_id": "https://api.aiva.local/premium-voice/audio/non-guessable-id",
+            "media_content_type": "music",
+            "announce": True,
+        },
+        blocking=True,
+    )
+    assert client.async_send_action_result.await_args.args[2] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_media_player_play_media_blocks_external_url(hass):
+    """Do not play arbitrary external media URLs from the backend queue."""
+    client = AsyncMock()
+    local_hass = _local_hass()
+    manager = AivaActionManager(local_hass, client)
+    action = _action(domain="media_player", service="play_media")
+    action["service_data"] = {
+        "entity_id": "media_player.living",
+        "media_content_id": "https://example.com/audio.mp3",
+        "media_content_type": "music",
+    }
+
+    await manager._async_process_action(action)
+
+    local_hass.services.async_call.assert_not_awaited()
+    assert client.async_send_action_result.await_args.args[2] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_media_player_other_services_remain_blocked(hass):
+    """Keep non-required media_player services blocked."""
+    client = AsyncMock()
+    local_hass = _local_hass()
+    manager = AivaActionManager(local_hass, client)
+
+    await manager._async_process_action(_action(domain="media_player", service="volume_set"))
+
+    local_hass.services.async_call.assert_not_awaited()
+    assert client.async_send_action_result.await_args.args[2] == "failed"
+
+
+@pytest.mark.asyncio
 async def test_unlisted_turn_domain_remains_blocked(hass):
     """Only explicitly allowed turn domains can execute local actions."""
     client = AsyncMock()

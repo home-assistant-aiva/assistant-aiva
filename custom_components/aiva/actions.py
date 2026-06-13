@@ -21,6 +21,7 @@ _PROCESSED_TTL = timedelta(minutes=10)
 _TURN_DOMAINS = {"light", "switch", "input_boolean"}
 _RUN_DOMAINS = {"scene", "script"}
 _BLOCKED_DOMAINS = {"lock", "alarm_control_panel", "camera", "siren", "vacuum"}
+_AIVA_AUDIO_PATH_PART = "/premium-voice/audio/"
 _SENSITIVE_TEXT_PATTERN = re.compile(
     r"(?i)\b(secret|pairing_code|linking_code|token|api[_-]?key|authorization|password)\b\s*[:=]\s*[^,\s]+"
 )
@@ -198,12 +199,41 @@ class AivaActionManager:
             return domain, service, dict(service_data)
         if domain in _RUN_DOMAINS and service == "turn_on":
             return domain, service, dict(service_data)
+        if domain == "media_player" and service == "play_media":
+            return domain, service, self._validated_media_player_play_media(service_data)
         option = service_data.get("option")
         if domain == "input_select" and service == "select_option" and isinstance(option, str) and option.strip():
             return domain, service, dict(service_data)
         if domain == "cover" and service == "close_cover":
             return domain, service, dict(service_data)
         raise ValueError("Servicio o dominio no permitido para ejecucion local.")
+
+    def _validated_media_player_play_media(self, service_data: dict[str, Any]) -> dict[str, Any]:
+        entity_id = str(service_data.get("entity_id") or "").strip()
+        media_content_id = str(service_data.get("media_content_id") or "").strip()
+        media_content_type = str(service_data.get("media_content_type") or "").strip()
+        if not entity_id.startswith("media_player."):
+            raise ValueError("La entidad media_player no es valida.")
+        if not self._is_aiva_audio_url(media_content_id):
+            raise ValueError("URL de audio externa bloqueada.")
+        if media_content_type not in {"music", "audio/mpeg"}:
+            raise ValueError("Tipo de audio no permitido.")
+        validated = {
+            "entity_id": entity_id,
+            "media_content_id": media_content_id,
+            "media_content_type": media_content_type,
+        }
+        if service_data.get("announce") is not None:
+            validated["announce"] = bool(service_data.get("announce"))
+        return validated
+
+    def _is_aiva_audio_url(self, value: str) -> bool:
+        if not value.startswith(("http://", "https://")):
+            return False
+        if _AIVA_AUDIO_PATH_PART not in value:
+            return False
+        lowered = value.lower()
+        return not any(part in lowered for part in ("token=", "api_key=", "authorization=", "@"))
 
     def _safe_home_assistant_error(self, err: Exception) -> str:
         """Return a useful Home Assistant error without leaking credentials."""
