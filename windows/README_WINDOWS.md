@@ -42,6 +42,13 @@ AIVA Collector lee archivos CSV o Excel exportados por el sistema del comercio, 
 
 `commerce_id` y `collector_id` salen del admin AIVA Comercial. El token del collector se copia una sola vez desde el admin y no debe guardarse en `config.local.json`.
 
+Para abrir el summary generado:
+
+```bat
+Get-Content C:\AIVA_Comercio\output\last_summary.json -Raw
+C:\Windows\System32\notepad.exe C:\AIVA_Comercio\output\last_summary.json
+```
+
 ## Mapeo de columnas
 
 Editar `column_mapping` en `config.local.json`. La izquierda es el nombre canonico de AIVA y la derecha es la columna real del archivo del comercio.

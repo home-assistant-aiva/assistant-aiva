@@ -92,6 +92,10 @@ def test_collect_diagnostics_is_local_and_token_safe():
         assert value not in lowered
     assert "collector_token" in content
     assert "PSObject.Properties.Remove('collector_token')" in content
+    assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in content
+    assert "POWERSHELL_EXE" in content
+    assert "PowerShell no disponible" in content
+    assert "powershell -NoProfile" not in content
     assert "Compress-Archive" in content
     assert "NoProfile" in content
     assert "no envia nada por internet" in lowered

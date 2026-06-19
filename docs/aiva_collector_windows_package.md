@@ -110,6 +110,13 @@ C:\AIVA_Comercio\output\last_summary.json
 
 Si ese archivo se genera y no se ejecuto `run_send.bat`, la prueba fue local.
 
+Para abrir el summary:
+
+```bat
+Get-Content C:\AIVA_Comercio\output\last_summary.json -Raw
+C:\Windows\System32\notepad.exe C:\AIVA_Comercio\output\last_summary.json
+```
+
 ## Validacion de instalacion limpia
 
 Antes de copiar el ZIP a una PC Windows se puede validar en Linux que el paquete no depende del checkout de desarrollo:

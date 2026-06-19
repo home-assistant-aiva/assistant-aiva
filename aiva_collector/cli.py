@@ -23,6 +23,13 @@ def _safe_idem_hash(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
+def safe_display_path(path: Path, base: Path = PROJECT_ROOT) -> str:
+    try:
+        return str(path.relative_to(base))
+    except ValueError:
+        return str(path)
+
+
 def validate_config(config: CollectorConfig) -> list[Path]:
     files = discover_input_files(config)
     if not files:
@@ -105,7 +112,7 @@ def _move_processed_if_enabled(config: CollectorConfig, files: list[Path]) -> li
     for source in files:
         dest = processed_dir / source.name
         shutil.move(str(source), str(dest))
-        moved.append(str(dest.relative_to(PROJECT_ROOT)))
+        moved.append(safe_display_path(dest))
     return moved
 
 
@@ -143,7 +150,7 @@ def cmd_run_once(args: argparse.Namespace) -> int:
         print("Dry-run: no se envio nada al backend.")
         save_state(
             config,
-            last_summary_file=str(output_path.relative_to(PROJECT_ROOT)),
+            last_summary_file=safe_display_path(output_path),
             last_idempotency_key_hash=_safe_idem_hash(idem),
             last_status="dry_run",
             processed_files=[],
@@ -177,7 +184,7 @@ def cmd_run_once(args: argparse.Namespace) -> int:
         )
         save_state(
             config,
-            last_summary_file=str(output_path.relative_to(PROJECT_ROOT)),
+            last_summary_file=safe_display_path(output_path),
             last_idempotency_key_hash=_safe_idem_hash(idem),
             last_status="error",
             backend_state=backend_state,
@@ -194,7 +201,7 @@ def cmd_run_once(args: argparse.Namespace) -> int:
     )
     save_state(
         config,
-        last_summary_file=str(output_path.relative_to(PROJECT_ROOT)),
+        last_summary_file=safe_display_path(output_path),
         last_idempotency_key_hash=_safe_idem_hash(idem),
         last_status="ok",
         processed_files=moved,

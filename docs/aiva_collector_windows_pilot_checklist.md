@@ -30,6 +30,13 @@
 - Confirmar que `filas_descartadas` sea razonable para el archivo probado.
 - Confirmar que no se envio nada al backend.
 
+Para abrir el summary:
+
+```bat
+Get-Content C:\AIVA_Comercio\output\last_summary.json -Raw
+C:\Windows\System32\notepad.exe C:\AIVA_Comercio\output\last_summary.json
+```
+
 ## D. Prueba con envio controlado
 
 - Configurar token temporal en la misma consola:
