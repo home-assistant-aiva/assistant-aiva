@@ -1,0 +1,11 @@
+fecha,producto_codigo,producto_nombre,categoria,cantidad_vendida,precio_venta,costo_unitario,stock_actual
+2026-06-01,SKU-COCA-225,Coca-Cola 2.25L,Bebidas,18,2500,1600,4
+2026-06-02,SKU-COCA-225,Coca-Cola 2.25L,Bebidas,22,2500,1600,3
+2026-06-03,SKU-COCA-225,Coca-Cola 2.25L,Bebidas,20,2550,1600,2
+2026-06-04,,Galletitas X,Almacen,0,1200,700,48
+2026-06-05,,Galletitas X,Almacen,1,1200,700,47
+2026-06-06,SKU-YERBA-1K,Yerba 1kg,Almacen,12,3900,2450,16
+2026-06-07,SKU-YERBA-1K,Yerba 1kg,Almacen,15,3950,2450,11
+2026-06-08,SKU-MARGEN-BAJO,Aceite oferta,Almacen,10,2100,2050,9
+2026-06-09,SKU-INCOMPLETO,Producto incompleto,Almacen,,1800,1200,5
+2026-06-10,SKU-SIN-COSTO,Producto sin costo,Kiosco,5,900,,20

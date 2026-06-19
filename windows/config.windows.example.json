@@ -1,0 +1,29 @@
+{
+  "collector_version": "0.1.0",
+  "backend_url": "http://TU_BACKEND:8080",
+  "commerce_id": "REEMPLAZAR_COMMERCE_ID",
+  "collector_id": "REEMPLAZAR_COLLECTOR_ID",
+  "collector_token_env": "AIVA_COLLECTOR_TOKEN",
+  "input_dir": "C:\\AIVA_Comercio\\entrada",
+  "processed_dir": "C:\\AIVA_Comercio\\procesados",
+  "error_dir": "C:\\AIVA_Comercio\\error",
+  "output_dir": "C:\\AIVA_Comercio\\output",
+  "state_dir": "C:\\AIVA_Comercio\\state",
+  "log_file": "C:\\AIVA_Comercio\\logs\\aiva_collector.log",
+  "periodo": "weekly",
+  "date_format": "%Y-%m-%d",
+  "encoding": "utf-8",
+  "delimiter": ",",
+  "max_products_per_summary": 1000,
+  "move_processed_files": false,
+  "column_mapping": {
+    "fecha": "fecha",
+    "producto_codigo": "producto_codigo",
+    "producto_nombre": "producto_nombre",
+    "categoria": "categoria",
+    "cantidad_vendida": "cantidad_vendida",
+    "precio_venta": "precio_venta",
+    "costo_unitario": "costo_unitario",
+    "stock_actual": "stock_actual"
+  }
+}
