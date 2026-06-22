@@ -1,0 +1,106 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - collector-main
+    paths:
+      - "aiva_collector/**"
+      - "packaging/**"
+      - "scripts/build_windows_exe.py"
+      - "scripts/verify_windows_exe_package.py"
+      - "windows/**"
+      - "docs/aiva_collector_windows_exe.md"
+      - "docs/aiva_collector_windows_installer.md"
+      - "pyproject.toml"
+      - ".github/workflows/build-windows-installer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
+          python -m pip install pyinstaller
+
+      - name: Run packaging tests
+        run: |
+          python -m pytest tests/test_windows_exe_packaging.py tests/test_windows_package.py tests/test_windows_assets.py tests/test_cli.py
+
+      - name: Build aiva-collector.exe
+        run: |
+          python scripts/build_windows_exe.py
+
+      - name: Verify executable help
+        run: |
+          .\dist\aiva-collector.exe --help
+
+      - name: Create demo config for executable validation
+        shell: pwsh
+        run: |
+          $config = Get-Content -Raw -LiteralPath "configs\example_config.json" | ConvertFrom-Json
+          $root = (Get-Location).Path
+          $config.input_dir = Join-Path $root "samples\input"
+          $config.processed_dir = Join-Path $env:RUNNER_TEMP "aiva_processed"
+          $config.error_dir = Join-Path $env:RUNNER_TEMP "aiva_error"
+          $config.output_dir = Join-Path $env:RUNNER_TEMP "aiva_output"
+          $config.state_dir = Join-Path $env:RUNNER_TEMP "aiva_state"
+          $config.log_file = Join-Path $env:RUNNER_TEMP "aiva_logs\aiva_collector.log"
+          $path = Join-Path $env:RUNNER_TEMP "aiva_config_demo.json"
+          $config | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 -LiteralPath $path
+          "AIVA_DEMO_CONFIG=$path" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Verify executable validate
+        shell: pwsh
+        run: |
+          .\dist\aiva-collector.exe validate --config "$env:AIVA_DEMO_CONFIG"
+
+      - name: Verify packaging definitions before installer
+        run: |
+          python scripts/verify_windows_exe_package.py
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "packaging\inno\aiva_collector_setup.iss"
+
+      - name: Create technical ZIP and manifest
+        run: |
+          python scripts/verify_windows_exe_package.py --create-zip --require-artifacts
+
+      - name: Print SHA256
+        shell: pwsh
+        run: |
+          Get-FileHash "dist\aiva-collector.exe" -Algorithm SHA256 | Format-List
+          Get-FileHash "dist\AIVA-Collector-Setup-v0.1.0.exe" -Algorithm SHA256 | Format-List
+          Get-FileHash "dist\aiva-collector-windows-exe-v0.1.0.zip" -Algorithm SHA256 | Format-List
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiva-collector-windows-v0.1.0
+          if-no-files-found: error
+          path: |
+            dist/aiva-collector.exe
+            dist/AIVA-Collector-Setup-v0.1.0.exe
+            dist/AIVA-Collector-Installer-v0.1.0.manifest.json
+            dist/aiva-collector-windows-exe-v0.1.0.zip

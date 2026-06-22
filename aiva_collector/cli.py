@@ -19,6 +19,15 @@ from .state import save_state
 from .summarizer import build_summary, idempotency_key
 
 
+WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
+
+
+def default_config_path() -> str | None:
+    if sys.platform.startswith("win"):
+        return WINDOWS_DEFAULT_CONFIG
+    return None
+
+
 def _safe_idem_hash(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
@@ -213,6 +222,11 @@ def cmd_run_once(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_send(args: argparse.Namespace) -> int:
+    args.send = True
+    return cmd_run_once(args)
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     setup_logging(config)
@@ -223,8 +237,9 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m aiva_collector.cli")
+    parser = argparse.ArgumentParser(prog="aiva-collector")
     sub = parser.add_subparsers(dest="command", required=True)
+    config_default = default_config_path()
 
     p_init = sub.add_parser("init-config")
     p_init.add_argument("--output", required=True)
@@ -232,17 +247,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=cmd_init_config)
 
     p_validate = sub.add_parser("validate")
-    p_validate.add_argument("--config", required=True)
+    p_validate.add_argument("--config", default=config_default, required=config_default is None)
     p_validate.set_defaults(func=cmd_validate)
 
     p_run = sub.add_parser("run-once")
-    p_run.add_argument("--config", required=True)
+    p_run.add_argument("--config", default=config_default, required=config_default is None)
     p_run.add_argument("--send", action="store_true")
     p_run.set_defaults(func=cmd_run_once)
 
+    p_send = sub.add_parser("send")
+    p_send.add_argument("--config", default=config_default, required=config_default is None)
+    p_send.set_defaults(func=cmd_send)
+
     p_status = sub.add_parser("status")
-    p_status.add_argument("--config", required=True)
+    p_status.add_argument("--config", default=config_default, required=config_default is None)
     p_status.set_defaults(func=cmd_status)
+
+    p_service_status = sub.add_parser("service-status")
+    p_service_status.add_argument("--config", default=config_default, required=config_default is None)
+    p_service_status.set_defaults(func=cmd_status)
     return parser
 
 

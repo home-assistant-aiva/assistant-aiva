@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from aiva_collector.cli import main, safe_display_path
+from aiva_collector.cli import build_parser, main, safe_display_path
 
 
 def test_cli_run_once_dry_generates_last_summary(monkeypatch):
@@ -22,6 +22,21 @@ def test_cli_send_without_token_fails(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert code == 2
     assert "Falta token" in captured.err
+
+
+def test_cli_send_alias_without_token_fails(monkeypatch, capsys):
+    monkeypatch.delenv("AIVA_COLLECTOR_TOKEN", raising=False)
+    code = main(["send", "--config", "configs/example_config.json"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "Falta token" in captured.err
+
+
+def test_cli_windows_default_config(monkeypatch):
+    monkeypatch.setattr("sys.platform", "win32")
+    parser = build_parser()
+    args = parser.parse_args(["validate"])
+    assert args.config == "C:\\AIVA_Comercio\\config.local.json"
 
 
 def test_move_processed_false_keeps_file():

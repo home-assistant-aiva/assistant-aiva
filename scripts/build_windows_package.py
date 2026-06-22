@@ -189,6 +189,8 @@ def line_is_allowed(pattern_name: str, relative: Path, line: str) -> bool:
     if pattern_name == "Authorization: Bearer":
         return normalized == "aiva_collector/client.py" and 'f"Bearer {token}"' in line
     if pattern_name == "config.local.json":
+        if normalized == "aiva_collector/cli.py" and "WINDOWS_DEFAULT_CONFIG" in line:
+            return True
         return normalized.endswith(".md") or normalized.endswith(".bat") or normalized == "README.md"
     return False
 
