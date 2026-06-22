@@ -34,7 +34,7 @@ def _safe_idem_hash(key: str) -> str:
 
 def safe_display_path(path: Path, base: Path = PROJECT_ROOT) -> str:
     try:
-        return str(path.relative_to(base))
+        return path.relative_to(base).as_posix()
     except ValueError:
         return str(path)
 

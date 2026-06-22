@@ -85,7 +85,7 @@ def test_linux_relative_and_absolute_paths_still_work(tmp_path):
         },
         config_path=Path("config.json"),
     )
-    assert str(relative.path("input_dir")).endswith("/samples/input")
+    assert relative.path("input_dir").parts[-2:] == ("samples", "input")
     assert absolute.path("input_dir") == tmp_path
 
 
