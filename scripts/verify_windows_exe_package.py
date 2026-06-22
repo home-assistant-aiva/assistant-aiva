@@ -85,6 +85,7 @@ def assert_spec_safe(spec_path: Path = SPEC_PATH) -> None:
     required = [
         'name="aiva-collector"',
         "console=True",
+        "aiva_collector_entrypoint.py",
         '"requests"',
         '"openpyxl"',
         '"certifi"',

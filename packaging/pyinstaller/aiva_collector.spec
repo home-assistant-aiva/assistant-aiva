@@ -8,7 +8,7 @@ project_root = Path(SPECPATH).parents[1]
 
 
 a = Analysis(
-    [str(project_root / "aiva_collector" / "cli.py")],
+    [str(project_root / "packaging" / "pyinstaller" / "aiva_collector_entrypoint.py")],
     pathex=[str(project_root)],
     binaries=[],
     datas=[],

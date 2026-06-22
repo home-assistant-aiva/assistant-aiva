@@ -12,6 +12,8 @@ VERIFY_SPEC.loader.exec_module(verify_windows_exe_package)
 
 def test_pyinstaller_spec_is_safe_and_complete():
     verify_windows_exe_package.assert_spec_safe()
+    entrypoint = Path("packaging/pyinstaller/aiva_collector_entrypoint.py").read_text(encoding="utf-8")
+    assert "from aiva_collector.cli import main" in entrypoint
 
 
 def test_inno_script_is_safe_and_preserves_existing_config():
