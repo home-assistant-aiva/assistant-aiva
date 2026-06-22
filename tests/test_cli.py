@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from aiva_collector.cli import build_parser, main, safe_display_path
 
 
@@ -37,6 +39,40 @@ def test_cli_windows_default_config(monkeypatch):
     parser = build_parser()
     args = parser.parse_args(["validate"])
     assert args.config == "C:\\AIVA_Comercio\\config.local.json"
+
+
+def test_cli_exposes_activation_and_run_auto_help():
+    parser = build_parser()
+    with pytest.raises(SystemExit) as activate:
+        parser.parse_args(["activate", "--help"])
+    with pytest.raises(SystemExit) as run_auto:
+        parser.parse_args(["run-auto", "--help"])
+    assert activate.value.code == 0
+    assert run_auto.value.code == 0
+
+
+def test_run_auto_without_files_exits_ok(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("AIVA_COLLECTOR_TOKEN", "token-test")
+    config_path = tmp_path / "config.auto.json"
+    data = json.loads(Path("configs/example_config.json").read_text(encoding="utf-8"))
+    data.update(
+        {
+            "input_dir": str(tmp_path / "input"),
+            "processed_dir": str(tmp_path / "processed"),
+            "error_dir": str(tmp_path / "error"),
+            "output_dir": str(tmp_path / "output"),
+            "state_dir": str(tmp_path / "state"),
+            "log_file": str(tmp_path / "logs" / "aiva_collector.log"),
+            "move_processed_files": True,
+        }
+    )
+    (tmp_path / "input").mkdir()
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    code = main(["run-auto", "--config", str(config_path)])
+
+    assert code == 0
+    assert "Sin archivos" in capsys.readouterr().out
 
 
 def test_move_processed_false_keeps_file():

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
+from .token_store import load_token
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -55,7 +56,12 @@ class CollectorConfig:
     @property
     def token(self) -> str | None:
         value = os.getenv(self.collector_token_env)
-        return value if value else None
+        if value:
+            return value
+        try:
+            return load_token(self.path("state_dir"))
+        except ConfigError:
+            return None
 
     @property
     def column_mapping(self) -> dict[str, str]:
@@ -85,9 +91,7 @@ class CollectorConfig:
         if missing:
             raise ConfigError("Faltan campos para enviar: " + ", ".join(missing))
         if not self.token:
-            raise ConfigError(
-                f"Falta token: exportar la variable {self.collector_token_env} antes de usar --send"
-            )
+            raise ConfigError("collector_not_activated: Falta token; activá AIVA Collector antes de enviar")
 
 
 def load_config(path: str | Path) -> CollectorConfig:

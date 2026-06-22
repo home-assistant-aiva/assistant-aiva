@@ -1,6 +1,7 @@
 import pytest
 
 from aiva_collector.client import CollectorClient, _headers
+from aiva_collector.client import activate_collector
 from aiva_collector.config import load_config
 from aiva_collector.errors import BackendError
 
@@ -94,3 +95,33 @@ def test_post_status_uses_backend_error_message_field(monkeypatch):
     CollectorClient(config).post_status("error", "archivo invalido")
     assert captured["kwargs"]["json"]["error_message"] == "archivo invalido"
     assert "message" not in captured["kwargs"]["json"]
+
+
+def test_activate_collector_posts_code_without_printing_token(monkeypatch, capsys):
+    captured = {}
+
+    class Response:
+        status_code = 200
+        content = b'{"ok": true, "collector_token": "aiva_col_secret"}'
+
+        def json(self):
+            return {"ok": True, "collector_token": "aiva_col_secret"}
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return Response()
+
+    monkeypatch.setattr("aiva_collector.client.requests.post", fake_post)
+    response = activate_collector(
+        backend_url="http://backend",
+        activation_code="AIVA-TEST-0001",
+        machine_id="machine",
+        hostname="host",
+        collector_version="0.2.0",
+    )
+
+    assert response["collector_token"] == "aiva_col_secret"
+    assert captured["url"] == "http://backend/commerce/collector/activate"
+    assert captured["kwargs"]["json"]["activation_code"] == "AIVA-TEST-0001"
+    assert "aiva_col_secret" not in capsys.readouterr().out

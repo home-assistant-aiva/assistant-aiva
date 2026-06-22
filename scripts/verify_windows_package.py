@@ -109,7 +109,11 @@ def assert_required_files(names: set[str]) -> None:
 
 
 def line_is_safe_code(name: str, pattern_name: str, line: str) -> bool:
-    return pattern_name == "Authorization: Bearer" and name == "aiva_collector/client.py" and 'f"Bearer {token}"' in line
+    if pattern_name == "Authorization: Bearer" and name == "aiva_collector/client.py" and 'f"Bearer {token}"' in line:
+        return True
+    if pattern_name == "collector_token" and name == "aiva_collector/cli.py" and 'response["collector_token"]' in line:
+        return True
+    return False
 
 
 def assert_no_secrets(archive: zipfile.ZipFile, names: list[str]) -> None:

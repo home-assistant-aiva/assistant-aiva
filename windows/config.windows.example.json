@@ -1,6 +1,6 @@
 {
-  "collector_version": "0.1.0",
-  "backend_url": "http://TU_BACKEND:8080",
+  "collector_version": "0.2.0",
+  "backend_url": "http://187.77.44.118:8080",
   "commerce_id": "REEMPLAZAR_COMMERCE_ID",
   "collector_id": "REEMPLAZAR_COLLECTOR_ID",
   "collector_token_env": "AIVA_COLLECTOR_TOKEN",
@@ -15,7 +15,7 @@
   "encoding": "utf-8",
   "delimiter": ",",
   "max_products_per_summary": 1000,
-  "move_processed_files": false,
+  "move_processed_files": true,
   "column_mapping": {
     "fecha": "fecha",
     "producto_codigo": "producto_codigo",

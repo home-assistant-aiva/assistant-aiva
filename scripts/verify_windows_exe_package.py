@@ -11,14 +11,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 INNO_PATH = ROOT / "packaging" / "inno" / "aiva_collector_setup.iss"
 DIST_DIR = ROOT / "dist"
 EXE_PATH = DIST_DIR / "aiva-collector.exe"
-INSTALLER_PATH = DIST_DIR / "AIVA-Collector-Setup-v0.1.0.exe"
-TECH_ZIP_PATH = DIST_DIR / "aiva-collector-windows-exe-v0.1.0.zip"
-MANIFEST_PATH = DIST_DIR / "AIVA-Collector-Installer-v0.1.0.manifest.json"
+INSTALLER_PATH = DIST_DIR / "AIVA-Collector-Setup-v0.2.0.exe"
+TECH_ZIP_PATH = DIST_DIR / "aiva-collector-windows-exe-v0.2.0.zip"
+MANIFEST_PATH = DIST_DIR / "AIVA-Collector-Installer-v0.2.0.manifest.json"
 
 FORBIDDEN_TEXT = [
     "/opt/aiva-collector",
@@ -45,9 +45,13 @@ TECH_ZIP_FILES = [
     ROOT / "docs" / "aiva_collector_windows_installer.md",
     ROOT / "windows" / "config.windows.example.json",
     ROOT / "packaging" / "windows_runtime" / "run_validate.bat",
+    ROOT / "packaging" / "windows_runtime" / "activate.bat",
     ROOT / "packaging" / "windows_runtime" / "run_dry.bat",
+    ROOT / "packaging" / "windows_runtime" / "run_auto.bat",
     ROOT / "packaging" / "windows_runtime" / "run_status.bat",
     ROOT / "packaging" / "windows_runtime" / "run_send.bat",
+    ROOT / "packaging" / "windows_runtime" / "install_scheduled_task.bat",
+    ROOT / "packaging" / "windows_runtime" / "uninstall_scheduled_task.bat",
     ROOT / "packaging" / "windows_runtime" / "collect_diagnostics.bat",
 ]
 
@@ -104,12 +108,14 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
     text = inno_path.read_text(encoding="utf-8")
     assert_text_file_safe(inno_path)
     required = [
-        "OutputBaseFilename=AIVA-Collector-Setup-v0.1.0",
+        "OutputBaseFilename=AIVA-Collector-Setup-v0.2.0",
         "Source: \"..\\..\\dist\\aiva-collector.exe\"",
         "DestName: \"config.local.json\"; Flags: onlyifdoesntexist",
         "C:\\AIVA_Comercio\\entrada",
         "C:\\AIVA_Comercio\\diagnostico",
-        "run_send.bat",
+        "activate.bat",
+        "run_auto.bat",
+        "install_scheduled_task.bat",
     ]
     missing = [value for value in required if value not in text]
     if missing:

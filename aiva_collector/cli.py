@@ -4,22 +4,28 @@ import argparse
 import hashlib
 import json
 import logging
+import os
+import socket
 import shutil
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .client import CollectorClient
+from .client import CollectorClient, activate_collector
 from .config import PROJECT_ROOT, CollectorConfig, init_config, load_config
-from .errors import BackendError, CollectorError, ValidationError
+from .errors import BackendError, CollectorError, ConfigError, ValidationError
 from .logging_setup import setup_logging
 from .normalizer import normalize_rows
 from .readers import detect_columns, discover_input_files, read_file
 from .state import save_state
 from .summarizer import build_summary, idempotency_key
+from .token_store import save_token
 
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
+DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
+DEFAULT_COLLECTOR_VERSION = "0.2.0"
 
 
 def default_config_path() -> str | None:
@@ -123,6 +129,187 @@ def _move_processed_if_enabled(config: CollectorConfig, files: list[Path]) -> li
         shutil.move(str(source), str(dest))
         moved.append(safe_display_path(dest))
     return moved
+
+
+def _timestamped_dest(directory: Path, source: Path, *, suffix: str | None = None) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    extra = f".{suffix}" if suffix else ""
+    return directory / f"{source.stem}.{stamp}{extra}{source.suffix}"
+
+
+def _move_files(files: list[Path], directory: Path, *, suffix: str | None = None) -> list[str]:
+    directory.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for source in files:
+        if not source.exists():
+            continue
+        dest = _timestamped_dest(directory, source, suffix=suffix)
+        shutil.move(str(source), str(dest))
+        moved.append(safe_display_path(dest))
+    return moved
+
+
+def _machine_id_path() -> Path:
+    if sys.platform.startswith("win"):
+        return Path(r"C:\AIVA_Comercio\state\machine.id")
+    return PROJECT_ROOT / "state" / "machine.id"
+
+
+def stable_machine_id() -> str:
+    path = _machine_id_path()
+    if path.exists():
+        value = path.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value = f"aiva-{uuid.uuid4().hex}"
+    path.write_text(value, encoding="utf-8")
+    return value
+
+
+def _activation_config_path(value: str | None) -> Path:
+    return Path(value or WINDOWS_DEFAULT_CONFIG)
+
+
+def _write_activation_config(path: Path, *, backend_url: str, response: dict) -> None:
+    defaults = dict(response.get("config_defaults") or {})
+    config = {
+        "backend_url": backend_url.rstrip("/"),
+        "commerce_id": response["commerce_id"],
+        "collector_id": response["collector_id"],
+        "collector_version": response.get("collector_version") or DEFAULT_COLLECTOR_VERSION,
+        "collector_token_env": "AIVA_COLLECTOR_TOKEN",
+        **defaults,
+    }
+    config.pop("collector_token", None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def _install_scheduled_task_if_available() -> None:
+    if not sys.platform.startswith("win"):
+        return
+    script = Path(sys.executable).resolve().parent / "install_scheduled_task.bat"
+    if script.exists():
+        os.system(f'"{script}"')
+
+
+def cmd_activate(args: argparse.Namespace) -> int:
+    backend_url = (args.backend_url or input(f"Backend URL [{DEFAULT_BACKEND_URL}]: ").strip() or DEFAULT_BACKEND_URL).rstrip("/")
+    code = args.code or input("Código de activación: ").strip()
+    if not code:
+        raise ConfigError("activation_code_invalid: ingresá un código de activación")
+    response = activate_collector(
+        backend_url=backend_url,
+        activation_code=code,
+        machine_id=stable_machine_id(),
+        hostname=socket.gethostname(),
+        collector_version=DEFAULT_COLLECTOR_VERSION,
+    )
+    config_path = _activation_config_path(args.config)
+    _write_activation_config(config_path, backend_url=backend_url, response=response)
+    config = load_config(config_path)
+    save_token(config.path("state_dir"), response["collector_token"])
+    try:
+        CollectorClient(config).service_status()
+    except BackendError as exc:
+        raise BackendError(f"Activación guardada, pero falló estado conexión: {exc}", status_code=exc.status_code) from exc
+    print("AIVA Collector activado correctamente.")
+    print(f"Config: {config_path}")
+    print("Token guardado de forma segura. No se muestra en pantalla.")
+    if args.install_task:
+        _install_scheduled_task_if_available()
+    return 0
+
+
+def _collect_auto(config: CollectorConfig, files: list[Path]) -> tuple[dict, list[Path], list[Path], list[dict]]:
+    valid_files: list[Path] = []
+    error_files: list[Path] = []
+    all_rows = []
+    discarded = []
+    rows_read = 0
+    for path in files:
+        try:
+            raw_rows = read_file(path, config)
+            rows_read += len(raw_rows)
+            result = normalize_rows(raw_rows, config)
+        except Exception as exc:
+            logging.error("parse error file=%s error=%s", path.name, exc)
+            error_files.append(path)
+            continue
+        valid_files.append(path)
+        all_rows.extend(result.rows)
+        for item in result.discarded:
+            item["file"] = path.name
+            discarded.append(item)
+    if not valid_files:
+        raise ValidationError("No hubo archivos válidos para enviar")
+    summary = build_summary(
+        all_rows,
+        config,
+        files_processed=len(valid_files),
+        rows_read=rows_read,
+        rows_discarded=len(discarded),
+    )
+    return summary, valid_files, error_files, discarded
+
+
+def cmd_run_auto(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    setup_logging(config)
+    config.require_send_ready()
+    for key in ("processed_dir", "error_dir", "output_dir", "state_dir"):
+        config.path(key).mkdir(parents=True, exist_ok=True)
+    files = discover_input_files(config)
+    if not files:
+        logging.info("run-auto: no hay archivos CSV/XLSX en input_dir")
+        print("Sin archivos para procesar.")
+        return 0
+    summary, valid_files, error_files, discarded = _collect_auto(config, files)
+    for item in discarded[:20]:
+        logging.warning("Fila descartada file=%s row=%s reasons=%s", item.get("file"), item.get("row_number"), item.get("reasons"))
+    if error_files:
+        moved_errors = _move_files(error_files, config.path("error_dir"), suffix="parse_error")
+        logging.info("run-auto parse errors moved=%s", moved_errors)
+    output_path = _write_summary(config, summary)
+    idem = idempotency_key(summary)
+    backend_state = {
+        "last_backend_commerce_id": config.commerce_id,
+        "last_backend_collector_id": config.collector_id,
+        "last_idempotency_key_hash": _safe_idem_hash(idem),
+    }
+    try:
+        client = CollectorClient(config)
+        client.post_status("running")
+        response = client.send_summary(summary)
+        client.post_status("ok")
+        moved = _move_files(valid_files, config.path("processed_dir")) if bool(config.raw.get("move_processed_files", True)) else []
+        backend_state.update(
+            {
+                "last_backend_send_at": datetime.now(timezone.utc).isoformat(),
+                "last_backend_status_code": response.get("_http_status_code"),
+                "last_backend_summary_status": "sent",
+            }
+        )
+        save_state(config, last_summary_file=safe_display_path(output_path), last_idempotency_key_hash=_safe_idem_hash(idem), last_status="ok", processed_files=moved, backend_state=backend_state)
+        print("run-auto OK")
+        return 0
+    except BackendError as exc:
+        if exc.status_code == 409:
+            moved = _move_files(valid_files, config.path("processed_dir"), suffix="duplicate") if bool(config.raw.get("move_processed_files", True)) else []
+            backend_state.update(
+                {
+                    "last_backend_send_at": datetime.now(timezone.utc).isoformat(),
+                    "last_backend_status_code": 409,
+                    "last_backend_summary_status": "duplicate",
+                }
+            )
+            save_state(config, last_summary_file=safe_display_path(output_path), last_idempotency_key_hash=_safe_idem_hash(idem), last_status="duplicate", processed_files=moved, backend_state=backend_state)
+            print("run-auto duplicate_summary")
+            return 0
+        logging.error("run-auto backend error; archivos quedan en entrada: %s", exc)
+        save_state(config, last_summary_file=safe_display_path(output_path), last_idempotency_key_hash=_safe_idem_hash(idem), last_status="error", backend_state={**backend_state, "last_backend_status_code": exc.status_code})
+        return 2
 
 
 def cmd_init_config(args: argparse.Namespace) -> int:
@@ -258,6 +445,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_send = sub.add_parser("send")
     p_send.add_argument("--config", default=config_default, required=config_default is None)
     p_send.set_defaults(func=cmd_send)
+
+    p_activate = sub.add_parser("activate")
+    p_activate.add_argument("--backend-url", default=None)
+    p_activate.add_argument("--code", default=None)
+    p_activate.add_argument("--config", default=WINDOWS_DEFAULT_CONFIG)
+    p_activate.add_argument("--install-task", action="store_true")
+    p_activate.set_defaults(func=cmd_activate)
+
+    p_auto = sub.add_parser("run-auto")
+    p_auto.add_argument("--config", default=config_default, required=config_default is None)
+    p_auto.set_defaults(func=cmd_run_auto)
 
     p_status = sub.add_parser("status")
     p_status.add_argument("--config", default=config_default, required=config_default is None)

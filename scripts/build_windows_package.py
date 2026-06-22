@@ -13,7 +13,7 @@ from typing import Iterable
 
 
 PACKAGE_NAME = "aiva-collector-windows-manual"
-DEFAULT_VERSION = "0.1.0"
+DEFAULT_VERSION = "0.2.0"
 ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
 
@@ -105,6 +105,7 @@ SAFE_COLLECTOR_TOKEN_CONTEXTS = [
     "sin `collector_token`",
     "collector_token como campo",
     "collector_token en config",
+    'response["collector_token"]',
 ]
 
 

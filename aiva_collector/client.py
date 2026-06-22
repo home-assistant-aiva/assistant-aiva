@@ -91,3 +91,27 @@ class CollectorClient:
         if response.status_code not in (200, 201):
             raise _safe_error(response)
         return response.json() if response.content else {}
+
+
+def activate_collector(
+    *,
+    backend_url: str,
+    activation_code: str,
+    machine_id: str,
+    hostname: str,
+    collector_version: str,
+    timeout: int = 20,
+) -> dict[str, Any]:
+    response = requests.post(
+        f"{backend_url.rstrip('/')}/commerce/collector/activate",
+        json={
+            "activation_code": activation_code,
+            "machine_id": machine_id,
+            "hostname": hostname,
+            "collector_version": collector_version,
+        },
+        timeout=timeout,
+    )
+    if response.status_code not in (200, 201):
+        raise _safe_error(response)
+    return response.json() if response.content else {}

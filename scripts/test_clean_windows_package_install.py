@@ -137,6 +137,7 @@ def line_is_allowed(pattern_name: str, line: str) -> bool:
             '"collector_token" in data',
             '"collector_token" not in data',
             '"collector_token",',
+            'response["collector_token"]',
             "Properties.Remove('collector_token')",
         )
         return any(context in line for context in safe_contexts)
