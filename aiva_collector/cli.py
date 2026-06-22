@@ -11,6 +11,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .client import CollectorClient, activate_collector
 from .config import PROJECT_ROOT, CollectorConfig, init_config, load_config
@@ -25,7 +26,7 @@ from .token_store import save_token
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.0"
+DEFAULT_COLLECTOR_VERSION = "0.2.1"
 
 
 def default_config_path() -> str | None:
@@ -171,6 +172,23 @@ def _activation_config_path(value: str | None) -> Path:
     return Path(value or WINDOWS_DEFAULT_CONFIG)
 
 
+def _looks_like_activation_code(value: str) -> bool:
+    normalized = value.strip()
+    return normalized.lower().startswith("aiva_col_") or normalized.upper().startswith("AIVA-")
+
+
+def _normalize_backend_url(value: str) -> str:
+    backend_url = (value.strip() or DEFAULT_BACKEND_URL).rstrip("/")
+    if _looks_like_activation_code(backend_url):
+        raise ConfigError(
+            "Parece que pegaste el código en el campo URL. Presioná Enter en Backend URL y pegá el código cuando se pida Código de activación."
+        )
+    parsed = urlparse(backend_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ConfigError("Backend URL inválida. Debe empezar con http:// o https://.")
+    return backend_url
+
+
 def _write_activation_config(path: Path, *, backend_url: str, response: dict) -> None:
     defaults = dict(response.get("config_defaults") or {})
     config = {
@@ -195,7 +213,8 @@ def _install_scheduled_task_if_available() -> None:
 
 
 def cmd_activate(args: argparse.Namespace) -> int:
-    backend_url = (args.backend_url or input(f"Backend URL [{DEFAULT_BACKEND_URL}]: ").strip() or DEFAULT_BACKEND_URL).rstrip("/")
+    raw_backend_url = args.backend_url if args.backend_url is not None else input(f"Backend URL [{DEFAULT_BACKEND_URL}]: ")
+    backend_url = _normalize_backend_url(raw_backend_url)
     code = args.code or input("Código de activación: ").strip()
     if not code:
         raise ConfigError("activation_code_invalid: ingresá un código de activación")

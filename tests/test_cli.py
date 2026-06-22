@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from aiva_collector.cli import build_parser, main, safe_display_path
+from aiva_collector.cli import DEFAULT_BACKEND_URL, build_parser, main, safe_display_path
 
 
 def test_cli_run_once_dry_generates_last_summary(monkeypatch):
@@ -123,3 +123,59 @@ def test_safe_display_path_windows_manual_output_does_not_raise():
     path = Path("C:\\AIVA_Comercio\\output\\last_summary.json")
     base = Path("C:\\AIVA_Comercio\\collector")
     assert safe_display_path(path, base) == "C:\\AIVA_Comercio\\output\\last_summary.json"
+
+
+def test_activate_empty_backend_url_uses_default(monkeypatch, tmp_path):
+    captured = {}
+
+    monkeypatch.setattr("builtins.input", lambda prompt: "" if "Backend URL" in prompt else "AIVA-8F3K-91QZ")
+    monkeypatch.setattr("aiva_collector.cli.stable_machine_id", lambda: "machine-test")
+    monkeypatch.setattr("aiva_collector.cli.socket.gethostname", lambda: "host-test")
+
+    def fake_activate(**kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "commerce_id": "commerce-1",
+            "collector_id": "collector-1",
+            "collector_token": "aiva_col_secret",
+            "collector_version": "0.2.1",
+            "config_defaults": {
+                "input_dir": str(tmp_path / "input"),
+                "processed_dir": str(tmp_path / "processed"),
+                "error_dir": str(tmp_path / "error"),
+                "output_dir": str(tmp_path / "output"),
+                "state_dir": str(tmp_path / "state"),
+                "log_file": str(tmp_path / "logs" / "aiva_collector.log"),
+                "column_mapping": {
+                    "producto_nombre": "producto",
+                    "cantidad_vendida": "cantidad",
+                    "precio_venta": "precio",
+                },
+            },
+        }
+
+    monkeypatch.setattr("aiva_collector.cli.activate_collector", fake_activate)
+    monkeypatch.setattr("aiva_collector.cli.save_token", lambda *args, **kwargs: None)
+    monkeypatch.setattr("aiva_collector.cli.CollectorClient.service_status", lambda self: {})
+
+    code = main(["activate", "--config", str(tmp_path / "config.json")])
+
+    assert code == 0
+    assert captured["kwargs"]["backend_url"] == DEFAULT_BACKEND_URL
+    assert captured["kwargs"]["collector_version"] == "0.2.1"
+
+
+def test_activate_detects_code_pasted_in_backend_url(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda prompt: "aiva_col_wrong_field" if "Backend URL" in prompt else "AIVA-8F3K-91QZ")
+
+    code = main(["activate"])
+
+    assert code == 2
+    assert "Parece que pegaste el código en el campo URL" in capsys.readouterr().err
+
+
+def test_activate_rejects_backend_url_without_scheme(capsys):
+    code = main(["activate", "--backend-url", "187.77.44.118:8080", "--code", "AIVA-8F3K-91QZ"])
+
+    assert code == 2
+    assert "Debe empezar con http:// o https://" in capsys.readouterr().err

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import requests
+from requests import RequestException
 
 from .config import CollectorConfig
 from .errors import BackendError
@@ -28,7 +29,19 @@ def _safe_error(response: requests.Response) -> BackendError:
     except ValueError:
         detail = response.text[:300]
     status = response.status_code
-    if status == 400:
+    error_payload = detail.get("error") if isinstance(detail, dict) else None
+    error_code = error_payload.get("code") if isinstance(error_payload, dict) else None
+    if error_code == "activation_code_invalid":
+        message = "El código no es válido. Generá un código nuevo desde AIVA Comercial y volvé a intentar."
+    elif error_code == "activation_code_already_used":
+        message = "El código ya fue usado. Generá un código nuevo desde AIVA Comercial y volvé a intentar."
+    elif error_code == "activation_code_expired":
+        message = "El código venció. Generá un código nuevo desde AIVA Comercial y volvé a intentar."
+    elif error_code == "activation_code_revoked":
+        message = "El código fue revocado. Generá un código nuevo desde AIVA Comercial y volvé a intentar."
+    elif error_code == "commerce_not_active":
+        message = "El comercio no está activo. Revisá el estado en AIVA Comercial antes de activar."
+    elif status == 400:
         message = f"Solicitud invalida al backend: {detail}"
     elif status == 401:
         message = "Token invalido o no autorizado"
@@ -102,16 +115,19 @@ def activate_collector(
     collector_version: str,
     timeout: int = 20,
 ) -> dict[str, Any]:
-    response = requests.post(
-        f"{backend_url.rstrip('/')}/commerce/collector/activate",
-        json={
-            "activation_code": activation_code,
-            "machine_id": machine_id,
-            "hostname": hostname,
-            "collector_version": collector_version,
-        },
-        timeout=timeout,
-    )
+    try:
+        response = requests.post(
+            f"{backend_url.rstrip('/')}/commerce/collector/activate",
+            json={
+                "activation_code": activation_code,
+                "machine_id": machine_id,
+                "hostname": hostname,
+                "collector_version": collector_version,
+            },
+            timeout=timeout,
+        )
+    except RequestException as exc:
+        raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
     if response.status_code not in (200, 201):
         raise _safe_error(response)
     return response.json() if response.content else {}

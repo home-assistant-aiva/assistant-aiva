@@ -118,10 +118,33 @@ def test_activate_collector_posts_code_without_printing_token(monkeypatch, capsy
         activation_code="AIVA-TEST-0001",
         machine_id="machine",
         hostname="host",
-        collector_version="0.2.0",
+        collector_version="0.2.1",
     )
 
     assert response["collector_token"] == "aiva_col_secret"
     assert captured["url"] == "http://backend/commerce/collector/activate"
     assert captured["kwargs"]["json"]["activation_code"] == "AIVA-TEST-0001"
     assert "aiva_col_secret" not in capsys.readouterr().out
+
+
+def test_activate_collector_invalid_code_has_user_message(monkeypatch):
+    class Response:
+        status_code = 400
+        content = b'{"ok": false, "error": {"code": "activation_code_invalid", "message": "Activation code is invalid"}}'
+        text = content.decode("utf-8")
+
+        def json(self):
+            return {"ok": False, "error": {"code": "activation_code_invalid", "message": "Activation code is invalid"}}
+
+    monkeypatch.setattr("aiva_collector.client.requests.post", lambda *args, **kwargs: Response())
+
+    with pytest.raises(BackendError) as exc:
+        activate_collector(
+            backend_url="http://backend",
+            activation_code="AIVA-BAD1-CODE",
+            machine_id="machine",
+            hostname="host",
+            collector_version="0.2.1",
+        )
+
+    assert "El código no es válido" in str(exc.value)
