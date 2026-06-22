@@ -93,16 +93,16 @@ jobs:
         shell: pwsh
         run: |
           Get-FileHash "dist\aiva-collector.exe" -Algorithm SHA256 | Format-List
-          Get-FileHash "dist\AIVA-Collector-Setup-v0.2.0.exe" -Algorithm SHA256 | Format-List
-          Get-FileHash "dist\aiva-collector-windows-exe-v0.2.0.zip" -Algorithm SHA256 | Format-List
+          Get-FileHash "dist\AIVA-Collector-Setup-v0.2.1.exe" -Algorithm SHA256 | Format-List
+          Get-FileHash "dist\aiva-collector-windows-exe-v0.2.1.zip" -Algorithm SHA256 | Format-List
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: aiva-collector-windows-v0.2.0
+          name: aiva-collector-windows-v0.2.1
           if-no-files-found: error
           path: |
             dist/aiva-collector.exe
-            dist/AIVA-Collector-Setup-v0.2.0.exe
-            dist/AIVA-Collector-Installer-v0.2.0.manifest.json
-            dist/aiva-collector-windows-exe-v0.2.0.zip
+            dist/AIVA-Collector-Setup-v0.2.1.exe
+            dist/AIVA-Collector-Installer-v0.2.1.manifest.json
+            dist/aiva-collector-windows-exe-v0.2.1.zip
