@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from aiva_collector.cli import DEFAULT_BACKEND_URL, build_parser, main, safe_display_path
+from aiva_collector.cli import DEFAULT_BACKEND_URL, DEFAULT_COLLECTOR_VERSION, build_parser, main, safe_display_path
 
 
 def test_cli_run_once_dry_generates_last_summary(monkeypatch):
@@ -162,7 +162,7 @@ def test_activate_empty_backend_url_uses_default(monkeypatch, tmp_path):
 
     assert code == 0
     assert captured["kwargs"]["backend_url"] == DEFAULT_BACKEND_URL
-    assert captured["kwargs"]["collector_version"] == "0.2.1"
+    assert captured["kwargs"]["collector_version"] == DEFAULT_COLLECTOR_VERSION
 
 
 def test_activate_detects_code_pasted_in_backend_url(monkeypatch, capsys):

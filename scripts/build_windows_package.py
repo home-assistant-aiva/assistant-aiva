@@ -13,7 +13,7 @@ from typing import Iterable
 
 
 PACKAGE_NAME = "aiva-collector-windows-manual"
-DEFAULT_VERSION = "0.2.1"
+DEFAULT_VERSION = "0.2.2"
 ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
 

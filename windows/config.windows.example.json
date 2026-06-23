@@ -1,5 +1,5 @@
 {
-  "collector_version": "0.2.0",
+  "collector_version": "0.2.2",
   "backend_url": "http://187.77.44.118:8080",
   "commerce_id": "REEMPLAZAR_COMMERCE_ID",
   "collector_id": "REEMPLAZAR_COLLECTOR_ID",

@@ -13,6 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .column_mapping import (
+    ColumnMappingResult,
+    detect_column_mapping,
+    sample_preview,
+    validate_explicit_mapping,
+)
 from .client import CollectorClient, activate_collector
 from .config import PROJECT_ROOT, CollectorConfig, init_config, load_config
 from .errors import BackendError, CollectorError, ConfigError, ValidationError
@@ -26,7 +32,7 @@ from .token_store import save_token
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.1"
+DEFAULT_COLLECTOR_VERSION = "0.2.2"
 
 
 def default_config_path() -> str | None:
@@ -51,11 +57,10 @@ def validate_config(config: CollectorConfig) -> list[Path]:
     if not files:
         raise ValidationError("No se detectaron archivos CSV/XLSX en input_dir")
     columns = detect_columns(files, config)
-    mapping = config.column_mapping
-    required_sources = [mapping[name] for name in ("producto_nombre", "cantidad_vendida", "precio_venta")]
-    missing_columns = sorted(source for source in required_sources if source not in columns)
-    if missing_columns:
-        raise ValidationError("Faltan columnas requeridas en archivos: " + ", ".join(missing_columns))
+    explicit = validate_explicit_mapping(config.column_mapping, columns) if config.column_mapping else None
+    detected = explicit if explicit and explicit.status == "auto_approved" else detect_column_mapping(columns)
+    if detected.status == "failed":
+        raise ValidationError("AIVA necesita revisar el mapeo de columnas desde el admin.")
     config.path("processed_dir").mkdir(parents=True, exist_ok=True)
     config.path("error_dir").mkdir(parents=True, exist_ok=True)
     config.path("output_dir").mkdir(parents=True, exist_ok=True)
@@ -63,7 +68,77 @@ def validate_config(config: CollectorConfig) -> list[Path]:
     return files
 
 
-def _collect(config: CollectorConfig) -> tuple[dict, list[Path], list[dict]]:
+def _config_with_mapping(config: CollectorConfig, mapping: dict[str, str]) -> CollectorConfig:
+    raw = dict(config.raw)
+    raw["column_mapping"] = dict(mapping)
+    return CollectorConfig(raw=raw, config_path=config.config_path)
+
+
+def _headers_from_rows(rows: list[dict]) -> list[str]:
+    if not rows:
+        return []
+    return [str(header) for header in rows[0].keys()]
+
+
+def _backend_mapping(config: CollectorConfig) -> dict[str, str] | None:
+    if not config.token or not config.backend_url:
+        return None
+    try:
+        response = CollectorClient(config).get_column_mapping()
+    except BackendError as exc:
+        logging.warning("No se pudo consultar mapping activo; se usa deteccion local: %s", exc)
+        return None
+    mapping = response.get("mapping")
+    if isinstance(mapping, dict) and mapping:
+        return {str(key): str(value) for key, value in mapping.items()}
+    return None
+
+
+def _resolve_mapping_for_rows(
+    config: CollectorConfig,
+    rows: list[dict],
+    *,
+    backend_mapping: dict[str, str] | None = None,
+) -> tuple[CollectorConfig, ColumnMappingResult]:
+    headers = _headers_from_rows(rows)
+    warnings: list[str] = []
+    for source, mapping in (("backend", backend_mapping), ("explicit", config.column_mapping)):
+        if not mapping:
+            continue
+        result = validate_explicit_mapping(mapping, headers)
+        if result.status == "auto_approved":
+            if warnings:
+                result.warnings[:0] = warnings
+            return _config_with_mapping(config, result.mapping), result
+        warnings.append(f"Mapping {source} no coincide con las columnas detectadas; se intentó autodetección.")
+    result = detect_column_mapping(headers)
+    result.warnings[:0] = warnings
+    return _config_with_mapping(config, result.mapping), result
+
+
+def _mapping_candidate_payload(path: Path, rows: list[dict], result: ColumnMappingResult, config: CollectorConfig) -> dict:
+    include_preview = bool(config.raw.get("send_mapping_sample_preview", False))
+    return {
+        "commerce_id": config.commerce_id,
+        "collector_id": config.collector_id,
+        "headers": result.detected_headers,
+        "suggested_mapping": result.mapping,
+        "confidence": result.confidence,
+        "status": result.status,
+        "sample_preview": sample_preview(rows, result.detected_headers, include_values=include_preview),
+        "file_name": path.name,
+    }
+
+
+def _print_mapping_used(result: ColumnMappingResult) -> None:
+    print(f"mapping status: {result.status}")
+    print(f"mapping confidence: {result.confidence}")
+    print("mapping usado:")
+    for field, source in sorted(result.mapping.items()):
+        print(f"  {field}: {source}")
+
+
+def _collect(config: CollectorConfig, *, backend_mapping: dict[str, str] | None = None) -> tuple[dict, list[Path], list[dict]]:
     files = validate_config(config)
     logging.info("collector run start")
     logging.info("files detected count=%s", len(files))
@@ -73,7 +148,11 @@ def _collect(config: CollectorConfig) -> tuple[dict, list[Path], list[dict]]:
     for path in files:
         raw_rows = read_file(path, config)
         rows_read += len(raw_rows)
-        result = normalize_rows(raw_rows, config)
+        effective_config, mapping_result = _resolve_mapping_for_rows(config, raw_rows, backend_mapping=backend_mapping)
+        if mapping_result.status != "auto_approved":
+            raise ValidationError("AIVA necesita revisar el mapeo de columnas desde el admin.")
+        logging.info("mapping used file=%s confidence=%s mapping=%s", path.name, mapping_result.confidence, mapping_result.mapping)
+        result = normalize_rows(raw_rows, effective_config)
         all_rows.extend(result.rows)
         for item in result.discarded:
             item["file"] = path.name
@@ -241,17 +320,28 @@ def cmd_activate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _collect_auto(config: CollectorConfig, files: list[Path]) -> tuple[dict, list[Path], list[Path], list[dict]]:
+def _collect_auto(
+    config: CollectorConfig,
+    files: list[Path],
+    *,
+    backend_mapping: dict[str, str] | None = None,
+) -> tuple[dict | None, list[Path], list[Path], list[dict], list[dict]]:
     valid_files: list[Path] = []
     error_files: list[Path] = []
     all_rows = []
     discarded = []
+    candidates: list[dict] = []
     rows_read = 0
     for path in files:
         try:
             raw_rows = read_file(path, config)
             rows_read += len(raw_rows)
-            result = normalize_rows(raw_rows, config)
+            effective_config, mapping_result = _resolve_mapping_for_rows(config, raw_rows, backend_mapping=backend_mapping)
+            logging.info("mapping candidate file=%s status=%s confidence=%s", path.name, mapping_result.status, mapping_result.confidence)
+            if mapping_result.status != "auto_approved":
+                candidates.append(_mapping_candidate_payload(path, raw_rows, mapping_result, config))
+                continue
+            result = normalize_rows(raw_rows, effective_config)
         except Exception as exc:
             logging.error("parse error file=%s error=%s", path.name, exc)
             error_files.append(path)
@@ -261,6 +351,8 @@ def _collect_auto(config: CollectorConfig, files: list[Path]) -> tuple[dict, lis
         for item in result.discarded:
             item["file"] = path.name
             discarded.append(item)
+    if candidates:
+        return None, valid_files, error_files, discarded, candidates
     if not valid_files:
         raise ValidationError("No hubo archivos válidos para enviar")
     summary = build_summary(
@@ -270,7 +362,7 @@ def _collect_auto(config: CollectorConfig, files: list[Path]) -> tuple[dict, lis
         rows_read=rows_read,
         rows_discarded=len(discarded),
     )
-    return summary, valid_files, error_files, discarded
+    return summary, valid_files, error_files, discarded, candidates
 
 
 def cmd_run_auto(args: argparse.Namespace) -> int:
@@ -284,7 +376,26 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         logging.info("run-auto: no hay archivos CSV/XLSX en input_dir")
         print("Sin archivos para procesar.")
         return 0
-    summary, valid_files, error_files, discarded = _collect_auto(config, files)
+    client = CollectorClient(config)
+    backend_mapping = _backend_mapping(config)
+    summary, valid_files, error_files, discarded, candidates = _collect_auto(config, files, backend_mapping=backend_mapping)
+    if candidates:
+        for candidate in candidates:
+            try:
+                client.post_mapping_candidate(candidate)
+            except BackendError as exc:
+                logging.error("No se pudo enviar mapping candidate; archivo queda en entrada: %s", exc)
+                print("AIVA necesita revisar el mapeo de columnas desde el admin. No se envió summary.")
+                return 2
+        message = "AIVA necesita revisar el mapeo de columnas desde el admin."
+        logging.warning(message)
+        try:
+            client.post_status("error", message)
+        except BackendError:
+            pass
+        print(f"{message} No se envió summary.")
+        return 2
+    assert summary is not None
     for item in discarded[:20]:
         logging.warning("Fila descartada file=%s row=%s reasons=%s", item.get("file"), item.get("row_number"), item.get("reasons"))
     if error_files:
@@ -298,7 +409,6 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         "last_idempotency_key_hash": _safe_idem_hash(idem),
     }
     try:
-        client = CollectorClient(config)
         client.post_status("running")
         response = client.send_summary(summary)
         client.post_status("ok")
@@ -354,7 +464,8 @@ def cmd_run_once(args: argparse.Namespace) -> int:
     setup_logging(config)
     if args.send:
         config.require_send_ready()
-    summary, files, discarded = _collect(config)
+    backend_mapping = _backend_mapping(config) if args.send else None
+    summary, files, discarded = _collect(config, backend_mapping=backend_mapping)
     for item in discarded[:20]:
         logging.warning("Fila descartada file=%s row=%s reasons=%s", item.get("file"), item.get("row_number"), item.get("reasons"))
     output_path = _write_summary(config, summary)
@@ -362,6 +473,9 @@ def cmd_run_once(args: argparse.Namespace) -> int:
 
     if not args.send:
         _print_compact_summary(summary, output_path)
+        raw_rows = read_file(files[0], config) if files else []
+        _, mapping_result = _resolve_mapping_for_rows(config, raw_rows)
+        _print_mapping_used(mapping_result)
         print("Dry-run: no se envio nada al backend.")
         save_state(
             config,

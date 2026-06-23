@@ -105,6 +105,28 @@ class CollectorClient:
             raise _safe_error(response)
         return response.json() if response.content else {}
 
+    def get_column_mapping(self) -> dict[str, Any]:
+        response = requests.get(
+            f"{self.config.backend_url}/commerce/collector/column-mapping",
+            params={"commerce_id": self.config.commerce_id},
+            headers=_headers(self.config),
+            timeout=self.timeout,
+        )
+        if response.status_code not in (200, 201):
+            raise _safe_error(response)
+        return response.json() if response.content else {}
+
+    def post_mapping_candidate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = requests.post(
+            f"{self.config.backend_url}/commerce/collector/mapping-candidate",
+            json=payload,
+            headers=_headers(self.config),
+            timeout=self.timeout,
+        )
+        if response.status_code not in (200, 201):
+            raise _safe_error(response)
+        return response.json() if response.content else {}
+
 
 def activate_collector(
     *,

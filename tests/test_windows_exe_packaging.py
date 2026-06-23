@@ -20,7 +20,7 @@ def test_inno_script_is_safe_and_preserves_existing_config():
     verify_windows_exe_package.assert_inno_safe()
     content = Path("packaging/inno/aiva_collector_setup.iss").read_text(encoding="utf-8")
     assert "onlyifdoesntexist" in content
-    assert "AIVA-Collector-Setup-v0.2.1" in content
+    assert "AIVA-Collector-Setup-v0.2.2" in content
 
 
 def test_installer_runtime_wrappers_are_safe():

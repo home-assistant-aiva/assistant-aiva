@@ -1,5 +1,5 @@
 {
-  "collector_version": "0.2.0",
+  "collector_version": "0.2.2",
   "backend_url": "http://127.0.0.1:8080",
   "commerce_id": "commerce_demo",
   "collector_id": "collector_demo",

@@ -11,14 +11,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 INNO_PATH = ROOT / "packaging" / "inno" / "aiva_collector_setup.iss"
 DIST_DIR = ROOT / "dist"
 EXE_PATH = DIST_DIR / "aiva-collector.exe"
-INSTALLER_PATH = DIST_DIR / "AIVA-Collector-Setup-v0.2.1.exe"
-TECH_ZIP_PATH = DIST_DIR / "aiva-collector-windows-exe-v0.2.1.zip"
-MANIFEST_PATH = DIST_DIR / "AIVA-Collector-Installer-v0.2.1.manifest.json"
+INSTALLER_PATH = DIST_DIR / "AIVA-Collector-Setup-v0.2.2.exe"
+TECH_ZIP_PATH = DIST_DIR / "aiva-collector-windows-exe-v0.2.2.zip"
+MANIFEST_PATH = DIST_DIR / "AIVA-Collector-Installer-v0.2.2.manifest.json"
 
 FORBIDDEN_TEXT = [
     "/opt/aiva-collector",
@@ -108,7 +108,7 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
     text = inno_path.read_text(encoding="utf-8")
     assert_text_file_safe(inno_path)
     required = [
-        "OutputBaseFilename=AIVA-Collector-Setup-v0.2.1",
+        "OutputBaseFilename=AIVA-Collector-Setup-v0.2.2",
         "Source: \"..\\..\\dist\\aiva-collector.exe\"",
         "DestName: \"config.local.json\"; Flags: onlyifdoesntexist",
         "C:\\AIVA_Comercio\\entrada",
