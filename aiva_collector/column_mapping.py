@@ -35,6 +35,8 @@ ALIASES: dict[str, tuple[str, ...]] = {
         "item",
         "detalle",
         "producto descripcion",
+        "nombre descripcion producto",
+        "nombre producto",
         "nombre",
         "name",
     ),
@@ -42,6 +44,10 @@ ALIASES: dict[str, tuple[str, ...]] = {
         "codigo",
         "código",
         "cod",
+        "cod prod",
+        "cod_prod",
+        "codigo articulo",
+        "codigo_articulo",
         "sku",
         "producto_codigo",
         "cod_articulo",
@@ -61,12 +67,14 @@ ALIASES: dict[str, tuple[str, ...]] = {
         "cantidad_vendida",
         "unidades",
         "unidades_vendidas",
+        "unid vend",
+        "unid_vend",
+        "unidades vendidas",
         "qty",
         "quantity",
         "vendido",
         "ventas",
         "cant_vendida",
-        "unidades vendidas",
     ),
     "precio_venta": (
         "precio",
@@ -81,6 +89,9 @@ ALIASES: dict[str, tuple[str, ...]] = {
         "importe_unitario",
         "precio final",
         "precio_final",
+        "precio venta",
+        "precio_venta",
+        "price",
     ),
     "costo_unitario": (
         "costo",
@@ -91,6 +102,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
         "costo unitario",
         "compra",
         "precio_compra",
+        "cost",
     ),
     "stock_actual": (
         "stock",
@@ -98,6 +110,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
         "existencia",
         "existencias",
         "inventario",
+        "inventory",
         "disponible",
         "unidades_stock",
         "stock disponible",
@@ -123,6 +136,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
         "línea",
         "grupo",
         "departamento",
+        "category",
         "seccion",
         "sección",
     ),
@@ -201,6 +215,7 @@ def detect_column_mapping(headers: list[str] | tuple[str, ...] | set[str]) -> Co
             scores[field] = round(best_score, 3)
             used_headers.add(best_header)
 
+    _prefer_product_name_when_better(mapping, scores, normalized_headers, used_headers)
     _prefer_description_as_product_name(mapping, scores, normalized_headers, used_headers)
 
     missing_required = [field for field in REQUIRED_FIELDS if field not in mapping]
@@ -339,3 +354,24 @@ def _prefer_description_as_product_name(
                 scores["producto_codigo"] = 0.80
                 used_headers.add(product_header)
             return
+
+
+def _prefer_product_name_when_better(
+    mapping: dict[str, str],
+    scores: dict[str, float],
+    normalized_headers: dict[str, str],
+    used_headers: set[str],
+) -> None:
+    if "producto_nombre" in mapping:
+        return
+    for field, header in list(mapping.items()):
+        if field == "producto_codigo":
+            product_name_score = _score_header("producto_nombre", normalized_headers[header])
+            current_score = scores.get(field, 0.0)
+            if product_name_score >= 0.90 and product_name_score > current_score:
+                mapping.pop(field, None)
+                scores.pop(field, None)
+                mapping["producto_nombre"] = header
+                scores["producto_nombre"] = round(product_name_score, 3)
+                used_headers.add(header)
+                return

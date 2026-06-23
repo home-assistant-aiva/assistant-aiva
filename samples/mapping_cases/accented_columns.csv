@@ -1,0 +1,21 @@
+Día,Código,Artículo,Categoría,Unidades Vendidas,Precio Final,Costo Unitario,Stock Disponible
+2026-06-01,A001,Coca-Cola 2.25L,Bebidas,5,2500,1800,18
+2026-06-02,A002,Yerba 1kg,Almacen,4,3225,2415,11
+2026-06-03,A003,Galletitas X,Golosinas,10,1000,620,28
+2026-06-04,A004,Aceite Oferta,Almacen,2,4175,3315,4
+2026-06-05,A005,Alfajor Simple,Golosinas,13,650,390,40
+2026-06-06,A006,Leche 1L,Lacteos,8,1425,995,17
+2026-06-07,A007,Arroz 1kg,Almacen,4,1850,1200,9
+2026-06-08,A001,Coca-Cola 2.25L,Bebidas,6,2575,1815,11
+2026-06-09,A002,Yerba 1kg,Almacen,5,3200,2400,4
+2026-06-10,A003,Galletitas X,Golosinas,8,975,635,21
+2026-06-11,A004,Aceite Oferta,Almacen,3,4150,3300,0
+2026-06-12,A005,Alfajor Simple,Golosinas,14,725,405,33
+2026-06-13,A006,Leche 1L,Lacteos,6,1400,980,10
+2026-06-14,A007,Arroz 1kg,Almacen,5,1825,1215,2
+2026-06-15,A001,Coca-Cola 2.25L,Bebidas,7,2550,1800,4
+2026-06-16,A002,Yerba 1kg,Almacen,3,3275,2415,0
+2026-06-17,A003,Galletitas X,Golosinas,9,950,620,14
+2026-06-18,A004,Aceite Oferta,Almacen,4,4125,3315,0
+2026-06-19,A005,Alfajor Simple,Golosinas,12,700,390,26
+2026-06-20,A006,Leche 1L,Lacteos,7,1475,995,3

@@ -12,11 +12,13 @@ config.integration.local.json
 .env
 logs/*.log
 samples/output/*.json
+samples/mapping_cases/output/*.json
 samples/processed/*
 samples/error/*
 state/*.json
 !logs/.gitkeep
 !samples/output/.gitkeep
+!samples/mapping_cases/output/.gitkeep
 !samples/processed/.gitkeep
 !samples/error/.gitkeep
 !state/.gitkeep

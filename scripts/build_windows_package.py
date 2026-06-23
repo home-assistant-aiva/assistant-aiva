@@ -13,7 +13,7 @@ from typing import Iterable
 
 
 PACKAGE_NAME = "aiva-collector-windows-manual"
-DEFAULT_VERSION = "0.2.2"
+DEFAULT_VERSION = "0.2.3"
 ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
 
@@ -29,7 +29,9 @@ INCLUDE_PATHS = [
     Path("aiva_collector"),
     Path("windows"),
     Path("docs/aiva_collector_clean_install_test.md"),
+    Path("docs/aiva_collector_column_mapping.md"),
     Path("docs/aiva_collector_first_client_data_request.md"),
+    Path("docs/aiva_collector_mapping_test_cases.md"),
     Path("docs/aiva_collector_windows_manual.md"),
     Path("docs/aiva_collector_windows_package.md"),
     Path("docs/aiva_collector_windows_pilot_checklist.md"),

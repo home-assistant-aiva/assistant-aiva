@@ -32,7 +32,7 @@ from .token_store import save_token
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.2"
+DEFAULT_COLLECTOR_VERSION = "0.2.3"
 
 
 def default_config_path() -> str | None:
