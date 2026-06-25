@@ -17,6 +17,8 @@ BAT_FILES = [
     WINDOWS_DIR / "run_dry.bat",
     WINDOWS_DIR / "run_send.bat",
     WINDOWS_DIR / "run_status.bat",
+    WINDOWS_DIR / "run_queue_status.bat",
+    WINDOWS_DIR / "run_retry_pending.bat",
     WINDOWS_DIR / "set_token_example.bat",
 ]
 
@@ -126,6 +128,8 @@ def test_non_send_bats_do_not_execute_send():
         "run_validate.bat",
         "run_dry.bat",
         "run_status.bat",
+        "run_queue_status.bat",
+        "run_retry_pending.bat",
         "install_manual.bat",
         "install_dependencies.bat",
         "collect_diagnostics.bat",

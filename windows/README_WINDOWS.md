@@ -38,7 +38,9 @@ AIVA Collector lee archivos CSV o Excel exportados por el sistema del comercio, 
 10. Revisar `C:\AIVA_Comercio\output\last_summary.json`.
 11. Configurar token temporal en la misma ventana con `set AIVA_COLLECTOR_TOKEN=PEGAR_TOKEN_AQUI`.
 12. Ejecutar `run_send.bat` y escribir `ENVIAR` cuando corresponda.
-13. Ver recomendaciones en admin AIVA Comercial.
+13. Si no hay internet, ejecutar `run_queue_status.bat` para ver pendientes.
+14. Cuando vuelva internet, ejecutar `run_retry_pending.bat`.
+15. Ver recomendaciones en admin AIVA Comercial.
 
 `commerce_id` y `collector_id` salen del admin AIVA Comercial. El token del collector se copia una sola vez desde el admin y no debe guardarse en `config.local.json`.
 
@@ -73,6 +75,7 @@ Ejemplos:
 - Columnas no coinciden: revisar `column_mapping`.
 - Token faltante: usar `set AIVA_COLLECTOR_TOKEN=PEGAR_TOKEN_AQUI` antes de `run_send.bat`.
 - Backend no responde: revisar `backend_url`.
+- Pendiente offline: ejecutar `run_queue_status.bat` y luego `run_retry_pending.bat` cuando vuelva la conexion.
 - Comercio suspendido: revisar estado del comercio en admin.
 - `duplicate_summary`: el backend ya recibio ese resumen.
 - Separador incorrecto: cambiar `delimiter`, por ejemplo `;`.

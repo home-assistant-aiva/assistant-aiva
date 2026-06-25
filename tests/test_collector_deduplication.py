@@ -117,6 +117,47 @@ def test_backend_down_creates_pending_queue(tmp_path, monkeypatch):
     conn = connect(local_db_path(config))
     try:
         assert status_counts(conn)["pending_send"] == 1
-        assert queue_counts(conn)["pending"] == 1
+        assert queue_counts(conn)["retrying"] == 1
+        row = conn.execute("SELECT payload_json_path FROM upload_queue").fetchone()
+        assert row["payload_json_path"]
+        assert Path(row["payload_json_path"]).exists()
+    finally:
+        conn.close()
+
+
+def test_retry_success_sends_saved_payload_and_moves_file(tmp_path, monkeypatch):
+    config_path = _config(tmp_path)
+    source = tmp_path / "input" / "ventas.csv"
+    _write_valid(source, "Producto Pendiente")
+    sent: list[dict] = []
+    _mock_backend(monkeypatch, sent, fail=True)
+
+    assert main(["run-auto", "--config", str(config_path)]) == 0
+
+    _write_valid(source, "Producto Modificado")
+    _mock_backend(monkeypatch, sent, fail=False)
+    assert main(["run-auto", "--config", str(config_path)]) == 0
+
+    assert any(item["productos_resumidos"][0]["producto_nombre"] == "Producto Pendiente" for item in sent)
+    assert not source.exists()
+    assert list((tmp_path / "processed").glob("*.csv"))
+
+
+def test_pending_send_file_is_not_reparsed_as_new(tmp_path, monkeypatch):
+    config_path = _config(tmp_path, move_processed=False)
+    source = tmp_path / "input" / "ventas.csv"
+    _write_valid(source, "Producto Pendiente")
+    sent: list[dict] = []
+    _mock_backend(monkeypatch, sent, fail=True)
+    assert main(["run-auto", "--config", str(config_path)]) == 0
+
+    _write_valid(source, "Producto Modificado")
+    assert main(["run-auto", "--config", str(config_path)]) == 0
+
+    config = load_config(config_path)
+    conn = connect(local_db_path(config))
+    try:
+        assert status_counts(conn)["pending_send"] == 1
+        assert conn.execute("SELECT COUNT(*) AS count FROM processed_files").fetchone()["count"] == 1
     finally:
         conn.close()

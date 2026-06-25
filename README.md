@@ -36,6 +36,8 @@ FASE 4.4 incluye un paquete manual para pruebas en Windows, sin instalador exe y
 - `windows/run_dry.bat`
 - `windows/run_send.bat`
 - `windows/run_status.bat`
+- `windows/run_queue_status.bat`
+- `windows/run_retry_pending.bat`
 - `windows/install_manual.bat`
 - `windows/install_dependencies.bat`
 - `windows/check_python.bat`
@@ -92,11 +94,15 @@ python -m aiva_collector.cli validate --config config.local.json
 python -m aiva_collector.cli run-once --config config.local.json
 python -m aiva_collector.cli run-auto --config config.local.json
 python -m aiva_collector.cli status --config config.local.json
+python -m aiva_collector.cli queue-status --config config.local.json
+python -m aiva_collector.cli retry-pending --config config.local.json
 ```
 
 `run-once` sin `--send` es la prueba sin enviar: muestra mapping, validacion, duplicado local y si se enviaria. No mueve archivos, no envia y no marca `sent` en SQLite.
 
-`run-auto` es "Procesar ahora": espera archivos estables, deduplica por hash, valida, envia summary si corresponde, registra `state/aiva_collector.db` y mueve archivos a `procesados`, `procesados/duplicados` o `errores`.
+`run-auto` es "Procesar ahora": procesa cola pendiente, espera archivos estables, deduplica por hash, valida, envia summary si corresponde, registra `state/aiva_collector.db` y mueve archivos a `procesados`, `procesados/duplicados` o `errores`.
+
+`queue-status` muestra pendientes, reintentando, enviados, errores, proximo reintento y DB local. `retry-pending` intenta enviar ahora los pendientes sin imprimir token.
 
 El summary generado queda en `samples/output/last_summary.json` o en el `output_dir` configurado.
 
@@ -112,16 +118,16 @@ Antes del envío se reporta status `running`; luego `ok` o `error`. El token no 
 
 ## Robustez local
 
-FASE 5.9 agrega:
+FASE 6.0 agrega:
 
 - `processed_files` y `processed_file_events` en SQLite local.
 - `file_sha256` para detectar cambios fisicos.
 - `normalized_data_hash` para detectar cambios reales de datos.
 - idempotency key estable por comercio, collector y contenido normalizado.
 - validaciones bloqueantes y advertencias antes del envio.
-- `upload_queue` minima para dejar pendientes cuando el backend no responde.
+- `upload_queue` real con payload JSON en `state/queue`, backoff y reintento automatico.
 
-Ver [docs/aiva_collector_reliability.md](docs/aiva_collector_reliability.md).
+Ver [docs/aiva_collector_reliability.md](docs/aiva_collector_reliability.md) y [docs/aiva_collector_offline_queue.md](docs/aiva_collector_offline_queue.md).
 
 ## Integración backend demo
 

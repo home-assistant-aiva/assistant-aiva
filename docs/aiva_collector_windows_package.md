@@ -15,6 +15,8 @@ Incluye:
 - `docs\aiva_collector_first_client_data_request.md`
 - `windows\README_SUPPORT.md`
 - `windows\collect_diagnostics.bat`
+- `windows\run_queue_status.bat`
+- `windows\run_retry_pending.bat`
 - `README.md`
 - `pyproject.toml`
 - `configs\example_config.json`
@@ -44,11 +46,14 @@ Ejecutar estos BATs desde `C:\AIVA_Comercio\collector\windows`:
 4. `run_validate.bat`
 5. `run_dry.bat`
 6. `run_status.bat` si se quiere consultar estado del collector
-7. `set_token_example.bat` para ver como configurar el token temporalmente
-8. `run_send.bat` solo cuando el token este configurado y se quiera enviar
-9. `collect_diagnostics.bat` solo si hace falta soporte
+7. `run_queue_status.bat` para ver pendientes offline
+8. `run_retry_pending.bat` para reintentar pendientes
+9. `set_token_example.bat` para ver como configurar el token temporalmente
+10. `run_send.bat` solo cuando el token este configurado y se quiera enviar
+11. `collect_diagnostics.bat` solo si hace falta soporte
 
 `run_send.bat` exige que exista `AIVA_COLLECTOR_TOKEN` y pide escribir `ENVIAR` antes de ejecutar el envio.
+`run_retry_pending.bat` no imprime el token y usa la cola offline.
 
 ## Kit piloto
 

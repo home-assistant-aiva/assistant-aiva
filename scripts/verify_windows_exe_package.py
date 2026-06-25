@@ -11,14 +11,26 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.2.4"
+
+
+def read_version(root: Path = ROOT) -> str:
+    try:
+        import tomllib
+
+        data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        return str(data.get("project", {}).get("version") or "0.0.0")
+    except Exception:
+        return "0.0.0"
+
+
+VERSION = read_version()
 SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 INNO_PATH = ROOT / "packaging" / "inno" / "aiva_collector_setup.iss"
 DIST_DIR = ROOT / "dist"
 EXE_PATH = DIST_DIR / "aiva-collector.exe"
-INSTALLER_PATH = DIST_DIR / "AIVA-Collector-Setup-v0.2.4.exe"
-TECH_ZIP_PATH = DIST_DIR / "aiva-collector-windows-exe-v0.2.4.zip"
-MANIFEST_PATH = DIST_DIR / "AIVA-Collector-Installer-v0.2.4.manifest.json"
+INSTALLER_PATH = DIST_DIR / f"AIVA-Collector-Setup-v{VERSION}.exe"
+TECH_ZIP_PATH = DIST_DIR / f"aiva-collector-windows-exe-v{VERSION}.zip"
+MANIFEST_PATH = DIST_DIR / f"AIVA-Collector-Installer-v{VERSION}.manifest.json"
 
 FORBIDDEN_TEXT = [
     "/opt/aiva-collector",
@@ -49,6 +61,8 @@ TECH_ZIP_FILES = [
     ROOT / "packaging" / "windows_runtime" / "run_dry.bat",
     ROOT / "packaging" / "windows_runtime" / "run_auto.bat",
     ROOT / "packaging" / "windows_runtime" / "run_status.bat",
+    ROOT / "packaging" / "windows_runtime" / "run_queue_status.bat",
+    ROOT / "packaging" / "windows_runtime" / "run_retry_pending.bat",
     ROOT / "packaging" / "windows_runtime" / "run_send.bat",
     ROOT / "packaging" / "windows_runtime" / "install_scheduled_task.bat",
     ROOT / "packaging" / "windows_runtime" / "uninstall_scheduled_task.bat",
@@ -108,13 +122,16 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
     text = inno_path.read_text(encoding="utf-8")
     assert_text_file_safe(inno_path)
     required = [
-        "OutputBaseFilename=AIVA-Collector-Setup-v0.2.4",
+        f"OutputBaseFilename=AIVA-Collector-Setup-v{VERSION}",
         "Source: \"..\\..\\dist\\aiva-collector.exe\"",
         "DestName: \"config.local.json\"; Flags: onlyifdoesntexist",
         "C:\\AIVA_Comercio\\entrada",
+        "C:\\AIVA_Comercio\\state\\queue",
         "C:\\AIVA_Comercio\\diagnostico",
         "activate.bat",
         "run_auto.bat",
+        "run_queue_status.bat",
+        "run_retry_pending.bat",
         "install_scheduled_task.bat",
     ]
     missing = [value for value in required if value not in text]

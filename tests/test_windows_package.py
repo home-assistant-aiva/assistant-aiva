@@ -28,10 +28,13 @@ REQUIRED_IN_ZIP = {
     "windows/run_dry.bat",
     "windows/run_send.bat",
     "windows/run_status.bat",
+    "windows/run_queue_status.bat",
+    "windows/run_retry_pending.bat",
     "windows/set_token_example.bat",
     "windows/README_SUPPORT.md",
     "docs/aiva_collector_clean_install_test.md",
     "docs/aiva_collector_first_client_data_request.md",
+    "docs/aiva_collector_offline_queue.md",
     "docs/aiva_collector_windows_manual.md",
     "docs/aiva_collector_windows_package.md",
     "docs/aiva_collector_windows_pilot_checklist.md",
@@ -65,7 +68,7 @@ def test_build_creates_zip_manifest_and_required_files(tmp_path):
     assert zip_path.exists()
     assert manifest_path.exists()
     assert manifest["package_name"] == "aiva-collector-windows-manual"
-    assert manifest["version"] == "0.2.4"
+    assert manifest["version"] == "0.2.5"
     assert manifest["safety_checks_passed"] is True
     assert manifest["files_count"] == len(names)
     assert REQUIRED_IN_ZIP <= names

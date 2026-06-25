@@ -51,6 +51,16 @@ def test_cli_exposes_activation_and_run_auto_help():
     assert run_auto.value.code == 0
 
 
+def test_cli_exposes_queue_commands_help():
+    parser = build_parser()
+    with pytest.raises(SystemExit) as queue_status:
+        parser.parse_args(["queue-status", "--help"])
+    with pytest.raises(SystemExit) as retry_pending:
+        parser.parse_args(["retry-pending", "--help"])
+    assert queue_status.value.code == 0
+    assert retry_pending.value.code == 0
+
+
 def test_run_auto_without_files_exits_ok(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("AIVA_COLLECTOR_TOKEN", "token-test")
     config_path = tmp_path / "config.auto.json"
@@ -73,6 +83,92 @@ def test_run_auto_without_files_exits_ok(tmp_path, monkeypatch, capsys):
 
     assert code == 0
     assert "Sin archivos" in capsys.readouterr().out
+
+
+def test_queue_status_outputs_counts_without_token(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("AIVA_COLLECTOR_TOKEN", "token-test")
+    config_path = tmp_path / "config.queue.json"
+    data = json.loads(Path("configs/example_config.json").read_text(encoding="utf-8"))
+    data.update(
+        {
+            "input_dir": str(tmp_path / "input"),
+            "processed_dir": str(tmp_path / "processed"),
+            "error_dir": str(tmp_path / "error"),
+            "output_dir": str(tmp_path / "output"),
+            "state_dir": str(tmp_path / "state"),
+            "log_file": str(tmp_path / "logs" / "aiva_collector.log"),
+        }
+    )
+    (tmp_path / "input").mkdir()
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    code = main(["queue-status", "--config", str(config_path)])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "pendientes:" in out
+    assert "token-test" not in out
+
+
+def test_retry_pending_attempts_send_without_printing_token(tmp_path, monkeypatch, capsys):
+    from aiva_collector.config import load_config
+    from aiva_collector.local_state import connect, local_db_path, upsert_detected_file, update_file_state
+    from aiva_collector.offline_queue import enqueue_payload
+
+    monkeypatch.setenv("AIVA_COLLECTOR_TOKEN", "token-test")
+    config_path = tmp_path / "config.retry.json"
+    data = json.loads(Path("configs/example_config.json").read_text(encoding="utf-8"))
+    data.update(
+        {
+            "backend_url": "http://backend",
+            "commerce_id": "commerce-test",
+            "collector_id": "collector-test",
+            "input_dir": str(tmp_path / "input"),
+            "processed_dir": str(tmp_path / "processed"),
+            "error_dir": str(tmp_path / "error"),
+            "output_dir": str(tmp_path / "output"),
+            "state_dir": str(tmp_path / "state"),
+            "log_file": str(tmp_path / "logs" / "aiva_collector.log"),
+        }
+    )
+    source = tmp_path / "input" / "ventas.csv"
+    source.parent.mkdir()
+    source.write_text("x", encoding="utf-8")
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+    config = load_config(config_path)
+    conn = connect(local_db_path(config))
+    try:
+        upsert_detected_file(conn, file_id="file-1", commerce_id="commerce-test", collector_id="collector-test", path=source, file_sha256="sha")
+        update_file_state(conn, "file-1", status="pending_send")
+        enqueue_payload(
+            conn,
+            config,
+            file_id="file-1",
+            payload={
+                "commerce_id": "commerce-test",
+                "collector_id": "collector-test",
+                "periodo": "weekly",
+                "fecha_inicio": "2026-06-01",
+                "fecha_fin": "2026-06-01",
+                "productos_resumidos": [],
+                "resumen_financiero": {},
+                "metadata": {"source_file": {"normalized_data_hash": "hash"}},
+            },
+        )
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "aiva_collector.offline_queue.CollectorClient.send_summary",
+        lambda self, payload: {"summary_id": "s1", "_http_status_code": 200},
+    )
+
+    code = main(["retry-pending", "--config", str(config_path)])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "enviados=1" in out
+    assert "token-test" not in out
 
 
 def test_move_processed_false_keeps_file():

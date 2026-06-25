@@ -1,5 +1,5 @@
 #define AppName "AIVA Collector"
-#define AppVersion "0.2.4"
+#define AppVersion "0.2.5"
 #define AppPublisher "AIVA Comercial"
 #define AppExeName "aiva-collector.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\AIVA Collector
 DefaultGroupName=AIVA Collector
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
-OutputBaseFilename=AIVA-Collector-Setup-v0.2.4
+OutputBaseFilename=AIVA-Collector-Setup-v0.2.5
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -32,6 +32,7 @@ Name: "C:\AIVA_Comercio\procesados\duplicados"
 Name: "C:\AIVA_Comercio\output"
 Name: "C:\AIVA_Comercio\logs"
 Name: "C:\AIVA_Comercio\state"
+Name: "C:\AIVA_Comercio\state\queue"
 Name: "C:\AIVA_Comercio\diagnostico"
 
 [Files]
@@ -47,6 +48,8 @@ Name: "{group}\AIVA Collector - Activar"; Filename: "{app}\activate.bat"; Workin
 Name: "{group}\AIVA Collector - Abrir carpeta de entrada"; Filename: "{app}\open_input_folder.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Prueba sin enviar"; Filename: "{app}\run_dry.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Procesar ahora"; Filename: "{app}\run_auto.bat"; WorkingDir: "{app}"
+Name: "{group}\AIVA Collector - Estado de Cola"; Filename: "{app}\run_queue_status.bat"; WorkingDir: "{app}"
+Name: "{group}\AIVA Collector - Reintentar Pendientes"; Filename: "{app}\run_retry_pending.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Estado conexion"; Filename: "{app}\run_status.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Diagnostico"; Filename: "{app}\collect_diagnostics.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Instalar tarea automatica"; Filename: "{app}\install_scheduled_task.bat"; WorkingDir: "{app}"

@@ -222,13 +222,69 @@ def upsert_upload_queue(
             payload_hash=excluded.payload_hash,
             payload_json_path=excluded.payload_json_path,
             status='pending',
-            retry_count=upload_queue.retry_count + 1,
             last_error=excluded.last_error,
             updated_at=excluded.updated_at
         """,
         (uuid.uuid4().hex, file_id, idempotency_key, payload_hash, payload_json_path, (last_error or "")[:500], now, now),
     )
     conn.commit()
+
+
+def list_due_queue_items(conn: sqlite3.Connection, *, now: str | None = None, force: bool = False) -> list[dict[str, Any]]:
+    timestamp = now or utc_now()
+    if force:
+        rows = conn.execute(
+            """
+            SELECT * FROM upload_queue
+            WHERE status IN ('pending', 'retrying', 'processing')
+            ORDER BY created_at ASC
+            """
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT * FROM upload_queue
+            WHERE status IN ('pending', 'retrying')
+              AND (next_retry_at IS NULL OR next_retry_at <= ?)
+            ORDER BY COALESCE(next_retry_at, created_at) ASC
+            """,
+            (timestamp,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_queue_item(conn: sqlite3.Connection, file_id: str, **fields: Any) -> None:
+    if not fields:
+        return
+    fields["updated_at"] = utc_now()
+    assignments = ", ".join(f"{key} = ?" for key in fields)
+    values = list(fields.values()) + [file_id]
+    conn.execute(f"UPDATE upload_queue SET {assignments} WHERE file_id = ?", values)
+    conn.commit()
+
+
+def queue_summary(conn: sqlite3.Connection) -> dict[str, Any]:
+    counts = queue_counts(conn)
+    next_row = conn.execute(
+        """
+        SELECT next_retry_at FROM upload_queue
+        WHERE status = 'retrying' AND next_retry_at IS NOT NULL
+        ORDER BY next_retry_at ASC LIMIT 1
+        """
+    ).fetchone()
+    last_error_row = conn.execute(
+        """
+        SELECT last_error, updated_at FROM upload_queue
+        WHERE last_error IS NOT NULL AND last_error != ''
+        ORDER BY updated_at DESC LIMIT 1
+        """
+    ).fetchone()
+    return {
+        "counts": counts,
+        "next_retry_at": str(next_row["next_retry_at"]) if next_row else None,
+        "last_error": str(last_error_row["last_error"]) if last_error_row else None,
+        "last_error_at": str(last_error_row["updated_at"]) if last_error_row else None,
+    }
 
 
 def status_counts(conn: sqlite3.Connection) -> dict[str, int]:

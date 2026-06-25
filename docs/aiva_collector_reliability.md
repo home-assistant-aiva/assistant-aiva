@@ -1,6 +1,6 @@
 # AIVA Collector Reliability
 
-FASE 5.9 agrega registro local por archivo para que el Collector no envie dos veces el mismo contenido y corte datos invalidos antes de llamar al backend.
+FASE 6.0 agrega una cola offline real sobre el registro local por archivo para que el Collector no pierda summaries si no hay internet o el backend esta caido.
 
 ## SQLite local
 
@@ -10,7 +10,7 @@ Tablas:
 
 - `processed_files`: metadata del archivo, hashes, estado, conteos, idempotency key, respuesta saneada del backend y error resumido.
 - `processed_file_events`: eventos operativos por archivo.
-- `upload_queue`: estructura minima para FASE 6.0. En esta fase solo registra pendientes si el backend no responde.
+- `upload_queue`: cola de envio offline con payload JSON normalizado, idempotency key, backoff, retry count y ultimo error.
 
 No se guardan archivos completos, filas crudas, tokens ni secretos.
 
@@ -67,7 +67,7 @@ Windows standard:
 - `C:\AIVA_Comercio\output`
 - `C:\AIVA_Comercio\logs`
 
-Si el envio sale OK, el archivo se mueve a `procesados` con timestamp. Si hay error bloqueante, se mueve a `errores` con un `.error.txt` al lado. Si el backend no responde, el archivo no se mueve y queda pendiente para reintento futuro.
+Si el envio sale OK, el archivo se mueve a `procesados` con timestamp. Si hay error bloqueante, se mueve a `errores` con un `.error.txt` al lado. Si el backend no responde, el archivo no se mueve, queda en `entrada`, se salta por estado `pending_send` y se reintenta desde `state\queue`.
 
 Config:
 
@@ -77,7 +77,26 @@ Config:
 
 ## Offline queue FASE 6.0
 
-`upload_queue` queda lista para un retry automatico futuro. FASE 5.9 no implementa daemon ni politica completa de reintentos; solo deja el payload referenciado, hash, idempotency key, estado `pending` y ultimo error.
+`run-auto` procesa cola pendiente al inicio, procesa archivos nuevos y vuelve a intentar pendientes al final. El payload se guarda en `C:\AIVA_Comercio\state\queue\*.json`; no se guarda token ni Excel completo.
+
+Estados de cola:
+
+- `pending`
+- `processing`
+- `retrying`
+- `sent`
+- `duplicate`
+- `error`
+
+Backoff:
+
+- retry 0: 5 minutos
+- retry 1: 15 minutos
+- retry 2: 30 minutos
+- retry 3: 60 minutos
+- despues: 6 horas
+
+`offline_queue_max_retry_count` permite cambiar el maximo de reintentos, con default 10.
 
 ## Diagnostico
 
@@ -87,6 +106,10 @@ Comandos utiles:
 aiva-collector.exe run-once --config C:\AIVA_Comercio\config.local.json
 aiva-collector.exe run-auto --config C:\AIVA_Comercio\config.local.json
 aiva-collector.exe status --config C:\AIVA_Comercio\config.local.json
+aiva-collector.exe queue-status --config C:\AIVA_Comercio\config.local.json
+aiva-collector.exe retry-pending --config C:\AIVA_Comercio\config.local.json
 ```
 
 `status` muestra la ruta de la DB local, conteos por estado y pendientes de cola. Para limpiar procesados de forma segura, borrar solo archivos antiguos dentro de `procesados` o `procesados\duplicados`; no borrar `state\aiva_collector.db` salvo que se quiera perder la memoria local de deduplicacion.
+
+Ver tambien [aiva_collector_offline_queue.md](aiva_collector_offline_queue.md).

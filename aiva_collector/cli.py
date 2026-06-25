@@ -29,14 +29,15 @@ from .local_state import (
     get_by_sha256,
     local_db_path,
     queue_counts,
+    queue_summary,
     status_counts,
     update_file_state,
     upsert_detected_file,
-    upsert_upload_queue,
     utc_now,
 )
 from .logging_setup import setup_logging
 from .normalizer import normalize_rows
+from .offline_queue import enqueue_payload, process_queue
 from .readers import detect_columns, discover_input_files, read_file
 from .state import save_state
 from .summarizer import build_summary, idempotency_key
@@ -46,7 +47,7 @@ from .validation import validate_normalized_data
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.4"
+DEFAULT_COLLECTOR_VERSION = "0.2.5"
 
 
 def default_config_path() -> str | None:
@@ -251,6 +252,7 @@ def _runtime_dirs(config: CollectorConfig) -> None:
     for key in ("input_dir", "processed_dir", "error_dir", "output_dir", "state_dir"):
         config.path(key).mkdir(parents=True, exist_ok=True)
     (config.path("processed_dir") / "duplicados").mkdir(parents=True, exist_ok=True)
+    (config.path("state_dir") / "queue").mkdir(parents=True, exist_ok=True)
 
 
 def _archive_file(config: CollectorConfig, path: Path, target_dir: Path, *, suffix: str | None = None) -> list[str]:
@@ -465,6 +467,21 @@ def _process_reliable_file(
         return "skipped", message
 
     file_sha256 = compute_file_sha256(path)
+    existing_path = conn.execute(
+        "SELECT * FROM processed_files WHERE file_path = ? AND status IN ('pending_send', 'retrying', 'processing') ORDER BY updated_at DESC LIMIT 1",
+        (str(path),),
+    ).fetchone()
+    if existing_path:
+        row = dict(existing_path)
+        add_event(
+            conn,
+            file_id=row["file_id"],
+            event_type="pending_send_skipped",
+            level="info",
+            message="Archivo ya tiene payload pendiente; no se parseo nuevamente.",
+            context={"file_name": path.name, "status": row.get("status")},
+        )
+        return "pending_send", "Archivo pendiente de envio; se reintentara desde la cola offline."
     existing = get_by_sha256(conn, file_sha256)
     if existing and existing.get("status") == "sent":
         duplicate_dir = config.path("processed_dir") / "duplicados"
@@ -478,6 +495,16 @@ def _process_reliable_file(
             context={"file_name": path.name, "moved": moved},
         )
         return "duplicate", "Archivo duplicado detectado. No se envio nuevamente."
+    if existing and existing.get("status") in {"pending_send", "retrying", "processing"}:
+        add_event(
+            conn,
+            file_id=existing["file_id"],
+            event_type="pending_send_skipped",
+            level="info",
+            message="Archivo ya tiene payload pendiente; no se parseo nuevamente.",
+            context={"file_name": path.name, "status": existing.get("status")},
+        )
+        return "pending_send", "Archivo pendiente de envio; se reintentara desde la cola offline."
 
     file_id = existing["file_id"] if existing else build_file_id(file_sha256, path.name)
     upsert_detected_file(
@@ -559,7 +586,6 @@ def _process_reliable_file(
     output_path = _write_summary(config, summary)
     idem = idempotency_key(summary)
     update_file_state(conn, file_id, idempotency_key=idem)
-    payload_hash = compute_normalized_data_hash(summary)
 
     try:
         client.post_status("running")
@@ -585,16 +611,15 @@ def _process_reliable_file(
             backend_response_code=exc.status_code,
             error_message=str(exc),
         )
-        upsert_upload_queue(
+        enqueue_payload(
             conn,
+            config,
             file_id=file_id,
-            idempotency_key=idem,
-            payload_hash=payload_hash,
-            payload_json_path=safe_display_path(output_path),
+            payload=summary,
             last_error=str(exc),
         )
         add_event(conn, file_id=file_id, event_type="pending_send", level="warning", message=str(exc))
-        return "pending_send", "No se pudo enviar por conexion/backend. Quedo pendiente para reintento futuro."
+        return "pending_send", "No se pudo conectar con AIVA. El archivo quedo pendiente y se reintentara automaticamente."
 
     moved = _archive_file(config, path, config.path("processed_dir")) if _config_bool(config, "move_processed_files", True) else []
     update_file_state(
@@ -622,14 +647,19 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
     setup_logging(config)
     config.require_send_ready()
     _runtime_dirs(config)
+    client = CollectorClient(config)
+    conn = connect_local_state(local_db_path(config))
+    initial_queue = process_queue(conn, config, client=client)
     files = discover_input_files(config)
     if not files:
         logging.info("run-auto: no hay archivos CSV/XLSX en input_dir")
-        print("Sin archivos para procesar.")
+        conn.close()
+        print(
+            "Sin archivos para procesar. "
+            f"cola: enviados={initial_queue.sent} pendientes_reintentando={initial_queue.retrying} errores={initial_queue.errors}"
+        )
         return 0
-    client = CollectorClient(config)
     backend_mapping = _backend_mapping(config)
-    conn = connect_local_state(local_db_path(config))
     results: list[tuple[str, str | None]] = []
     try:
         for path in files:
@@ -642,16 +672,17 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
             )
             results.append((status, message))
             logging.info("run-auto file=%s status=%s message=%s", path.name, status, message)
+        final_queue = process_queue(conn, config, client=client, force=True)
     finally:
         conn.close()
 
-    sent = sum(1 for status, _ in results if status == "sent")
+    sent = sum(1 for status, _ in results if status == "sent") + initial_queue.sent + final_queue.sent
     duplicates = sum(1 for status, _ in results if status == "duplicate")
     pending = sum(1 for status, _ in results if status == "pending_send")
-    errors = sum(1 for status, _ in results if status == "error")
+    errors = sum(1 for status, _ in results if status == "error") + initial_queue.errors + final_queue.errors
     print(f"run-auto finalizado: enviados={sent} duplicados={duplicates} pendientes={pending} errores={errors}")
     if pending:
-        print("No se pudo enviar por conexion/backend. Quedo pendiente para reintento futuro.")
+        print("No se pudo conectar con AIVA. El archivo quedo pendiente y se reintentara automaticamente.")
     save_state(
         config,
         last_summary_file=safe_display_path(config.path("output_dir") / "last_summary.json"),
@@ -818,6 +849,61 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_queue_status(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    setup_logging(config)
+    db_path = local_db_path(config)
+    summary = {
+        "pending": 0,
+        "retrying": 0,
+        "sent": 0,
+        "error": 0,
+        "duplicate": 0,
+        "processing": 0,
+        "next_retry_at": None,
+        "last_error": None,
+        "db_path": str(db_path),
+    }
+    if db_path.exists():
+        conn = connect_local_state(db_path)
+        try:
+            details = queue_summary(conn)
+            counts = details["counts"]
+            summary.update({status: int(counts.get(status, 0)) for status in ("pending", "retrying", "sent", "error", "duplicate", "processing")})
+            summary["next_retry_at"] = details["next_retry_at"]
+            summary["last_error"] = details["last_error"]
+        finally:
+            conn.close()
+    print("AIVA Collector - Estado de cola")
+    print(f"pendientes: {summary['pending']}")
+    print(f"reintentando: {summary['retrying']}")
+    print(f"enviados: {summary['sent']}")
+    print(f"duplicados: {summary['duplicate']}")
+    print(f"errores: {summary['error']}")
+    print(f"proximo reintento: {summary['next_retry_at'] or '-'}")
+    print(f"ultima falla: {summary['last_error'] or '-'}")
+    print(f"DB local: {summary['db_path']}")
+    return 0
+
+
+def cmd_retry_pending(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    setup_logging(config)
+    config.require_send_ready()
+    _runtime_dirs(config)
+    conn = connect_local_state(local_db_path(config))
+    try:
+        result = process_queue(conn, config, force=True)
+    finally:
+        conn.close()
+    print(
+        "retry-pending finalizado: "
+        f"intentados={result.attempted} enviados={result.sent} duplicados={result.duplicate} "
+        f"reintentando={result.retrying} errores={result.errors}"
+    )
+    return 0 if result.errors == 0 else 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aiva-collector")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -855,6 +941,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_status = sub.add_parser("status")
     p_status.add_argument("--config", default=config_default, required=config_default is None)
     p_status.set_defaults(func=cmd_status)
+
+    p_queue_status = sub.add_parser("queue-status")
+    p_queue_status.add_argument("--config", default=config_default, required=config_default is None)
+    p_queue_status.set_defaults(func=cmd_queue_status)
+
+    p_retry_pending = sub.add_parser("retry-pending")
+    p_retry_pending.add_argument("--config", default=config_default, required=config_default is None)
+    p_retry_pending.set_defaults(func=cmd_retry_pending)
 
     p_service_status = sub.add_parser("service-status")
     p_service_status.add_argument("--config", default=config_default, required=config_default is None)
