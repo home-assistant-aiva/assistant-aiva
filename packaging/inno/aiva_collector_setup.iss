@@ -1,5 +1,5 @@
 #define AppName "AIVA Collector"
-#define AppVersion "0.2.3"
+#define AppVersion "0.2.4"
 #define AppPublisher "AIVA Comercial"
 #define AppExeName "aiva-collector.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\AIVA Collector
 DefaultGroupName=AIVA Collector
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
-OutputBaseFilename=AIVA-Collector-Setup-v0.2.3
+OutputBaseFilename=AIVA-Collector-Setup-v0.2.4
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -27,7 +27,8 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "C:\AIVA_Comercio"
 Name: "C:\AIVA_Comercio\entrada"
 Name: "C:\AIVA_Comercio\procesados"
-Name: "C:\AIVA_Comercio\error"
+Name: "C:\AIVA_Comercio\errores"
+Name: "C:\AIVA_Comercio\procesados\duplicados"
 Name: "C:\AIVA_Comercio\output"
 Name: "C:\AIVA_Comercio\logs"
 Name: "C:\AIVA_Comercio\state"

@@ -77,8 +77,12 @@ def normalize_rows(raw_rows: list[dict[str, Any]], config: CollectorConfig) -> N
             reasons.append("producto_nombre requerido")
         if cantidad_vendida is None:
             reasons.append("cantidad_vendida requerida")
+        elif cantidad_vendida < 0:
+            reasons.append("cantidad_vendida negativa")
         if precio_venta is None:
             reasons.append("precio_venta requerido")
+        elif precio_venta < 0:
+            reasons.append("precio_venta negativo")
         if reasons:
             discarded.append({"row_number": index, "reasons": reasons})
             continue

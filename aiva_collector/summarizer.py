@@ -122,6 +122,11 @@ def stable_summary_hash(summary: dict[str, Any]) -> str:
 
 
 def idempotency_key(summary: dict[str, Any]) -> str:
+    source_file = summary.get("metadata", {}).get("source_file", {})
+    normalized_hash = source_file.get("normalized_data_hash") if isinstance(source_file, dict) else None
+    if normalized_hash:
+        base = "|".join([str(summary["commerce_id"]), str(summary["collector_id"]), str(normalized_hash)])
+        return hashlib.sha256(base.encode("utf-8")).hexdigest()
     base = "|".join(
         [
             str(summary["commerce_id"]),

@@ -1,8 +1,8 @@
 # AIVA Collector v1
 
-AIVA Collector lee exportaciones CSV/Excel de una carpeta local del comercio, normaliza columnas, calcula un resumen por producto y opcionalmente envía sólo ese summary al backend de AIVA Comercial.
+AIVA Collector lee exportaciones CSV/Excel de una carpeta local del comercio, normaliza columnas, valida datos, calcula un resumen por producto y opcionalmente envia solo ese summary al backend de AIVA Comercial.
 
-No envía tickets completos, no envía archivos Excel, no envía datos crudos, no modifica stock, ventas ni facturación, no automatiza clicks y no escribe en sistemas del cliente. En v1 no incluye instalador Windows exe, servicio en segundo plano, HMAC, WhatsApp, Telegram, GPT ni Home Assistant.
+No envia tickets completos, no envia archivos Excel, no envia datos crudos, no modifica stock, ventas ni facturacion, no automatiza clicks y no escribe en sistemas del cliente. El estado local guarda metadata, conteos y hashes en SQLite; no guarda tokens ni filas crudas.
 
 ## Instalación
 
@@ -49,7 +49,8 @@ C:\AIVA_Comercio
   collector
   entrada
   procesados
-  error
+  procesados\duplicados
+  errores
   output
   logs
   state
@@ -84,14 +85,20 @@ La prueba crea una venv temporal, instala desde la carpeta descomprimida, ejecut
 
 FASE 4.7 agrega el kit piloto Windows: checklist de prueba, plantilla de resultados, pedido de datos al primer cliente y diagnóstico seguro para soporte. Ver [docs/aiva_collector_windows_pilot_checklist.md](docs/aiva_collector_windows_pilot_checklist.md), [docs/aiva_collector_windows_pilot_results_template.md](docs/aiva_collector_windows_pilot_results_template.md), [docs/aiva_collector_first_client_data_request.md](docs/aiva_collector_first_client_data_request.md) y [windows/README_SUPPORT.md](windows/README_SUPPORT.md).
 
-## Dry-run
+## Comandos principales
 
 ```bash
 python -m aiva_collector.cli validate --config config.local.json
 python -m aiva_collector.cli run-once --config config.local.json
+python -m aiva_collector.cli run-auto --config config.local.json
+python -m aiva_collector.cli status --config config.local.json
 ```
 
-El summary generado queda en `samples/output/last_summary.json`.
+`run-once` sin `--send` es la prueba sin enviar: muestra mapping, validacion, duplicado local y si se enviaria. No mueve archivos, no envia y no marca `sent` en SQLite.
+
+`run-auto` es "Procesar ahora": espera archivos estables, deduplica por hash, valida, envia summary si corresponde, registra `state/aiva_collector.db` y mueve archivos a `procesados`, `procesados/duplicados` o `errores`.
+
+El summary generado queda en `samples/output/last_summary.json` o en el `output_dir` configurado.
 
 ## Enviar al backend
 
@@ -102,6 +109,19 @@ python -m aiva_collector.cli run-once --config config.local.json --send
 ```
 
 Antes del envío se reporta status `running`; luego `ok` o `error`. El token no se imprime.
+
+## Robustez local
+
+FASE 5.9 agrega:
+
+- `processed_files` y `processed_file_events` en SQLite local.
+- `file_sha256` para detectar cambios fisicos.
+- `normalized_data_hash` para detectar cambios reales de datos.
+- idempotency key estable por comercio, collector y contenido normalizado.
+- validaciones bloqueantes y advertencias antes del envio.
+- `upload_queue` minima para dejar pendientes cuando el backend no responde.
+
+Ver [docs/aiva_collector_reliability.md](docs/aiva_collector_reliability.md).
 
 ## Integración backend demo
 

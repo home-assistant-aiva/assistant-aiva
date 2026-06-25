@@ -22,17 +22,31 @@ from .column_mapping import (
 from .client import CollectorClient, activate_collector
 from .config import PROJECT_ROOT, CollectorConfig, init_config, load_config
 from .errors import BackendError, CollectorError, ConfigError, ValidationError
+from .file_fingerprint import build_file_id, compute_file_sha256, compute_normalized_data_hash, wait_for_stable_file
+from .local_state import (
+    add_event,
+    connect as connect_local_state,
+    get_by_sha256,
+    local_db_path,
+    queue_counts,
+    status_counts,
+    update_file_state,
+    upsert_detected_file,
+    upsert_upload_queue,
+    utc_now,
+)
 from .logging_setup import setup_logging
 from .normalizer import normalize_rows
 from .readers import detect_columns, discover_input_files, read_file
 from .state import save_state
 from .summarizer import build_summary, idempotency_key
 from .token_store import save_token
+from .validation import validate_normalized_data
 
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.3"
+DEFAULT_COLLECTOR_VERSION = "0.2.4"
 
 
 def default_config_path() -> str | None:
@@ -229,6 +243,74 @@ def _move_files(files: list[Path], directory: Path, *, suffix: str | None = None
     return moved
 
 
+def _config_bool(config: CollectorConfig, key: str, default: bool) -> bool:
+    return bool(config.raw.get(key, default))
+
+
+def _runtime_dirs(config: CollectorConfig) -> None:
+    for key in ("input_dir", "processed_dir", "error_dir", "output_dir", "state_dir"):
+        config.path(key).mkdir(parents=True, exist_ok=True)
+    (config.path("processed_dir") / "duplicados").mkdir(parents=True, exist_ok=True)
+
+
+def _archive_file(config: CollectorConfig, path: Path, target_dir: Path, *, suffix: str | None = None) -> list[str]:
+    if not path.exists():
+        return []
+    target_dir.mkdir(parents=True, exist_ok=True)
+    dest = _timestamped_dest(target_dir, path, suffix=suffix)
+    if _config_bool(config, "keep_original_files", False):
+        shutil.copy2(path, dest)
+    else:
+        shutil.move(str(path), str(dest))
+    return [str(dest)]
+
+
+def _write_error_note(error_file: Path, original: Path, message: str) -> Path:
+    note = error_file.with_suffix(error_file.suffix + ".error.txt")
+    note.write_text(
+        f"AIVA Collector no envio este archivo.\nArchivo: {original.name}\nMotivo: {message}\n",
+        encoding="utf-8",
+    )
+    return note
+
+
+def _file_stat_metadata(path: Path) -> tuple[int, str]:
+    stat = path.stat()
+    return stat.st_size, datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+
+
+def _attach_reliability_metadata(
+    summary: dict,
+    *,
+    file_id: str,
+    path: Path,
+    file_sha256: str,
+    normalized_data_hash: str,
+    detected_at: str,
+    processed_at: str,
+    validation: dict,
+) -> None:
+    file_size, file_mtime = _file_stat_metadata(path)
+    metadata = summary.setdefault("metadata", {})
+    metadata["source_file"] = {
+        "file_id": file_id,
+        "file_name": path.name,
+        "file_sha256": file_sha256,
+        "normalized_data_hash": normalized_data_hash,
+        "file_size": file_size,
+        "file_mtime": file_mtime,
+        "detected_at": detected_at,
+        "processed_at": processed_at,
+        "rows_total": validation["rows_total"],
+        "rows_valid": validation["rows_valid"],
+        "rows_invalid": validation["rows_invalid"],
+    }
+    metadata["validation"] = {
+        "warnings": validation["warnings"],
+        "blocking_errors": validation["blocking_errors"],
+    }
+
+
 def _machine_id_path() -> Path:
     if sys.platform.startswith("win"):
         return Path(r"C:\AIVA_Comercio\state\machine.id")
@@ -365,12 +447,181 @@ def _collect_auto(
     return summary, valid_files, error_files, discarded, candidates
 
 
+def _process_reliable_file(
+    *,
+    config: CollectorConfig,
+    client: CollectorClient,
+    conn,
+    path: Path,
+    backend_mapping: dict[str, str] | None,
+) -> tuple[str, str | None]:
+    if not wait_for_stable_file(
+        path,
+        checks=int(config.raw.get("stable_file_checks", 2)),
+        interval_seconds=float(config.raw.get("stable_file_interval_seconds", 1)),
+    ):
+        message = "El archivo todavia se esta copiando o exportando. Se intentara en la proxima ejecucion."
+        add_event(conn, file_id=None, event_type="file_not_stable", level="warning", message=message, context={"file_name": path.name})
+        return "skipped", message
+
+    file_sha256 = compute_file_sha256(path)
+    existing = get_by_sha256(conn, file_sha256)
+    if existing and existing.get("status") == "sent":
+        duplicate_dir = config.path("processed_dir") / "duplicados"
+        moved = _archive_file(config, path, duplicate_dir, suffix="duplicate") if _config_bool(config, "move_processed_files", True) else []
+        add_event(
+            conn,
+            file_id=existing["file_id"],
+            event_type="duplicate_skipped",
+            level="info",
+            message="Archivo duplicado detectado localmente; no se envio.",
+            context={"file_name": path.name, "moved": moved},
+        )
+        return "duplicate", "Archivo duplicado detectado. No se envio nuevamente."
+
+    file_id = existing["file_id"] if existing else build_file_id(file_sha256, path.name)
+    upsert_detected_file(
+        conn,
+        file_id=file_id,
+        commerce_id=config.commerce_id,
+        collector_id=config.collector_id,
+        path=path,
+        file_sha256=file_sha256,
+        status="processing",
+    )
+    add_event(conn, file_id=file_id, event_type="processing_started", level="info", message="Procesamiento iniciado.")
+
+    try:
+        raw_rows = read_file(path, config)
+        effective_config, mapping_result = _resolve_mapping_for_rows(config, raw_rows, backend_mapping=backend_mapping)
+        if mapping_result.status != "auto_approved":
+            raise ValidationError("AIVA necesita revisar el mapeo de columnas desde el admin.")
+        result = normalize_rows(raw_rows, effective_config)
+        validation = validate_normalized_data(
+            raw_rows=raw_rows,
+            mapping=effective_config.column_mapping,
+            normalized_rows=result.rows,
+            discarded_rows=result.discarded,
+        )
+    except Exception as exc:
+        message = str(exc)
+        update_file_state(conn, file_id, status="error", error_message=message, processed_at=utc_now())
+        add_event(conn, file_id=file_id, event_type="processing_error", level="error", message=message)
+        if _config_bool(config, "move_error_files", True):
+            moved = _archive_file(config, path, config.path("error_dir"), suffix="error")
+            if moved:
+                _write_error_note(Path(moved[0]), path, message)
+        return "error", message
+
+    normalized_hash = compute_normalized_data_hash(result.rows)
+    processed_at = utc_now()
+    validation_dict = validation.as_dict()
+    update_file_state(
+        conn,
+        file_id,
+        status="validated" if validation.is_valid else "error",
+        normalized_data_hash=normalized_hash,
+        processed_at=processed_at,
+        rows_total=validation.rows_total,
+        rows_valid=validation.rows_valid,
+        rows_invalid=validation.rows_invalid,
+        error_message="; ".join(validation.blocking_errors) if validation.blocking_errors else None,
+    )
+    for warning in validation.warnings:
+        add_event(conn, file_id=file_id, event_type="validation_warning", level="warning", message=warning)
+
+    if not validation.is_valid:
+        message = "; ".join(validation.blocking_errors)
+        add_event(conn, file_id=file_id, event_type="validation_blocked", level="error", message=message)
+        if _config_bool(config, "move_error_files", True):
+            moved = _archive_file(config, path, config.path("error_dir"), suffix="validation_error")
+            if moved:
+                _write_error_note(Path(moved[0]), path, message)
+        return "error", message
+
+    summary = build_summary(
+        result.rows,
+        config,
+        files_processed=1,
+        rows_read=len(raw_rows),
+        rows_discarded=len(result.discarded),
+    )
+    _attach_reliability_metadata(
+        summary,
+        file_id=file_id,
+        path=path,
+        file_sha256=file_sha256,
+        normalized_data_hash=normalized_hash,
+        detected_at=get_file_detected_at(conn, file_id),
+        processed_at=processed_at,
+        validation=validation_dict,
+    )
+    output_path = _write_summary(config, summary)
+    idem = idempotency_key(summary)
+    update_file_state(conn, file_id, idempotency_key=idem)
+    payload_hash = compute_normalized_data_hash(summary)
+
+    try:
+        client.post_status("running")
+        response = client.send_summary(summary)
+        client.post_status("ok")
+    except BackendError as exc:
+        if exc.status_code == 409:
+            moved = _archive_file(config, path, config.path("processed_dir") / "duplicados", suffix="duplicate") if _config_bool(config, "move_processed_files", True) else []
+            update_file_state(
+                conn,
+                file_id,
+                status="duplicate",
+                sent_at=utc_now(),
+                backend_response_code=409,
+                error_message=str(exc),
+            )
+            add_event(conn, file_id=file_id, event_type="backend_duplicate", level="info", message=str(exc), context={"moved": moved})
+            return "duplicate", "Backend informo summary duplicado. No se reenvio."
+        update_file_state(
+            conn,
+            file_id,
+            status="pending_send",
+            backend_response_code=exc.status_code,
+            error_message=str(exc),
+        )
+        upsert_upload_queue(
+            conn,
+            file_id=file_id,
+            idempotency_key=idem,
+            payload_hash=payload_hash,
+            payload_json_path=safe_display_path(output_path),
+            last_error=str(exc),
+        )
+        add_event(conn, file_id=file_id, event_type="pending_send", level="warning", message=str(exc))
+        return "pending_send", "No se pudo enviar por conexion/backend. Quedo pendiente para reintento futuro."
+
+    moved = _archive_file(config, path, config.path("processed_dir")) if _config_bool(config, "move_processed_files", True) else []
+    update_file_state(
+        conn,
+        file_id,
+        status="sent",
+        sent_at=utc_now(),
+        backend_summary_id=response.get("summary_id") or response.get("id"),
+        backend_response_code=response.get("_http_status_code", 200),
+        backend_response_json=response,
+    )
+    add_event(conn, file_id=file_id, event_type="sent", level="info", message="Summary enviado correctamente.", context={"moved": moved})
+    return "sent", "Summary enviado correctamente."
+
+
+def get_file_detected_at(conn, file_id: str) -> str:
+    from .local_state import get_file
+
+    row = get_file(conn, file_id)
+    return str(row.get("detected_at")) if row else utc_now()
+
+
 def cmd_run_auto(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     setup_logging(config)
     config.require_send_ready()
-    for key in ("processed_dir", "error_dir", "output_dir", "state_dir"):
-        config.path(key).mkdir(parents=True, exist_ok=True)
+    _runtime_dirs(config)
     files = discover_input_files(config)
     if not files:
         logging.info("run-auto: no hay archivos CSV/XLSX en input_dir")
@@ -378,67 +629,36 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         return 0
     client = CollectorClient(config)
     backend_mapping = _backend_mapping(config)
-    summary, valid_files, error_files, discarded, candidates = _collect_auto(config, files, backend_mapping=backend_mapping)
-    if candidates:
-        for candidate in candidates:
-            try:
-                client.post_mapping_candidate(candidate)
-            except BackendError as exc:
-                logging.error("No se pudo enviar mapping candidate; archivo queda en entrada: %s", exc)
-                print("AIVA necesita revisar el mapeo de columnas desde el admin. No se envió summary.")
-                return 2
-        message = "AIVA necesita revisar el mapeo de columnas desde el admin."
-        logging.warning(message)
-        try:
-            client.post_status("error", message)
-        except BackendError:
-            pass
-        print(f"{message} No se envió summary.")
-        return 2
-    assert summary is not None
-    for item in discarded[:20]:
-        logging.warning("Fila descartada file=%s row=%s reasons=%s", item.get("file"), item.get("row_number"), item.get("reasons"))
-    if error_files:
-        moved_errors = _move_files(error_files, config.path("error_dir"), suffix="parse_error")
-        logging.info("run-auto parse errors moved=%s", moved_errors)
-    output_path = _write_summary(config, summary)
-    idem = idempotency_key(summary)
-    backend_state = {
-        "last_backend_commerce_id": config.commerce_id,
-        "last_backend_collector_id": config.collector_id,
-        "last_idempotency_key_hash": _safe_idem_hash(idem),
-    }
+    conn = connect_local_state(local_db_path(config))
+    results: list[tuple[str, str | None]] = []
     try:
-        client.post_status("running")
-        response = client.send_summary(summary)
-        client.post_status("ok")
-        moved = _move_files(valid_files, config.path("processed_dir")) if bool(config.raw.get("move_processed_files", True)) else []
-        backend_state.update(
-            {
-                "last_backend_send_at": datetime.now(timezone.utc).isoformat(),
-                "last_backend_status_code": response.get("_http_status_code"),
-                "last_backend_summary_status": "sent",
-            }
-        )
-        save_state(config, last_summary_file=safe_display_path(output_path), last_idempotency_key_hash=_safe_idem_hash(idem), last_status="ok", processed_files=moved, backend_state=backend_state)
-        print("run-auto OK")
-        return 0
-    except BackendError as exc:
-        if exc.status_code == 409:
-            moved = _move_files(valid_files, config.path("processed_dir"), suffix="duplicate") if bool(config.raw.get("move_processed_files", True)) else []
-            backend_state.update(
-                {
-                    "last_backend_send_at": datetime.now(timezone.utc).isoformat(),
-                    "last_backend_status_code": 409,
-                    "last_backend_summary_status": "duplicate",
-                }
+        for path in files:
+            status, message = _process_reliable_file(
+                config=config,
+                client=client,
+                conn=conn,
+                path=path,
+                backend_mapping=backend_mapping,
             )
-            save_state(config, last_summary_file=safe_display_path(output_path), last_idempotency_key_hash=_safe_idem_hash(idem), last_status="duplicate", processed_files=moved, backend_state=backend_state)
-            print("run-auto duplicate_summary")
-            return 0
-        logging.error("run-auto backend error; archivos quedan en entrada: %s", exc)
-        save_state(config, last_summary_file=safe_display_path(output_path), last_idempotency_key_hash=_safe_idem_hash(idem), last_status="error", backend_state={**backend_state, "last_backend_status_code": exc.status_code})
-        return 2
+            results.append((status, message))
+            logging.info("run-auto file=%s status=%s message=%s", path.name, status, message)
+    finally:
+        conn.close()
+
+    sent = sum(1 for status, _ in results if status == "sent")
+    duplicates = sum(1 for status, _ in results if status == "duplicate")
+    pending = sum(1 for status, _ in results if status == "pending_send")
+    errors = sum(1 for status, _ in results if status == "error")
+    print(f"run-auto finalizado: enviados={sent} duplicados={duplicates} pendientes={pending} errores={errors}")
+    if pending:
+        print("No se pudo enviar por conexion/backend. Quedo pendiente para reintento futuro.")
+    save_state(
+        config,
+        last_summary_file=safe_display_path(config.path("output_dir") / "last_summary.json"),
+        last_idempotency_key_hash=None,
+        last_status="ok" if errors == 0 else "error",
+    )
+    return 0 if errors == 0 else 2
 
 
 def cmd_init_config(args: argparse.Namespace) -> int:
@@ -473,9 +693,41 @@ def cmd_run_once(args: argparse.Namespace) -> int:
 
     if not args.send:
         _print_compact_summary(summary, output_path)
-        raw_rows = read_file(files[0], config) if files else []
-        _, mapping_result = _resolve_mapping_for_rows(config, raw_rows)
-        _print_mapping_used(mapping_result)
+        db_path = local_db_path(config)
+        conn = connect_local_state(db_path) if db_path.exists() else None
+        try:
+            for file_path in files:
+                raw_rows = read_file(file_path, config)
+                effective_config, mapping_result = _resolve_mapping_for_rows(config, raw_rows)
+                _print_mapping_used(mapping_result)
+                normalized = normalize_rows(raw_rows, effective_config) if mapping_result.status == "auto_approved" else None
+                validation = (
+                    validate_normalized_data(
+                        raw_rows=raw_rows,
+                        mapping=effective_config.column_mapping,
+                        normalized_rows=normalized.rows,
+                        discarded_rows=normalized.discarded,
+                    )
+                    if normalized
+                    else None
+                )
+                duplicate = False
+                if conn:
+                    duplicate = bool(get_by_sha256(conn, compute_file_sha256(file_path)))
+                print(f"archivo: {file_path.name}")
+                print(f"validacion: {'OK' if validation and validation.is_valid else 'ERROR'}")
+                if validation:
+                    print(f"filas validas: {validation.rows_valid}")
+                    print(f"filas invalidas: {validation.rows_invalid}")
+                    for warning in validation.warnings:
+                        print(f"warning: {warning}")
+                    for error in validation.blocking_errors:
+                        print(f"error bloqueante: {error}")
+                print(f"duplicado local: {'si' if duplicate else 'no'}")
+                print(f"se enviaria: {'no' if duplicate or not validation or not validation.is_valid else 'si'}")
+        finally:
+            if conn:
+                conn.close()
         print("Dry-run: no se envio nada al backend.")
         save_state(
             config,
@@ -550,8 +802,18 @@ def cmd_send(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     setup_logging(config)
-    config.require_send_ready()
-    response = CollectorClient(config).service_status()
+    db_path = local_db_path(config)
+    local = {"db_path": str(db_path), "processed_files": {}, "upload_queue": {}}
+    if db_path.exists():
+        conn = connect_local_state(db_path)
+        try:
+            local["processed_files"] = status_counts(conn)
+            local["upload_queue"] = queue_counts(conn)
+        finally:
+            conn.close()
+    response: dict = {"local_state": local}
+    if config.token and config.backend_url:
+        response["backend"] = CollectorClient(config).service_status()
     print(json.dumps(response, indent=2, ensure_ascii=True))
     return 0
 

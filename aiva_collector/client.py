@@ -70,12 +70,15 @@ class CollectorClient:
         }
         if message:
             payload["error_message"] = message[:240]
-        response = requests.post(
-            f"{self.config.backend_url}/commerce/collector/status",
-            json=payload,
-            headers=_headers(self.config),
-            timeout=self.timeout,
-        )
+        try:
+            response = requests.post(
+                f"{self.config.backend_url}/commerce/collector/status",
+                json=payload,
+                headers=_headers(self.config),
+                timeout=self.timeout,
+            )
+        except RequestException as exc:
+            raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
         if response.status_code not in (200, 201):
             raise _safe_error(response)
         data = response.json() if response.content else {}
@@ -83,46 +86,60 @@ class CollectorClient:
         return data
 
     def service_status(self) -> dict[str, Any]:
-        response = requests.get(
-            f"{self.config.backend_url}/commerce/collector/service-status",
-            params={"commerce_id": self.config.commerce_id, "collector_id": self.config.collector_id},
-            headers=_headers(self.config),
-            timeout=self.timeout,
-        )
+        try:
+            response = requests.get(
+                f"{self.config.backend_url}/commerce/collector/service-status",
+                params={"commerce_id": self.config.commerce_id, "collector_id": self.config.collector_id},
+                headers=_headers(self.config),
+                timeout=self.timeout,
+            )
+        except RequestException as exc:
+            raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
         if response.status_code not in (200, 201):
             raise _safe_error(response)
         return response.json() if response.content else {}
 
     def send_summary(self, summary: dict[str, Any]) -> dict[str, Any]:
         idem_key = idempotency_key(summary)
-        response = requests.post(
-            f"{self.config.backend_url}/commerce/collector/summaries",
-            json=summary,
-            headers=_headers(self.config, idem_key),
-            timeout=self.timeout,
-        )
+        try:
+            response = requests.post(
+                f"{self.config.backend_url}/commerce/collector/summaries",
+                json=summary,
+                headers=_headers(self.config, idem_key),
+                timeout=self.timeout,
+            )
+        except RequestException as exc:
+            raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
         if response.status_code not in (200, 201):
             raise _safe_error(response)
-        return response.json() if response.content else {}
+        data = response.json() if response.content else {}
+        data["_http_status_code"] = response.status_code
+        return data
 
     def get_column_mapping(self) -> dict[str, Any]:
-        response = requests.get(
-            f"{self.config.backend_url}/commerce/collector/column-mapping",
-            params={"commerce_id": self.config.commerce_id},
-            headers=_headers(self.config),
-            timeout=self.timeout,
-        )
+        try:
+            response = requests.get(
+                f"{self.config.backend_url}/commerce/collector/column-mapping",
+                params={"commerce_id": self.config.commerce_id},
+                headers=_headers(self.config),
+                timeout=self.timeout,
+            )
+        except RequestException as exc:
+            raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
         if response.status_code not in (200, 201):
             raise _safe_error(response)
         return response.json() if response.content else {}
 
     def post_mapping_candidate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = requests.post(
-            f"{self.config.backend_url}/commerce/collector/mapping-candidate",
-            json=payload,
-            headers=_headers(self.config),
-            timeout=self.timeout,
-        )
+        try:
+            response = requests.post(
+                f"{self.config.backend_url}/commerce/collector/mapping-candidate",
+                json=payload,
+                headers=_headers(self.config),
+                timeout=self.timeout,
+            )
+        except RequestException as exc:
+            raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
         if response.status_code not in (200, 201):
             raise _safe_error(response)
         return response.json() if response.content else {}

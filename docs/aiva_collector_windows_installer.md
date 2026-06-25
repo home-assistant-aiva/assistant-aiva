@@ -20,7 +20,7 @@ El instalador crea:
 
 - `C:\AIVA_Comercio\entrada`
 - `C:\AIVA_Comercio\procesados`
-- `C:\AIVA_Comercio\error`
+- `C:\AIVA_Comercio\errores`
 - `C:\AIVA_Comercio\output`
 - `C:\AIVA_Comercio\logs`
 - `C:\AIVA_Comercio\state`
