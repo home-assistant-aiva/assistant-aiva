@@ -84,9 +84,17 @@ jobs:
           $config.output_dir = Join-Path $env:RUNNER_TEMP "aiva_output"
           $config.state_dir = Join-Path $env:RUNNER_TEMP "aiva_state"
           $config.log_file = Join-Path $env:RUNNER_TEMP "aiva_logs\aiva_collector.log"
-          $config.discovery.include_paths = @($discoveryRoot)
-          $config.discovery.include_user_dirs = $false
-          $config.discovery.include_program_dirs = $false
+          $discovery = [pscustomobject]@{
+            include_paths = @($discoveryRoot)
+            include_user_dirs = $false
+            include_program_dirs = $false
+            include_database_services = $false
+          }
+          if ($config.PSObject.Properties["discovery"]) {
+            $config.discovery = $discovery
+          } else {
+            $config | Add-Member -MemberType NoteProperty -Name discovery -Value $discovery
+          }
           $path = Join-Path $env:RUNNER_TEMP "aiva_config_demo.json"
           $config | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 -LiteralPath $path
           "AIVA_DEMO_CONFIG=$path" | Out-File -FilePath $env:GITHUB_ENV -Append
