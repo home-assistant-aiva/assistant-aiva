@@ -11,8 +11,8 @@ def test_load_config_example():
     assert config.token is None
 
 
-def test_config_rejects_token_in_file(tmp_path):
-    path = tmp_path / "bad.json"
+def test_config_accepts_legacy_token_in_file_without_printing(tmp_path, capsys):
+    path = tmp_path / "legacy.json"
     path.write_text(
         json.dumps(
             {
@@ -28,8 +28,9 @@ def test_config_rejects_token_in_file(tmp_path):
         ),
         encoding="utf-8",
     )
-    with pytest.raises(ConfigError):
-        load_config(path)
+    config = load_config(path)
+    assert config.token == "secret"
+    assert "secret" not in capsys.readouterr().out
 
 
 def test_send_requires_token(monkeypatch):

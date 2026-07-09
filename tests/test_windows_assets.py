@@ -17,6 +17,7 @@ BAT_FILES = [
     WINDOWS_DIR / "run_dry.bat",
     WINDOWS_DIR / "run_discovery_dry.bat",
     WINDOWS_DIR / "run_discovery_report.bat",
+    WINDOWS_DIR / "diagnose_config.bat",
     WINDOWS_DIR / "run_send.bat",
     WINDOWS_DIR / "run_status.bat",
     WINDOWS_DIR / "run_queue_status.bat",
@@ -125,11 +126,18 @@ def test_run_send_requires_token_and_confirmation_before_send():
     assert "Falta AIVA_COLLECTOR_TOKEN. No se envio nada." in content
 
 
+def test_run_discovery_report_lets_exe_resolve_token_from_config():
+    content = (WINDOWS_DIR / "run_discovery_report.bat").read_text(encoding="utf-8")
+    assert "AIVA_COLLECTOR_TOKEN" not in content
+    assert "discover --report" in content
+
+
 def test_non_send_bats_do_not_execute_send():
     for name in (
         "run_validate.bat",
         "run_dry.bat",
         "run_discovery_dry.bat",
+        "diagnose_config.bat",
         "run_status.bat",
         "run_queue_status.bat",
         "run_retry_pending.bat",

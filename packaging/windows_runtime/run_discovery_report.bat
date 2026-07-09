@@ -1,14 +1,7 @@
 @echo off
 setlocal
 
-set "AIVA_ROOT=C:\AIVA_Comercio"
 set "AIVA_EXE=%~dp0aiva-collector.exe"
-
-if "%AIVA_COLLECTOR_TOKEN%"=="" (
-  echo Falta AIVA_COLLECTOR_TOKEN. No se envio nada.
-  pause
-  exit /b 2
-)
 
 echo AIVA detectara posibles fuentes. No modificara archivos ni bases.
 echo Escribi DETECTAR para enviar metadata segura al backend.
@@ -19,5 +12,5 @@ if /I not "%CONFIRM%"=="DETECTAR" (
   exit /b 1
 )
 
-"%AIVA_EXE%" discover --report --config "%AIVA_ROOT%\config.local.json"
+"%AIVA_EXE%" discover --report
 pause

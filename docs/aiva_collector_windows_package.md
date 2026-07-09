@@ -57,7 +57,7 @@ Ejecutar estos BATs desde `C:\AIVA_Comercio\collector\windows`:
 13. `collect_diagnostics.bat` solo si hace falta soporte
 
 `run_send.bat` exige que exista `AIVA_COLLECTOR_TOKEN` y pide escribir `ENVIAR` antes de ejecutar el envio.
-`run_discovery_report.bat` exige token y confirmacion `DETECTAR`. No sube archivos ni lee contenido comercial completo.
+`run_discovery_report.bat` exige confirmacion `DETECTAR`; el EXE resuelve el token desde la config instalada o el entorno. No sube archivos ni lee contenido comercial completo.
 `run_retry_pending.bat` no imprime el token y usa la cola offline.
 
 ## Kit piloto

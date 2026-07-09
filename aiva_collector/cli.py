@@ -21,6 +21,13 @@ from .column_mapping import (
 )
 from .client import CollectorClient, activate_collector
 from .config import PROJECT_ROOT, CollectorConfig, init_config, load_config
+from .config_discovery import (
+    RuntimeConfigResult,
+    find_installed_config_candidates,
+    resolve_runtime_config,
+    score_config_candidate,
+    standard_config_path,
+)
 from .discovery import DiscoveryConfig, DiscoveryReporter, DiscoveryScanner
 from .errors import BackendError, CollectorError, ConfigError, ValidationError
 from .file_fingerprint import build_file_id, compute_file_sha256, compute_normalized_data_hash, wait_for_stable_file
@@ -48,13 +55,19 @@ from .validation import validate_normalized_data
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.6rc1"
+DEFAULT_COLLECTOR_VERSION = "0.2.6rc2"
 
 
 def default_config_path() -> str | None:
-    if sys.platform.startswith("win"):
-        return WINDOWS_DEFAULT_CONFIG
     return None
+
+
+def _runtime(args: argparse.Namespace) -> RuntimeConfigResult:
+    return resolve_runtime_config(getattr(args, "config", None))
+
+
+def _load_runtime_config(args: argparse.Namespace) -> CollectorConfig:
+    return _runtime(args).config
 
 
 def _safe_idem_hash(key: str) -> str:
@@ -333,7 +346,7 @@ def stable_machine_id() -> str:
 
 
 def _activation_config_path(value: str | None) -> Path:
-    return Path(value or WINDOWS_DEFAULT_CONFIG)
+    return Path(value) if value else standard_config_path()
 
 
 def _looks_like_activation_code(value: str) -> bool:
@@ -644,7 +657,7 @@ def get_file_detected_at(conn, file_id: str) -> str:
 
 
 def cmd_run_auto(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config = _load_runtime_config(args)
     setup_logging(config)
     config.require_send_ready()
     _runtime_dirs(config)
@@ -700,7 +713,7 @@ def cmd_init_config(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config = _load_runtime_config(args)
     setup_logging(config)
     files = validate_config(config)
     token_state = "presente" if config.token else "ausente (permitido para dry-run)"
@@ -712,7 +725,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 def cmd_run_once(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config = _load_runtime_config(args)
     setup_logging(config)
     if args.send:
         config.require_send_ready()
@@ -832,7 +845,7 @@ def cmd_send(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config = _load_runtime_config(args)
     setup_logging(config)
     db_path = local_db_path(config)
     local = {"db_path": str(db_path), "processed_files": {}, "upload_queue": {}}
@@ -851,7 +864,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_queue_status(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config = _load_runtime_config(args)
     setup_logging(config)
     db_path = local_db_path(config)
     summary = {
@@ -888,7 +901,7 @@ def cmd_queue_status(args: argparse.Namespace) -> int:
 
 
 def cmd_retry_pending(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config = _load_runtime_config(args)
     setup_logging(config)
     config.require_send_ready()
     _runtime_dirs(config)
@@ -933,6 +946,10 @@ def _print_discovery_summary(candidates, *, as_json: bool = False) -> None:
         return
     print("AIVA Collector Discovery")
     print(f"Candidates found: {len(candidates)}")
+    if not candidates:
+        print("No se detectaron fuentes comerciales confiables.")
+        print("Sugerencia: indique una carpeta específica con reportes de ventas/stock o configure una fuente desde Admin.")
+        return
     for index, item in enumerate(candidates, start=1):
         location = item.detected_path or item.detected_host or "-"
         engine = f" {item.detected_engine}" if item.detected_engine else ""
@@ -940,7 +957,7 @@ def _print_discovery_summary(candidates, *, as_json: bool = False) -> None:
 
 
 def cmd_discover(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config = _load_runtime_config(args)
     setup_logging(config)
     discovery_config = DiscoveryConfig.from_collector_config(
         config,
@@ -949,6 +966,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         max_total_candidates=args.max_candidates,
         timeout_seconds=args.timeout,
         include_paths=args.include_path or None,
+        min_confidence=0.0 if args.show_low_confidence else None,
     )
     scanner = DiscoveryScanner(discovery_config)
     candidates = scanner.scan()
@@ -956,6 +974,11 @@ def cmd_discover(args: argparse.Namespace) -> int:
     if not args.report:
         logging.info("discovery dry-run candidates=%s", len(candidates))
         return 0
+    if not config.token:
+        print("No se encontró token del Collector en la configuración instalada.", file=sys.stderr)
+        print(f"Ejecute la activación del Collector o revise {standard_config_path()}.", file=sys.stderr)
+        print("No se envió nada.", file=sys.stderr)
+        return 2
     config.require_send_ready()
     result = DiscoveryReporter(config).report_discoveries(candidates, scanner)
     if not args.json:
@@ -965,6 +988,47 @@ def cmd_discover(args: argparse.Namespace) -> int:
             f"encolados={result.queued} errores={result.errors}"
         )
     return 0 if result.errors == 0 else 2
+
+
+def cmd_diagnose_config(args: argparse.Namespace) -> int:
+    try:
+        runtime = resolve_runtime_config(getattr(args, "config", None), migrate=not args.no_migrate)
+        selected = runtime.selected_path
+        candidates = runtime.candidates
+        config = runtime.config
+        resolved = True
+    except ConfigError:
+        selected = None
+        candidates = [score_config_candidate(path) for path in find_installed_config_candidates()]
+        config = None
+        resolved = False
+
+    payload = {
+        "standard_path": str(standard_config_path()),
+        "resolved": resolved,
+        "selected_path": str(selected) if selected else None,
+        "migrated": bool(resolved and runtime.migrated),
+        "backup_path": str(runtime.backup_path) if resolved and runtime.backup_path else None,
+        "selected_has_backend_url": bool(config and config.backend_url),
+        "selected_has_commerce_id": bool(config and config.commerce_id),
+        "selected_has_collector_id": bool(config and config.collector_id),
+        "selected_token_configured": bool(config and config.token),
+        "candidates": [
+            {
+                "path": str(item.path),
+                "score": item.score,
+                "valid": item.valid,
+                "has_backend_url": item.has_backend_url,
+                "has_commerce_id": item.has_commerce_id,
+                "has_collector_id": item.has_collector_id,
+                "token_configured": item.has_token,
+                "reason": item.reason,
+            }
+            for item in candidates
+        ],
+    }
+    print(json.dumps(payload, indent=2, ensure_ascii=True))
+    return 0 if resolved else 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -978,54 +1042,60 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=cmd_init_config)
 
     p_validate = sub.add_parser("validate")
-    p_validate.add_argument("--config", default=config_default, required=config_default is None)
+    p_validate.add_argument("--config", default=config_default)
     p_validate.set_defaults(func=cmd_validate)
 
     p_run = sub.add_parser("run-once")
-    p_run.add_argument("--config", default=config_default, required=config_default is None)
+    p_run.add_argument("--config", default=config_default)
     p_run.add_argument("--send", action="store_true")
     p_run.set_defaults(func=cmd_run_once)
 
     p_send = sub.add_parser("send")
-    p_send.add_argument("--config", default=config_default, required=config_default is None)
+    p_send.add_argument("--config", default=config_default)
     p_send.set_defaults(func=cmd_send)
 
     p_activate = sub.add_parser("activate")
     p_activate.add_argument("--backend-url", default=None)
     p_activate.add_argument("--code", default=None)
-    p_activate.add_argument("--config", default=WINDOWS_DEFAULT_CONFIG)
+    p_activate.add_argument("--config", default=None)
     p_activate.add_argument("--install-task", action="store_true")
     p_activate.set_defaults(func=cmd_activate)
 
     p_auto = sub.add_parser("run-auto")
-    p_auto.add_argument("--config", default=config_default, required=config_default is None)
+    p_auto.add_argument("--config", default=config_default)
     p_auto.set_defaults(func=cmd_run_auto)
 
     p_status = sub.add_parser("status")
-    p_status.add_argument("--config", default=config_default, required=config_default is None)
+    p_status.add_argument("--config", default=config_default)
     p_status.set_defaults(func=cmd_status)
 
     p_queue_status = sub.add_parser("queue-status")
-    p_queue_status.add_argument("--config", default=config_default, required=config_default is None)
+    p_queue_status.add_argument("--config", default=config_default)
     p_queue_status.set_defaults(func=cmd_queue_status)
 
     p_retry_pending = sub.add_parser("retry-pending")
-    p_retry_pending.add_argument("--config", default=config_default, required=config_default is None)
+    p_retry_pending.add_argument("--config", default=config_default)
     p_retry_pending.set_defaults(func=cmd_retry_pending)
 
     p_discover = sub.add_parser("discover")
-    p_discover.add_argument("--config", default=config_default, required=config_default is None)
+    p_discover.add_argument("--config", default=config_default)
     p_discover.add_argument("--dry-run", action="store_true")
     p_discover.add_argument("--report", action="store_true")
     p_discover.add_argument("--max-candidates", type=int, default=None)
     p_discover.add_argument("--timeout", type=int, default=None)
     p_discover.add_argument("--include-path", action="append", default=[])
     p_discover.add_argument("--safe-mode", choices=["true", "false"], default="true")
+    p_discover.add_argument("--show-low-confidence", action="store_true")
     p_discover.add_argument("--json", action="store_true")
     p_discover.set_defaults(func=cmd_discover)
 
+    p_diagnose = sub.add_parser("diagnose-config")
+    p_diagnose.add_argument("--config", default=config_default)
+    p_diagnose.add_argument("--no-migrate", action="store_true")
+    p_diagnose.set_defaults(func=cmd_diagnose_config)
+
     p_service_status = sub.add_parser("service-status")
-    p_service_status.add_argument("--config", default=config_default, required=config_default is None)
+    p_service_status.add_argument("--config", default=config_default)
     p_service_status.set_defaults(func=cmd_status)
     return parser
 

@@ -36,7 +36,7 @@ C:\AIVA_Comercio\config.local.json
 
 La base sale de `windows/config.windows.example.json`. Si el archivo ya existe, no lo pisa.
 
-El token no se guarda en config. El envio exige `AIVA_COLLECTOR_TOKEN` como variable de entorno.
+El instalador RC2 migra automaticamente una configuracion previa valida a `C:\ProgramData\AIVA Collector\config.windows.json` y crea backup local si debe reemplazar una config invalida. Los comandos del EXE resuelven el token desde entorno, config instalada heredada o token protegido por activacion, sin imprimirlo.
 
 ## Accesos directos
 

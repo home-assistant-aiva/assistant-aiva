@@ -3,5 +3,5 @@ setlocal
 
 set "AIVA_EXE=%~dp0aiva-collector.exe"
 
-"%AIVA_EXE%" queue-status
+"%AIVA_EXE%" diagnose-config
 pause

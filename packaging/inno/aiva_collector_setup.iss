@@ -1,5 +1,5 @@
 #define AppName "AIVA Collector"
-#define AppVersion "0.2.6rc1"
+#define AppVersion "0.2.6rc2"
 #define AppPublisher "AIVA Comercial"
 #define AppExeName "aiva-collector.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\AIVA Collector
 DefaultGroupName=AIVA Collector
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
-OutputBaseFilename=AIVA-Collector-Setup-v0.2.6rc1
+OutputBaseFilename=AIVA-Collector-Setup-v0.2.6-discovery-rc2
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -34,11 +34,14 @@ Name: "C:\AIVA_Comercio\logs"
 Name: "C:\AIVA_Comercio\state"
 Name: "C:\AIVA_Comercio\state\queue"
 Name: "C:\AIVA_Comercio\diagnostico"
+Name: "{commonappdata}\AIVA Collector"
+Name: "{commonappdata}\AIVA Collector\backups"
 
 [Files]
 Source: "..\..\dist\aiva-collector.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\windows_runtime\*.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\windows\config.windows.example.json"; DestDir: "C:\AIVA_Comercio"; DestName: "config.local.json"; Flags: onlyifdoesntexist ignoreversion
+Source: "..\..\windows\config.windows.example.json"; DestDir: "{commonappdata}\AIVA Collector"; DestName: "config.windows.json"; Flags: onlyifdoesntexist ignoreversion
 Source: "..\..\windows\config.windows.example.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\docs\aiva_collector_windows_installer.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\docs\aiva_collector_windows_exe.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -49,6 +52,7 @@ Name: "{group}\AIVA Collector - Abrir carpeta de entrada"; Filename: "{app}\open
 Name: "{group}\AIVA Collector - Prueba sin enviar"; Filename: "{app}\run_dry.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Detectar fuentes sin enviar"; Filename: "{app}\run_discovery_dry.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Reportar fuentes detectadas"; Filename: "{app}\run_discovery_report.bat"; WorkingDir: "{app}"
+Name: "{group}\AIVA Collector - Diagnosticar configuracion"; Filename: "{app}\diagnose_config.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Procesar ahora"; Filename: "{app}\run_auto.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Estado de Cola"; Filename: "{app}\run_queue_status.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Reintentar Pendientes"; Filename: "{app}\run_retry_pending.bat"; WorkingDir: "{app}"

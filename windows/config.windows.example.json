@@ -1,5 +1,5 @@
 {
-  "collector_version": "0.2.6rc1",
+  "collector_version": "0.2.6rc2",
   "backend_url": "http://187.77.44.118:8080",
   "commerce_id": "REEMPLAZAR_COMMERCE_ID",
   "collector_id": "REEMPLAZAR_COLLECTOR_ID",
@@ -25,11 +25,11 @@
     "max_total_candidates": 100,
     "max_report_candidates": 20,
     "include_user_dirs": true,
-    "include_program_dirs": true,
+    "include_program_dirs": false,
     "include_drive_roots": false,
     "timeout_seconds": 30,
     "safe_mode": true,
-    "min_confidence": 0.25
+    "min_confidence": 0.65
   },
   "column_mapping": {
     "fecha": "fecha",

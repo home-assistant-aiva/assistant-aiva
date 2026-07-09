@@ -46,8 +46,46 @@ POSITIVE_SIGNALS = {
     "movimientos",
     "detalle",
     "comprobantes",
+    "facturacion",
+    "facturación",
+    "caja",
+    "gestion",
+    "gestión",
     "aiva",
     "sistema",
+}
+COMMERCIAL_FILE_STEMS = {
+    "ventas",
+    "stock",
+    "productos",
+    "inventario",
+    "precios",
+    "costos",
+}
+COMMERCIAL_ROUTE_MARKERS = (
+    "/aiva",
+    "/aiva_",
+    "/sistema",
+    "/sistemas",
+    "/gestion",
+    "/gestión",
+    "/ventas",
+    "/reportes",
+    "/datos",
+)
+NEGATIVE_VENDOR_SIGNALS = {
+    "adobe",
+    "adobe creative cloud",
+    "mcafee",
+    "counter-strike",
+    "counter strike",
+    "steam",
+    "riot games",
+    "xboxgames",
+    "microsoft office/office15/samples",
+    "office samples",
+    "common files",
+    "hp",
 }
 NEGATIVE_SIGNALS = {
     "password",
@@ -68,8 +106,27 @@ NEGATIVE_SIGNALS = {
     "telegram",
     "private",
     "personal",
+    "thumbs.db",
+    "botprofile.db",
+    "pim.db",
 }
 EXCLUDED_PARTS = {
+    "$recycle.bin",
+    ".git",
+    "__pycache__",
+    "node_modules",
+    "venv",
+    ".venv",
+    "temp",
+    "cache",
+    "appdata",
+    "common files",
+    "windows",
+    "program files",
+    "program files (x86)",
+    "system volume information",
+}
+HARD_EXCLUDED_PARTS = {
     "$recycle.bin",
     ".git",
     "__pycache__",
@@ -85,6 +142,8 @@ EXCLUDED_SUFFIXES = (
     "\\appdata\\local\\microsoft",
     "\\appdata\\roaming\\mozilla",
     "\\appdata\\local\\temp",
+    "\\downloads",
+    "\\desktop",
 )
 
 
@@ -96,14 +155,14 @@ class DiscoveryConfig:
     max_total_candidates: int = 100
     max_report_candidates: int = 20
     include_user_dirs: bool = True
-    include_program_dirs: bool = True
+    include_program_dirs: bool = False
     include_database_services: bool = True
     include_drive_roots: bool = False
     timeout_seconds: int = 30
     safe_mode: bool = True
     dry_run: bool = False
     include_paths: tuple[Path, ...] = ()
-    min_confidence: float = 0.25
+    min_confidence: float = 0.65
 
     @classmethod
     def from_collector_config(
@@ -115,6 +174,7 @@ class DiscoveryConfig:
         max_total_candidates: int | None = None,
         timeout_seconds: int | None = None,
         include_paths: list[str] | None = None,
+        min_confidence: float | None = None,
     ) -> "DiscoveryConfig":
         raw = config.raw
         discovery_raw = raw.get("discovery") if isinstance(raw.get("discovery"), dict) else {}
@@ -133,14 +193,14 @@ class DiscoveryConfig:
             max_total_candidates=int(max_total_candidates if max_total_candidates is not None else value("max_total_candidates", 100)),
             max_report_candidates=int(value("max_report_candidates", 20)),
             include_user_dirs=bool(value("include_user_dirs", True)),
-            include_program_dirs=bool(value("include_program_dirs", True)),
+            include_program_dirs=bool(value("include_program_dirs", False)),
             include_database_services=bool(value("include_database_services", True)),
             include_drive_roots=bool(value("include_drive_roots", False)),
             timeout_seconds=int(timeout_seconds if timeout_seconds is not None else value("timeout_seconds", 30)),
             safe_mode=bool(safe_mode if safe_mode is not None else value("safe_mode", True)),
             dry_run=dry_run,
             include_paths=paths,
-            min_confidence=float(value("min_confidence", 0.25)),
+            min_confidence=float(min_confidence if min_confidence is not None else value("min_confidence", 0.65)),
         )
 
 
@@ -179,6 +239,24 @@ def _has_signal(name: str, signals: set[str]) -> bool:
     return any(signal in lowered for signal in signals)
 
 
+def _path_has_vendor_noise(path: Path) -> bool:
+    text = _norm_text(str(path))
+    return any(signal in text for signal in NEGATIVE_VENDOR_SIGNALS)
+
+
+def _is_commercial_route(path: Path) -> bool:
+    text = _norm_text(str(path))
+    return any(marker in text for marker in COMMERCIAL_ROUTE_MARKERS)
+
+
+def _is_generic_user_folder(path: Path) -> bool:
+    return path.name.lower() in {"desktop", "downloads", "escritorio", "descargas"}
+
+
+def _has_generic_user_part(path: Path) -> bool:
+    return any(part.lower() in {"desktop", "downloads", "escritorio", "descargas"} for part in path.parts)
+
+
 def _safe_stat(path: Path) -> os.stat_result | None:
     try:
         return path.stat()
@@ -194,12 +272,12 @@ def _is_hidden_or_system(path: Path) -> bool:
 def _is_excluded(path: Path) -> bool:
     lowered = str(path).lower().replace("/", "\\")
     parts = {part.lower() for part in path.parts}
-    return bool(parts & EXCLUDED_PARTS) or any(lowered.endswith(suffix) or f"{suffix}\\" in lowered for suffix in EXCLUDED_SUFFIXES)
+    return _path_has_vendor_noise(path) or bool(parts & EXCLUDED_PARTS) or any(lowered.endswith(suffix) or f"{suffix}\\" in lowered for suffix in EXCLUDED_SUFFIXES)
 
 
 def _has_excluded_part(path: Path) -> bool:
     parts = {part.lower() for part in path.parts}
-    return bool(parts & EXCLUDED_PARTS)
+    return _path_has_vendor_noise(path) or bool(parts & HARD_EXCLUDED_PARTS)
 
 
 def _redact_user_path(path_value: str) -> str:
@@ -273,7 +351,7 @@ class DiscoveryScanner:
             r"C:\Data",
             r"C:\Backups",
         ]
-        if self.config.include_program_dirs:
+        if self.config.include_program_dirs and not self.config.safe_mode:
             common.extend([r"C:\Program Files", r"C:\Program Files (x86)"])
         if self.config.include_drive_roots:
             common.append(r"C:\\")
@@ -320,7 +398,7 @@ class DiscoveryScanner:
         database_candidates: list[DiscoveryCandidate] = []
         for path in files:
             excluded = _has_excluded_part(path) if explicit_root else _is_excluded(path)
-            if excluded or _is_hidden_or_system(path):
+            if excluded or _is_hidden_or_system(path) or _path_has_vendor_noise(path):
                 continue
             suffix = path.suffix.lower()
             if self._negative_file(path):
@@ -333,7 +411,7 @@ class DiscoveryScanner:
                 candidate = self._database_candidate(path, suffix)
                 if candidate:
                     database_candidates.append(candidate)
-        folder_candidate = self._folder_candidate(folder, data_files) if data_files or _has_signal(folder.name, POSITIVE_SIGNALS) else None
+        folder_candidate = self._folder_candidate(folder, data_files) if data_files or (_has_signal(folder.name, POSITIVE_SIGNALS) and not _is_generic_user_folder(folder)) else None
         result = [folder_candidate] if folder_candidate else []
         result.extend(database_candidates)
         return result
@@ -376,7 +454,7 @@ class DiscoveryScanner:
 
     def _negative_file(self, path: Path) -> bool:
         text = f"{path.name} {path.parent.name}".lower()
-        return _has_signal(text, NEGATIVE_SIGNALS)
+        return _path_has_vendor_noise(path) or _has_signal(text, NEGATIVE_SIGNALS)
 
     def _file_metadata(self, path: Path) -> dict[str, Any] | None:
         stat = _safe_stat(path)
@@ -389,9 +467,12 @@ class DiscoveryScanner:
             "modified_at": _utc_from_timestamp(stat.st_mtime),
             "path": path,
             "positive_signal": _has_signal(path.name, POSITIVE_SIGNALS),
+            "commercial_file": path.stem.lower() in COMMERCIAL_FILE_STEMS or _has_signal(path.name, POSITIVE_SIGNALS),
         }
 
     def _folder_candidate(self, folder: Path, files: list[dict[str, Any]]) -> DiscoveryCandidate | None:
+        if _is_generic_user_folder(folder) and not any(bool(item.get("commercial_file")) for item in files):
+            return None
         extensions = {str(item["extension"]) for item in files}
         recent_cutoff = time.time() - 90 * 24 * 3600
         recent_count = sum(1 for item in files if _safe_stat(Path(item["path"])) and _safe_stat(Path(item["path"])).st_mtime >= recent_cutoff)
@@ -423,7 +504,14 @@ class DiscoveryScanner:
         stat = _safe_stat(path)
         if not engine or not stat or self._negative_file(path):
             return None
-        confidence = 0.7 if _has_signal(path.name, POSITIVE_SIGNALS) or _has_signal(path.parent.name, POSITIVE_SIGNALS) else 0.45
+        has_commercial_signal = _has_signal(path.name, POSITIVE_SIGNALS) or _has_signal(path.parent.name, POSITIVE_SIGNALS)
+        commercial_route = _is_commercial_route(path)
+        explicit_path = any(str(path).lower().startswith(str(root).lower()) for root in self.config.include_paths)
+        if explicit_path and _has_generic_user_part(path) and not has_commercial_signal:
+            return None
+        if not (explicit_path or has_commercial_signal or commercial_route):
+            return None
+        confidence = 0.72 if has_commercial_signal or commercial_route else 0.66
         if confidence < self.config.min_confidence:
             return None
         return DiscoveryCandidate(
@@ -449,7 +537,7 @@ class DiscoveryScanner:
         score = 0.2
         if "aiva/comercial/entrada" in path_text or "aiva_comercio/entrada" in path_text:
             score += 0.55
-        if any(signal in path_text for signal in ("reportes", "ventas", "stock", "sistema", "gestion", "gestión")):
+        if any(signal in path_text for signal in ("reportes", "ventas", "stock", "sistema", "gestion", "gestión", "inventario")):
             score += 0.25
         if data_count >= 3:
             score += 0.2
@@ -459,11 +547,16 @@ class DiscoveryScanner:
             score += 0.15
         elif file_signal_count == 1:
             score += 0.1
-        if "downloads" in path_text or "documents" in path_text or "documentos" in path_text:
+        if "desktop" in path_text or "downloads" in path_text or "descargas" in path_text or "escritorio" in path_text:
+            if not file_signal_count:
+                score = 0.0
+            else:
+                score = min(max(score, 0.65), 0.72)
+        elif "documents" in path_text or "documentos" in path_text:
             if file_signal_count and data_count:
-                score = max(score, 0.55)
+                score = max(score, 0.65)
             score = min(score, 0.75)
-        if _has_signal(str(folder), NEGATIVE_SIGNALS):
+        if _has_signal(str(folder), NEGATIVE_SIGNALS) or _path_has_vendor_noise(folder):
             score -= 0.4
         return round(max(0.0, min(score, 0.95)), 2)
 

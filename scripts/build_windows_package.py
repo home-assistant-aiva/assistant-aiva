@@ -13,7 +13,7 @@ from typing import Iterable
 
 
 PACKAGE_NAME = "aiva-collector-windows-manual"
-DEFAULT_VERSION = "0.2.6rc1"
+DEFAULT_VERSION = "0.2.6rc2"
 ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
 
@@ -130,6 +130,14 @@ def read_version(root: Path = ROOT) -> str:
         return DEFAULT_VERSION
 
 
+def public_asset_version(version: str) -> str:
+    if version == "0.2.6rc2":
+        return "0.2.6-discovery-rc2"
+    if version == "0.2.6rc1":
+        return "0.2.6-discovery-rc1"
+    return version
+
+
 def should_skip(path: Path) -> bool:
     parts = set(path.parts)
     if any(part == "__pycache__" for part in path.parts):
@@ -191,11 +199,15 @@ def is_text_file(path: Path) -> bool:
 def line_is_allowed(pattern_name: str, relative: Path, line: str) -> bool:
     normalized = relative.as_posix()
     if pattern_name == "collector_token":
+        if normalized == "aiva_collector/config_discovery.py" and "resolve_collector_token" in line:
+            return True
         return any(context in line for context in SAFE_COLLECTOR_TOKEN_CONTEXTS)
     if pattern_name == "Authorization: Bearer":
         return normalized == "aiva_collector/client.py" and 'f"Bearer {token}"' in line
     if pattern_name == "config.local.json":
         if normalized == "aiva_collector/cli.py" and "WINDOWS_DEFAULT_CONFIG" in line:
+            return True
+        if normalized == "aiva_collector/config_discovery.py":
             return True
         return normalized.endswith(".md") or normalized.endswith(".bat") or normalized == "README.md"
     return False
@@ -241,11 +253,12 @@ def build_package(root: Path = ROOT, dist_dir: Path = DIST_DIR) -> tuple[Path, P
     root = root.resolve()
     dist_dir.mkdir(parents=True, exist_ok=True)
     version = read_version(root)
-    zip_path = dist_dir / f"{PACKAGE_NAME}-v{version}.zip"
-    manifest_path = dist_dir / f"{PACKAGE_NAME}-v{version}.manifest.json"
+    asset_version = public_asset_version(version)
+    zip_path = dist_dir / f"{PACKAGE_NAME}-v{asset_version}.zip"
+    manifest_path = dist_dir / f"{PACKAGE_NAME}-v{asset_version}.manifest.json"
 
     with tempfile.TemporaryDirectory(prefix="aiva-collector-winpkg-") as tmp:
-        staging = Path(tmp) / f"{PACKAGE_NAME}-v{version}"
+        staging = Path(tmp) / f"{PACKAGE_NAME}-v{asset_version}"
         staging.mkdir(parents=True)
         files = iter_included_files(root)
         copy_files(root, staging, files)

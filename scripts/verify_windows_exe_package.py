@@ -24,11 +24,22 @@ def read_version(root: Path = ROOT) -> str:
 
 
 VERSION = read_version()
+
+
+def public_asset_version(version: str) -> str:
+    if version == "0.2.6rc2":
+        return "0.2.6-discovery-rc2"
+    if version == "0.2.6rc1":
+        return "0.2.6-discovery-rc1"
+    return version
+
+
+ASSET_VERSION = public_asset_version(VERSION)
 SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 INNO_PATH = ROOT / "packaging" / "inno" / "aiva_collector_setup.iss"
 DIST_DIR = ROOT / "dist"
 EXE_PATH = DIST_DIR / "aiva-collector.exe"
-INSTALLER_PATH = DIST_DIR / f"AIVA-Collector-Setup-v{VERSION}.exe"
+INSTALLER_PATH = DIST_DIR / f"AIVA-Collector-Setup-v{ASSET_VERSION}.exe"
 TECH_ZIP_PATH = DIST_DIR / f"aiva-collector-windows-exe-v{VERSION}.zip"
 MANIFEST_PATH = DIST_DIR / f"AIVA-Collector-Installer-v{VERSION}.manifest.json"
 
@@ -64,6 +75,7 @@ TECH_ZIP_FILES = [
     ROOT / "packaging" / "windows_runtime" / "run_queue_status.bat",
     ROOT / "packaging" / "windows_runtime" / "run_retry_pending.bat",
     ROOT / "packaging" / "windows_runtime" / "run_send.bat",
+    ROOT / "packaging" / "windows_runtime" / "diagnose_config.bat",
     ROOT / "packaging" / "windows_runtime" / "install_scheduled_task.bat",
     ROOT / "packaging" / "windows_runtime" / "uninstall_scheduled_task.bat",
     ROOT / "packaging" / "windows_runtime" / "collect_diagnostics.bat",
@@ -122,7 +134,7 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
     text = inno_path.read_text(encoding="utf-8")
     assert_text_file_safe(inno_path)
     required = [
-        f"OutputBaseFilename=AIVA-Collector-Setup-v{VERSION}",
+        f"OutputBaseFilename=AIVA-Collector-Setup-v{ASSET_VERSION}",
         "Source: \"..\\..\\dist\\aiva-collector.exe\"",
         "DestName: \"config.local.json\"; Flags: onlyifdoesntexist",
         "C:\\AIVA_Comercio\\entrada",
@@ -132,6 +144,7 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
         "run_auto.bat",
         "run_queue_status.bat",
         "run_retry_pending.bat",
+        "diagnose_config.bat",
         "install_scheduled_task.bat",
     ]
     missing = [value for value in required if value not in text]

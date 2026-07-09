@@ -38,7 +38,7 @@ def test_cli_windows_default_config(monkeypatch):
     monkeypatch.setattr("sys.platform", "win32")
     parser = build_parser()
     args = parser.parse_args(["validate"])
-    assert args.config == "C:\\AIVA_Comercio\\config.local.json"
+    assert args.config is None
 
 
 def test_cli_exposes_activation_and_run_auto_help():
@@ -59,6 +59,16 @@ def test_cli_exposes_queue_commands_help():
         parser.parse_args(["retry-pending", "--help"])
     assert queue_status.value.code == 0
     assert retry_pending.value.code == 0
+
+
+def test_cli_exposes_discover_and_diagnose_help():
+    parser = build_parser()
+    with pytest.raises(SystemExit) as discover:
+        parser.parse_args(["discover", "--help"])
+    with pytest.raises(SystemExit) as diagnose:
+        parser.parse_args(["diagnose-config", "--help"])
+    assert discover.value.code == 0
+    assert diagnose.value.code == 0
 
 
 def test_run_auto_without_files_exits_ok(tmp_path, monkeypatch, capsys):

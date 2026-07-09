@@ -58,6 +58,10 @@ class CollectorConfig:
         value = os.getenv(self.collector_token_env)
         if value:
             return value
+        for key in ("collector_token", "token", "api_token", "secret", "aiva_secret", "internal_secret"):
+            raw_value = self.raw.get(key)
+            if isinstance(raw_value, str) and raw_value.strip():
+                return raw_value.strip()
         try:
             return load_token(self.path("state_dir"))
         except ConfigError:
@@ -102,8 +106,6 @@ def load_config(path: str | Path) -> CollectorConfig:
         raise ConfigError(f"No existe config: {config_path}")
     with config_path.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
-    if "collector_token" in data:
-        raise ConfigError("collector_token no debe guardarse en config; usar variable de entorno")
     config = CollectorConfig(raw=data, config_path=config_path)
     validate_config_shape(config)
     return config
@@ -117,6 +119,8 @@ def validate_config_shape(config: CollectorConfig) -> None:
     if not config.collector_token_env:
         raise ConfigError("collector_token_env es requerido")
     mapping = config.column_mapping
+    if not mapping:
+        return
     missing = sorted(REQUIRED_MAPPING_KEYS - set(mapping))
     if missing:
         raise ConfigError("Faltan mappings requeridos: " + ", ".join(missing))

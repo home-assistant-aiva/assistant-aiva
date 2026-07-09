@@ -170,6 +170,93 @@ def test_personal_file_is_ignored(tmp_path):
     assert _scanner(tmp_path).scan() == []
 
 
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "Program Files/Adobe/Adobe Creative Cloud/pim.db",
+        "Program Files/McAfee/CSP/core.db",
+        "Program Files/Counter-Strike 1.6/cstrike/BotProfile.db",
+        "Program Files/HP/Documentation/thumbs.db",
+        "Program Files/Microsoft Office/Office15/SAMPLES/sample.accdb",
+    ],
+)
+def test_vendor_noise_databases_are_ignored(tmp_path, relative):
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"fake")
+
+    rendered = json.dumps([item.detected_path for item in _scanner(tmp_path).scan()])
+
+    assert path.name not in rendered
+
+
+def test_program_files_is_not_scanned_by_default(tmp_path):
+    folder = tmp_path / "Program Files" / "Sistema"
+    folder.mkdir(parents=True)
+    (folder / "ventas.csv").write_text("x", encoding="utf-8")
+
+    scanner = DiscoveryScanner(
+        DiscoveryConfig(
+            include_paths=(),
+            include_user_dirs=False,
+            include_program_dirs=True,
+            include_database_services=False,
+            include_drive_roots=False,
+            safe_mode=True,
+        )
+    )
+
+    assert scanner.scan() == []
+
+
+@pytest.mark.parametrize("folder_name", ["Downloads", "Desktop"])
+def test_generic_user_folder_is_not_reported_without_commercial_files(tmp_path, folder_name):
+    folder = tmp_path / "Users" / "Test" / folder_name
+    folder.mkdir(parents=True)
+    (folder / "random.db").write_bytes(b"fake")
+
+    assert _scanner(tmp_path).scan() == []
+
+
+def test_commercial_reports_are_detected_in_commercial_routes(tmp_path):
+    folder = tmp_path / "Sistema" / "Reportes"
+    folder.mkdir(parents=True)
+    (folder / "ventas.csv").write_text("x", encoding="utf-8")
+    aiva = tmp_path / "AIVA_Comercio" / "entrada"
+    aiva.mkdir(parents=True)
+    (aiva / "stock.xlsx").write_bytes(b"fake")
+
+    paths = {item.detected_path for item in _scanner(tmp_path).scan()}
+
+    assert str(folder) in paths
+    assert str(aiva) in paths
+
+
+def test_database_requires_commercial_signal_or_route(tmp_path):
+    bad = tmp_path / "Users" / "Test" / "Downloads" / "pim.db"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"fake")
+    good = tmp_path / "Datos" / "inventario.db"
+    good.parent.mkdir(parents=True)
+    good.write_bytes(b"fake")
+
+    paths = {item.detected_path for item in _scanner(tmp_path).scan()}
+
+    assert str(bad) not in paths
+    assert str(good) in paths
+
+
+def test_low_confidence_can_be_shown_for_diagnostics(tmp_path):
+    folder = tmp_path / "Documents"
+    folder.mkdir()
+    (folder / "reporte.txt").write_text("x", encoding="utf-8")
+
+    hidden = _scanner(tmp_path).scan()
+    visible = _scanner(tmp_path, min_confidence=0.0).scan()
+
+    assert len(visible) >= len(hidden)
+
+
 def test_deduplication_by_path_keeps_highest_confidence(tmp_path):
     scanner = _scanner(tmp_path)
     low = DiscoveryCandidate("watched_folder", "A", 0.3, detected_path=str(tmp_path))

@@ -6,7 +6,7 @@ on:
       release_tag:
         description: "Release tag to publish"
         required: true
-        default: "v0.2.6-collector-discovery-rc1"
+        default: "v0.2.6-collector-discovery-rc2"
       publish_release:
         description: "Publish GitHub pre-release"
         required: true
@@ -14,7 +14,7 @@ on:
         default: false
   push:
     tags:
-      - "v0.2.6-collector-discovery-rc1"
+      - "v0.2.6-collector-discovery-rc2"
       - "v0.2.*collector*"
       - "collector-v*"
 
@@ -22,10 +22,10 @@ permissions:
   contents: write
 
 env:
-  AIVA_RELEASE_VERSION: "0.2.6-discovery-rc1"
-  AIVA_RELEASE_TITLE: "AIVA Collector v0.2.6 Discovery RC1"
-  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-discovery-rc1.exe"
-  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-discovery-rc1.zip"
+  AIVA_RELEASE_VERSION: "0.2.6-discovery-rc2"
+  AIVA_RELEASE_TITLE: "AIVA Collector v0.2.6 Discovery RC2"
+  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-discovery-rc2.exe"
+  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-discovery-rc2.zip"
 
 jobs:
   build-release:
@@ -133,12 +133,10 @@ jobs:
       - name: Rename release assets
         shell: pwsh
         run: |
-          $installerSource = "dist\AIVA-Collector-Setup-v$env:AIVA_PACKAGE_VERSION.exe"
-          $manualSource = "dist\aiva-collector-windows-manual-v$env:AIVA_PACKAGE_VERSION.zip"
+          $installerSource = "dist\$env:AIVA_INSTALLER_ASSET"
+          $manualSource = "dist\$env:AIVA_MANUAL_ZIP_ASSET"
           if (-not (Test-Path $installerSource)) { throw "Missing installer: $installerSource" }
           if (-not (Test-Path $manualSource)) { throw "Missing manual ZIP: $manualSource" }
-          Copy-Item -LiteralPath $installerSource -Destination "dist\$env:AIVA_INSTALLER_ASSET" -Force
-          Copy-Item -LiteralPath $manualSource -Destination "dist\$env:AIVA_MANUAL_ZIP_ASSET" -Force
           Copy-Item -LiteralPath "README-INSTALACION-COLLECTOR.txt" -Destination "dist\README-INSTALACION-COLLECTOR.txt" -Force
 
       - name: Generate SHA256SUMS
@@ -186,14 +184,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          name: AIVA Collector v0.2.6 Discovery RC1
+          name: AIVA Collector v0.2.6 Discovery RC2
           prerelease: true
           draft: false
           fail_on_unmatched_files: true
           body: |
-            # AIVA Collector v0.2.6 Discovery RC1
+            # AIVA Collector v0.2.6 Discovery RC2
 
-            Pre-release para validar Collector Discovery basico.
+            Pre-release para validar Collector Discovery con migracion automatica de configuracion y filtros de ruido.
 
             Incluye:
 
@@ -202,6 +200,9 @@ jobs:
             * deteccion por extension de SQLite/Access/Firebird;
             * deteccion basica de servicios DB en Windows;
             * comandos "Detectar fuentes sin enviar" y "Reportar fuentes detectadas";
+            * migracion automatica de config previa con backup;
+            * token resuelto desde config instalada o entorno;
+            * filtros para evitar Program Files, Desktop/Downloads genericos y software no comercial;
             * integracion con Backend/Admin Fuentes de datos 6.4A.
 
             No incluye todavia:
@@ -222,7 +223,7 @@ jobs:
 
             Estado:
 
-            * RC1 / pre-release.
+            * RC2 / pre-release.
             * Usar primero en ambiente controlado.
 
             Validacion esperada:
