@@ -1,0 +1,230 @@
+name: Build Collector Windows Discovery Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish"
+        required: true
+        default: "v0.2.6-collector-discovery-rc1"
+      publish_release:
+        description: "Publish GitHub pre-release"
+        required: true
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v0.2.6-collector-discovery-rc1"
+      - "v0.2.*collector*"
+      - "collector-v*"
+
+permissions:
+  contents: write
+
+env:
+  AIVA_RELEASE_VERSION: "0.2.6-discovery-rc1"
+  AIVA_RELEASE_TITLE: "AIVA Collector v0.2.6 Discovery RC1"
+  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-discovery-rc1.exe"
+  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-discovery-rc1.zip"
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Read package version
+        shell: pwsh
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          "AIVA_PACKAGE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Package version: $version"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
+          python -m pip install pyinstaller
+
+      - name: Run Collector test suite
+        run: |
+          python -m pytest
+
+      - name: Build aiva-collector.exe
+        run: |
+          python scripts/build_windows_exe.py
+
+      - name: Verify executable commands
+        run: |
+          .\dist\aiva-collector.exe --help
+          .\dist\aiva-collector.exe activate --help
+          .\dist\aiva-collector.exe run-auto --help
+          .\dist\aiva-collector.exe discover --help
+
+      - name: Create demo config for executable validation
+        shell: pwsh
+        run: |
+          $config = Get-Content -Raw -LiteralPath "configs\example_config.json" | ConvertFrom-Json
+          $root = (Get-Location).Path
+          $discoveryRoot = Join-Path $env:RUNNER_TEMP "aiva_discovery_release_test"
+          New-Item -ItemType Directory -Force -Path (Join-Path $discoveryRoot "Reportes") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $discoveryRoot "Sistema") | Out-Null
+          "producto,cantidad,stock`nCoca,10,5" | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $discoveryRoot "Reportes\ventas.csv")
+          "fake sqlite placeholder" | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $discoveryRoot "Sistema\sistema.db")
+          $config.input_dir = Join-Path $root "samples\input"
+          $config.processed_dir = Join-Path $env:RUNNER_TEMP "aiva_processed"
+          $config.error_dir = Join-Path $env:RUNNER_TEMP "aiva_error"
+          $config.output_dir = Join-Path $env:RUNNER_TEMP "aiva_output"
+          $config.state_dir = Join-Path $env:RUNNER_TEMP "aiva_state"
+          $config.log_file = Join-Path $env:RUNNER_TEMP "aiva_logs\aiva_collector.log"
+          $config.discovery.include_paths = @($discoveryRoot)
+          $config.discovery.include_user_dirs = $false
+          $config.discovery.include_program_dirs = $false
+          $path = Join-Path $env:RUNNER_TEMP "aiva_config_demo.json"
+          $config | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 -LiteralPath $path
+          "AIVA_DEMO_CONFIG=$path" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "AIVA_DISCOVERY_ROOT=$discoveryRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Verify executable validate and discovery dry-run
+        shell: pwsh
+        run: |
+          .\dist\aiva-collector.exe validate --config "$env:AIVA_DEMO_CONFIG"
+          .\dist\aiva-collector.exe discover --config "$env:AIVA_DEMO_CONFIG" --dry-run --json --include-path "$env:AIVA_DISCOVERY_ROOT" | Tee-Object -Variable discoveryJson
+          $parsed = $discoveryJson | ConvertFrom-Json
+          if (-not ($parsed.items | Where-Object { $_.source_type -eq "watched_folder" })) { throw "watched_folder discovery not found" }
+          if (-not ($parsed.items | Where-Object { $_.source_type -eq "database" -and $_.detected_engine -eq "sqlite" })) { throw "sqlite discovery not found" }
+
+      - name: Verify packaging definitions before installer
+        run: |
+          python scripts/verify_windows_exe_package.py
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build Inno installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "packaging\inno\aiva_collector_setup.iss"
+
+      - name: Build manual ZIP
+        run: |
+          python scripts/build_windows_package.py
+
+      - name: Verify required Windows artifacts
+        run: |
+          python scripts/verify_windows_exe_package.py --require-artifacts
+
+      - name: Rename release assets
+        shell: pwsh
+        run: |
+          $installerSource = "dist\AIVA-Collector-Setup-v$env:AIVA_PACKAGE_VERSION.exe"
+          $manualSource = "dist\aiva-collector-windows-manual-v$env:AIVA_PACKAGE_VERSION.zip"
+          if (-not (Test-Path $installerSource)) { throw "Missing installer: $installerSource" }
+          if (-not (Test-Path $manualSource)) { throw "Missing manual ZIP: $manualSource" }
+          Copy-Item -LiteralPath $installerSource -Destination "dist\$env:AIVA_INSTALLER_ASSET" -Force
+          Copy-Item -LiteralPath $manualSource -Destination "dist\$env:AIVA_MANUAL_ZIP_ASSET" -Force
+          Copy-Item -LiteralPath "README-INSTALACION-COLLECTOR.txt" -Destination "dist\README-INSTALACION-COLLECTOR.txt" -Force
+
+      - name: Generate SHA256SUMS
+        shell: pwsh
+        run: |
+          $assets = @(
+            "dist\$env:AIVA_INSTALLER_ASSET",
+            "dist\$env:AIVA_MANUAL_ZIP_ASSET",
+            "dist\README-INSTALACION-COLLECTOR.txt"
+          )
+          $lines = foreach ($asset in $assets) {
+            if (-not (Test-Path $asset)) { throw "Missing asset for checksum: $asset" }
+            $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $(Split-Path $asset -Leaf)"
+          }
+          $lines | Set-Content -Encoding ASCII -LiteralPath "dist\SHA256SUMS.txt"
+          Get-Content -LiteralPath "dist\SHA256SUMS.txt"
+
+      - name: Assert release assets exist
+        shell: pwsh
+        run: |
+          $required = @(
+            "dist\$env:AIVA_INSTALLER_ASSET",
+            "dist\$env:AIVA_MANUAL_ZIP_ASSET",
+            "dist\SHA256SUMS.txt",
+            "dist\README-INSTALACION-COLLECTOR.txt"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing release asset: $path" }
+          }
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiva-collector-windows-v${{ env.AIVA_RELEASE_VERSION }}
+          if-no-files-found: error
+          path: |
+            dist/${{ env.AIVA_INSTALLER_ASSET }}
+            dist/${{ env.AIVA_MANUAL_ZIP_ASSET }}
+            dist/SHA256SUMS.txt
+            dist/README-INSTALACION-COLLECTOR.txt
+
+      - name: Publish GitHub pre-release
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          name: AIVA Collector v0.2.6 Discovery RC1
+          prerelease: true
+          draft: false
+          fail_on_unmatched_files: true
+          body: |
+            # AIVA Collector v0.2.6 Discovery RC1
+
+            Pre-release para validar Collector Discovery basico.
+
+            Incluye:
+
+            * deteccion segura de carpetas candidatas;
+            * deteccion de CSV/XLSX/XLS;
+            * deteccion por extension de SQLite/Access/Firebird;
+            * deteccion basica de servicios DB en Windows;
+            * comandos "Detectar fuentes sin enviar" y "Reportar fuentes detectadas";
+            * integracion con Backend/Admin Fuentes de datos 6.4A.
+
+            No incluye todavia:
+
+            * sync automatico desde fuente confirmada;
+            * lectura real de bases;
+            * API REST generica;
+            * Google Sheets;
+            * email adjunto.
+
+            Seguridad:
+
+            * no modifica archivos ni bases;
+            * no sube archivos del comercio;
+            * no lee contenido comercial completo;
+            * no envia Telegram real;
+            * no usa GPT.
+
+            Estado:
+
+            * RC1 / pre-release.
+            * Usar primero en ambiente controlado.
+
+            Validacion esperada:
+
+            * instalar en Windows;
+            * ejecutar dry-run;
+            * ejecutar report;
+            * revisar discoveries en Admin.
+          files: |
+            dist/${{ env.AIVA_INSTALLER_ASSET }}
+            dist/${{ env.AIVA_MANUAL_ZIP_ASSET }}
+            dist/SHA256SUMS.txt
+            dist/README-INSTALACION-COLLECTOR.txt

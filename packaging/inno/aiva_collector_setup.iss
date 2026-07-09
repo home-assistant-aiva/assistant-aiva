@@ -1,5 +1,5 @@
 #define AppName "AIVA Collector"
-#define AppVersion "0.2.5"
+#define AppVersion "0.2.6rc1"
 #define AppPublisher "AIVA Comercial"
 #define AppExeName "aiva-collector.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\AIVA Collector
 DefaultGroupName=AIVA Collector
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
-OutputBaseFilename=AIVA-Collector-Setup-v0.2.5
+OutputBaseFilename=AIVA-Collector-Setup-v0.2.6rc1
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
