@@ -312,14 +312,15 @@ class DiscoveryScanner:
                     and not (_has_excluded_part(current / name) if explicit_root else _is_excluded(current / name))
                 ]
             limited_files = [current / name for name in filenames[: self.config.max_files_per_dir]]
-            candidates.extend(self.scan_candidate_files(current, limited_files))
+            candidates.extend(self.scan_candidate_files(current, limited_files, explicit_root=explicit_root))
         return candidates
 
-    def scan_candidate_files(self, folder: Path, files: list[Path]) -> list[DiscoveryCandidate]:
+    def scan_candidate_files(self, folder: Path, files: list[Path], *, explicit_root: bool = False) -> list[DiscoveryCandidate]:
         data_files: list[dict[str, Any]] = []
         database_candidates: list[DiscoveryCandidate] = []
         for path in files:
-            if _is_excluded(path) or _is_hidden_or_system(path):
+            excluded = _has_excluded_part(path) if explicit_root else _is_excluded(path)
+            if excluded or _is_hidden_or_system(path):
                 continue
             suffix = path.suffix.lower()
             if self._negative_file(path):
