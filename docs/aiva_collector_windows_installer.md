@@ -44,6 +44,8 @@ El menu inicio incluye:
 
 - AIVA Collector - Validar configuracion
 - AIVA Collector - Prueba sin enviar
+- AIVA Collector - Detectar fuentes sin enviar
+- AIVA Collector - Reportar fuentes detectadas
 - AIVA Collector - Estado conexion
 - AIVA Collector - Enviar al servidor
 - AIVA Collector - Diagnostico

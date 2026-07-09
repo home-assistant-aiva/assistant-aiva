@@ -35,12 +35,14 @@ AIVA Collector lee archivos CSV o Excel exportados por el sistema del comercio, 
 7. Pegar archivos CSV/XLSX del comercio en `C:\AIVA_Comercio\entrada`.
 8. Ejecutar `run_validate.bat`.
 9. Ejecutar `run_dry.bat`.
-10. Revisar `C:\AIVA_Comercio\output\last_summary.json`.
-11. Configurar token temporal en la misma ventana con `set AIVA_COLLECTOR_TOKEN=PEGAR_TOKEN_AQUI`.
-12. Ejecutar `run_send.bat` y escribir `ENVIAR` cuando corresponda.
-13. Si no hay internet, ejecutar `run_queue_status.bat` para ver pendientes.
-14. Cuando vuelva internet, ejecutar `run_retry_pending.bat`.
-15. Ver recomendaciones en admin AIVA Comercial.
+10. Ejecutar `run_discovery_dry.bat` si se quiere detectar posibles fuentes sin enviar nada.
+11. Revisar `C:\AIVA_Comercio\output\last_summary.json`.
+12. Configurar token temporal en la misma ventana con `set AIVA_COLLECTOR_TOKEN=PEGAR_TOKEN_AQUI`.
+13. Ejecutar `run_send.bat` y escribir `ENVIAR` cuando corresponda.
+14. Ejecutar `run_discovery_report.bat` y escribir `DETECTAR` solo si se quiere reportar metadata segura de fuentes.
+15. Si no hay internet, ejecutar `run_queue_status.bat` para ver pendientes.
+16. Cuando vuelva internet, ejecutar `run_retry_pending.bat`.
+17. Ver recomendaciones en admin AIVA Comercial.
 
 `commerce_id` y `collector_id` salen del admin AIVA Comercial. El token del collector se copia una sola vez desde el admin y no debe guardarse en `config.local.json`.
 

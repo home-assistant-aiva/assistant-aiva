@@ -17,6 +17,8 @@ Incluye:
 - `windows\collect_diagnostics.bat`
 - `windows\run_queue_status.bat`
 - `windows\run_retry_pending.bat`
+- `windows\run_discovery_dry.bat`
+- `windows\run_discovery_report.bat`
 - `README.md`
 - `pyproject.toml`
 - `configs\example_config.json`
@@ -48,11 +50,14 @@ Ejecutar estos BATs desde `C:\AIVA_Comercio\collector\windows`:
 6. `run_status.bat` si se quiere consultar estado del collector
 7. `run_queue_status.bat` para ver pendientes offline
 8. `run_retry_pending.bat` para reintentar pendientes
-9. `set_token_example.bat` para ver como configurar el token temporalmente
-10. `run_send.bat` solo cuando el token este configurado y se quiera enviar
-11. `collect_diagnostics.bat` solo si hace falta soporte
+9. `run_discovery_dry.bat` para detectar posibles fuentes sin enviar nada
+10. `run_discovery_report.bat` para reportar metadata segura de fuentes detectadas
+11. `set_token_example.bat` para ver como configurar el token temporalmente
+12. `run_send.bat` solo cuando el token este configurado y se quiera enviar
+13. `collect_diagnostics.bat` solo si hace falta soporte
 
 `run_send.bat` exige que exista `AIVA_COLLECTOR_TOKEN` y pide escribir `ENVIAR` antes de ejecutar el envio.
+`run_discovery_report.bat` exige token y confirmacion `DETECTAR`. No sube archivos ni lee contenido comercial completo.
 `run_retry_pending.bat` no imprime el token y usa la cola offline.
 
 ## Kit piloto

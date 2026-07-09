@@ -23,6 +23,18 @@ def _headers(config: CollectorConfig, idem_key: str | None = None) -> dict[str, 
     return headers
 
 
+def _admin_headers(config: CollectorConfig) -> dict[str, str]:
+    secret_env = str(config.raw.get("discovery_admin_secret_env", "") or config.raw.get("admin_secret_env", "")).strip()
+    if secret_env:
+        import os
+
+        secret = os.getenv(secret_env)
+        if not secret:
+            raise BackendError(f"Falta secret de discovery: configurar {secret_env}")
+        return {"X-AIVA-Secret": secret, "X-AIVA-Collector-Id": config.collector_id}
+    return _headers(config)
+
+
 def _safe_error(response: requests.Response) -> BackendError:
     try:
         detail = response.json()
@@ -143,6 +155,26 @@ class CollectorClient:
         if response.status_code not in (200, 201):
             raise _safe_error(response)
         return response.json() if response.content else {}
+
+    def post_data_source_discovery(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # Backend 6.4A persists a sanitized raw_discovery_json from the accepted
+        # request, but its schema rejects an explicit raw_discovery field.
+        request_payload = dict(payload)
+        request_payload.pop("raw_discovery", None)
+        try:
+            response = requests.post(
+                f"{self.config.backend_url}/admin/commerce/businesses/{self.config.commerce_id}/data-source-discoveries",
+                json=request_payload,
+                headers=_admin_headers(self.config),
+                timeout=self.timeout,
+            )
+        except RequestException as exc:
+            raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
+        if response.status_code not in (200, 201, 409):
+            raise _safe_error(response)
+        data = response.json() if response.content else {}
+        data["_http_status_code"] = response.status_code
+        return data
 
 
 def activate_collector(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from dataclasses import dataclass
@@ -79,6 +80,38 @@ def max_retry_count(config: CollectorConfig, default: int = 10) -> int:
     return int(config.raw.get("offline_queue_max_retry_count", default))
 
 
+def _payload_kind(payload: dict[str, Any]) -> str:
+    return str(payload.get("_aiva_queue_kind") or "summary")
+
+
+def _payload_idempotency_key(payload: dict[str, Any]) -> str:
+    if _payload_kind(payload) == "data_source_discovery":
+        base = json.dumps(
+            {
+                "commerce_id": payload.get("commerce_id"),
+                "collector_id": payload.get("collector_id"),
+                "source_type": payload.get("source_type"),
+                "detected_path": payload.get("detected_path"),
+                "detected_host": payload.get("detected_host"),
+                "detected_engine": payload.get("detected_engine"),
+                "name": payload.get("name"),
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        return hashlib.sha256(base.encode("utf-8")).hexdigest()
+    return idempotency_key(payload)
+
+
+def _send_payload(client: CollectorClient, payload: dict[str, Any]) -> dict[str, Any]:
+    if _payload_kind(payload) == "data_source_discovery":
+        discovery = dict(payload)
+        discovery.pop("_aiva_queue_kind", None)
+        discovery.pop("commerce_id", None)
+        return client.post_data_source_discovery(discovery)
+    return client.send_summary(payload)
+
+
 def enqueue_payload(
     conn,
     config: CollectorConfig,
@@ -88,7 +121,7 @@ def enqueue_payload(
     last_error: str | None = None,
 ) -> dict[str, str]:
     _assert_no_sensitive_keys(payload)
-    idem = idempotency_key(payload)
+    idem = _payload_idempotency_key(payload)
     payload_hash = compute_normalized_data_hash(payload)
     path = _payload_path(config, file_id)
     tmp_path = path.with_suffix(".json.tmp")
@@ -127,6 +160,10 @@ def _is_temporary_backend_error(exc: BackendError) -> bool:
     return exc.status_code == 429 or exc.status_code >= 500
 
 
+def is_temporary_backend_error(exc: BackendError) -> bool:
+    return _is_temporary_backend_error(exc)
+
+
 def _timestamped_dest(directory: Path, source: Path, *, suffix: str | None = None) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     extra = f".{suffix}" if suffix else ""
@@ -152,6 +189,18 @@ def _move_original_to_processed(config: CollectorConfig, file_row: dict[str, Any
 
 
 def _mark_sent(conn, config: CollectorConfig, item: dict[str, Any], response: dict[str, Any], *, duplicate: bool = False) -> tuple[list[str], str | None]:
+    if str(item["file_id"]).startswith("discovery-"):
+        status = "duplicate" if duplicate else "sent"
+        update_queue_item(conn, str(item["file_id"]), status=status, last_error=None, next_retry_at=None)
+        add_event(
+            conn,
+            file_id=str(item["file_id"]),
+            event_type="discovery_retry_success",
+            level="info",
+            message="Discovery pendiente enviado correctamente." if not duplicate else "Backend confirmo discovery duplicado/idempotente.",
+            context={"duplicate": duplicate},
+        )
+        return [], None
     file_row = get_file(conn, str(item["file_id"]))
     moved, warning = _move_original_to_processed(config, file_row)
     status = "duplicate" if duplicate else "sent"
@@ -194,9 +243,9 @@ def process_queue(
         add_event(conn, file_id=file_id, event_type="retry_started", level="info", message="Reintento de payload pendiente iniciado.")
         try:
             payload = _load_payload(item.get("payload_json_path"))
-            if idempotency_key(payload) != item.get("idempotency_key"):
+            if _payload_idempotency_key(payload) != item.get("idempotency_key"):
                 raise ValueError("idempotency_key del payload no coincide con upload_queue")
-            response = client.send_summary(payload)
+            response = _send_payload(client, payload)
         except BackendError as exc:
             if _is_duplicate_response(exc):
                 _mark_sent(conn, config, item, {"duplicate": True, "_http_status_code": exc.status_code or 409}, duplicate=True)

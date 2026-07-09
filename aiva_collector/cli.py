@@ -21,6 +21,7 @@ from .column_mapping import (
 )
 from .client import CollectorClient, activate_collector
 from .config import PROJECT_ROOT, CollectorConfig, init_config, load_config
+from .discovery import DiscoveryConfig, DiscoveryReporter, DiscoveryScanner
 from .errors import BackendError, CollectorError, ConfigError, ValidationError
 from .file_fingerprint import build_file_id, compute_file_sha256, compute_normalized_data_hash, wait_for_stable_file
 from .local_state import (
@@ -904,6 +905,68 @@ def cmd_retry_pending(args: argparse.Namespace) -> int:
     return 0 if result.errors == 0 else 2
 
 
+def _print_discovery_summary(candidates, *, as_json: bool = False) -> None:
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "candidates_found": len(candidates),
+                    "items": [
+                        {
+                            "source_type": item.source_type,
+                            "name": item.name,
+                            "detected_path": item.detected_path,
+                            "detected_host": item.detected_host,
+                            "detected_engine": item.detected_engine,
+                            "confidence": item.confidence,
+                            "capabilities": item.capabilities,
+                            "sample_metadata": item.sample_metadata,
+                        }
+                        for item in candidates
+                    ],
+                },
+                indent=2,
+                ensure_ascii=True,
+            )
+        )
+        return
+    print("AIVA Collector Discovery")
+    print(f"Candidates found: {len(candidates)}")
+    for index, item in enumerate(candidates, start=1):
+        location = item.detected_path or item.detected_host or "-"
+        engine = f" {item.detected_engine}" if item.detected_engine else ""
+        print(f"{index}. {item.source_type}{engine} | {location} | confidence {item.confidence:.2f}")
+
+
+def cmd_discover(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    setup_logging(config)
+    discovery_config = DiscoveryConfig.from_collector_config(
+        config,
+        dry_run=bool(args.dry_run or not args.report),
+        safe_mode=args.safe_mode.lower() != "false",
+        max_total_candidates=args.max_candidates,
+        timeout_seconds=args.timeout,
+        include_paths=args.include_path or None,
+    )
+    scanner = DiscoveryScanner(discovery_config)
+    candidates = scanner.scan()
+    _print_discovery_summary(candidates, as_json=args.json)
+    if not args.report:
+        logging.info("discovery dry-run candidates=%s", len(candidates))
+        return 0
+    config.require_send_ready()
+    result = DiscoveryReporter(config).report_discoveries(candidates, scanner)
+    if not args.json:
+        print(
+            "Discovery report: "
+            f"intentados={result.attempted} enviados={result.sent} duplicados={result.duplicate} "
+            f"encolados={result.queued} errores={result.errors}"
+        )
+    return 0 if result.errors == 0 else 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aiva-collector")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -949,6 +1012,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_retry_pending = sub.add_parser("retry-pending")
     p_retry_pending.add_argument("--config", default=config_default, required=config_default is None)
     p_retry_pending.set_defaults(func=cmd_retry_pending)
+
+    p_discover = sub.add_parser("discover")
+    p_discover.add_argument("--config", default=config_default, required=config_default is None)
+    p_discover.add_argument("--dry-run", action="store_true")
+    p_discover.add_argument("--report", action="store_true")
+    p_discover.add_argument("--max-candidates", type=int, default=None)
+    p_discover.add_argument("--timeout", type=int, default=None)
+    p_discover.add_argument("--include-path", action="append", default=[])
+    p_discover.add_argument("--safe-mode", choices=["true", "false"], default="true")
+    p_discover.add_argument("--json", action="store_true")
+    p_discover.set_defaults(func=cmd_discover)
 
     p_service_status = sub.add_parser("service-status")
     p_service_status.add_argument("--config", default=config_default, required=config_default is None)

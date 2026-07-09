@@ -47,6 +47,8 @@ Source: "..\..\docs\aiva_collector_windows_exe.md"; DestDir: "{app}"; Flags: ign
 Name: "{group}\AIVA Collector - Activar"; Filename: "{app}\activate.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Abrir carpeta de entrada"; Filename: "{app}\open_input_folder.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Prueba sin enviar"; Filename: "{app}\run_dry.bat"; WorkingDir: "{app}"
+Name: "{group}\AIVA Collector - Detectar fuentes sin enviar"; Filename: "{app}\run_discovery_dry.bat"; WorkingDir: "{app}"
+Name: "{group}\AIVA Collector - Reportar fuentes detectadas"; Filename: "{app}\run_discovery_report.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Procesar ahora"; Filename: "{app}\run_auto.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Estado de Cola"; Filename: "{app}\run_queue_status.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Reintentar Pendientes"; Filename: "{app}\run_retry_pending.bat"; WorkingDir: "{app}"
@@ -63,3 +65,4 @@ Name: "desktopicon"; Description: "Crear acceso directo de validacion en el escr
 
 [Run]
 Filename: "{app}\activate.bat"; Description: "Activar AIVA Collector"; Flags: postinstall skipifsilent nowait
+Filename: "{app}\run_discovery_dry.bat"; Description: "Ejecutar deteccion segura de fuentes al finalizar instalacion"; Flags: postinstall skipifsilent nowait

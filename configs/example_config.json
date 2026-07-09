@@ -18,6 +18,19 @@
   "move_processed_files": false,
   "move_error_files": true,
   "keep_original_files": false,
+  "discovery": {
+    "enabled": true,
+    "max_depth": 3,
+    "max_files_per_dir": 50,
+    "max_total_candidates": 100,
+    "max_report_candidates": 20,
+    "include_user_dirs": true,
+    "include_program_dirs": true,
+    "include_drive_roots": false,
+    "timeout_seconds": 30,
+    "safe_mode": true,
+    "min_confidence": 0.25
+  },
   "column_mapping": {
     "fecha": "fecha",
     "producto_codigo": "producto_codigo",

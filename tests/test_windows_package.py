@@ -26,6 +26,8 @@ REQUIRED_IN_ZIP = {
     "windows/install_dependencies.bat",
     "windows/run_validate.bat",
     "windows/run_dry.bat",
+    "windows/run_discovery_dry.bat",
+    "windows/run_discovery_report.bat",
     "windows/run_send.bat",
     "windows/run_status.bat",
     "windows/run_queue_status.bat",

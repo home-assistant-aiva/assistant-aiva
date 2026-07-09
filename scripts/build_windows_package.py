@@ -30,6 +30,7 @@ INCLUDE_PATHS = [
     Path("windows"),
     Path("docs/aiva_collector_clean_install_test.md"),
     Path("docs/aiva_collector_column_mapping.md"),
+    Path("docs/collector_discovery.md"),
     Path("docs/aiva_collector_first_client_data_request.md"),
     Path("docs/aiva_collector_mapping_test_cases.md"),
     Path("docs/aiva_collector_offline_queue.md"),

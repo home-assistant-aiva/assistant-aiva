@@ -15,6 +15,8 @@ BAT_FILES = [
     WINDOWS_DIR / "install_dependencies.bat",
     WINDOWS_DIR / "run_validate.bat",
     WINDOWS_DIR / "run_dry.bat",
+    WINDOWS_DIR / "run_discovery_dry.bat",
+    WINDOWS_DIR / "run_discovery_report.bat",
     WINDOWS_DIR / "run_send.bat",
     WINDOWS_DIR / "run_status.bat",
     WINDOWS_DIR / "run_queue_status.bat",
@@ -127,6 +129,7 @@ def test_non_send_bats_do_not_execute_send():
     for name in (
         "run_validate.bat",
         "run_dry.bat",
+        "run_discovery_dry.bat",
         "run_status.bat",
         "run_queue_status.bat",
         "run_retry_pending.bat",

@@ -34,6 +34,8 @@ FASE 4.4 incluye un paquete manual para pruebas en Windows, sin instalador exe y
 - `windows/config.windows.example.json`
 - `windows/run_validate.bat`
 - `windows/run_dry.bat`
+- `windows/run_discovery_dry.bat`
+- `windows/run_discovery_report.bat`
 - `windows/run_send.bat`
 - `windows/run_status.bat`
 - `windows/run_queue_status.bat`
@@ -66,6 +68,8 @@ set AIVA_COLLECTOR_TOKEN=PEGAR_TOKEN_AQUI
 ```
 
 `run_send.bat` exige token y confirmación escrita `ENVIAR` antes de usar `--send`. Ver [windows/README_WINDOWS.md](windows/README_WINDOWS.md) y [docs/aiva_collector_windows_manual.md](docs/aiva_collector_windows_manual.md).
+
+`run_discovery_dry.bat` detecta posibles fuentes sin enviar nada. `run_discovery_report.bat` reporta metadata segura al backend solo con confirmacion `DETECTAR`.
 
 ## Paquete ZIP manual para Windows
 
@@ -254,3 +258,19 @@ Editar `column_mapping` en `config.local.json`. La clave izquierda es el campo c
 - Empaquetado exe.
 - HMAC.
 - Scheduler.
+
+## AIVA Collector Discovery
+
+El Collector incluye `discover` para detectar posibles fuentes de datos sin leer contenido comercial completo ni modificar archivos:
+
+```bash
+python -m aiva_collector.cli discover --config config.local.json --dry-run
+```
+
+Para reportar detecciones al backend de Fuentes de datos:
+
+```bash
+python -m aiva_collector.cli discover --config config.local.json --report
+```
+
+Ver `docs/collector_discovery.md`.
