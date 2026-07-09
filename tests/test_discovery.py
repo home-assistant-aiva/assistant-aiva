@@ -17,7 +17,15 @@ from aiva_collector.local_state import connect, queue_counts
 
 
 def _scanner(root: Path, **kwargs) -> DiscoveryScanner:
-    return DiscoveryScanner(DiscoveryConfig(include_paths=(root,), include_user_dirs=False, include_program_dirs=False, timeout_seconds=10, **kwargs))
+    options = {
+        "include_paths": (root,),
+        "include_user_dirs": False,
+        "include_program_dirs": False,
+        "include_database_services": False,
+        "timeout_seconds": 10,
+    }
+    options.update(kwargs)
+    return DiscoveryScanner(DiscoveryConfig(**options))
 
 
 def _config(tmp_path: Path) -> CollectorConfig:
@@ -54,7 +62,12 @@ def _write_config(tmp_path: Path, include_path: Path | None = None) -> Path:
         "column_mapping": {"producto_nombre": "Producto", "cantidad_vendida": "Cantidad", "precio_venta": "Precio"},
     }
     if include_path:
-        data["discovery"] = {"include_paths": [str(include_path)], "include_user_dirs": False, "include_program_dirs": False}
+        data["discovery"] = {
+            "include_paths": [str(include_path)],
+            "include_user_dirs": False,
+            "include_program_dirs": False,
+            "include_database_services": False,
+        }
     path = tmp_path / "config.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     return path

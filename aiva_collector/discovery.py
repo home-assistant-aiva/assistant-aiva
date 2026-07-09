@@ -97,6 +97,7 @@ class DiscoveryConfig:
     max_report_candidates: int = 20
     include_user_dirs: bool = True
     include_program_dirs: bool = True
+    include_database_services: bool = True
     include_drive_roots: bool = False
     timeout_seconds: int = 30
     safe_mode: bool = True
@@ -133,6 +134,7 @@ class DiscoveryConfig:
             max_report_candidates=int(value("max_report_candidates", 20)),
             include_user_dirs=bool(value("include_user_dirs", True)),
             include_program_dirs=bool(value("include_program_dirs", True)),
+            include_database_services=bool(value("include_database_services", True)),
             include_drive_roots=bool(value("include_drive_roots", False)),
             timeout_seconds=int(timeout_seconds if timeout_seconds is not None else value("timeout_seconds", 30)),
             safe_mode=bool(safe_mode if safe_mode is not None else value("safe_mode", True)),
@@ -235,7 +237,7 @@ class DiscoveryScanner:
             if self._timed_out() or len(candidates) >= self.config.max_total_candidates:
                 break
             candidates.extend(self.scan_common_folders(root))
-        if not self._timed_out():
+        if self.config.include_database_services and not self._timed_out():
             candidates.extend(self.scan_database_services())
         candidates = self.deduplicate_candidates(candidates)
         candidates = [self.sanitize_candidate(candidate) for candidate in candidates if candidate.confidence >= self.config.min_confidence]

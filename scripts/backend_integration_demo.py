@@ -142,7 +142,7 @@ def write_temp_config(base_url: str, commerce_id: str, collector_id: str) -> Pat
         }
     )
     data.pop("collector_token", None)
-    fd, raw_path = tempfile.mkstemp(prefix="aiva_collector_integration_", suffix=".json", dir="/tmp")
+    fd, raw_path = tempfile.mkstemp(prefix="aiva_collector_integration_", suffix=".json")
     path = Path(raw_path)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=True)
