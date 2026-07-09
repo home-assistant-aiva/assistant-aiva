@@ -197,6 +197,11 @@ def _is_excluded(path: Path) -> bool:
     return bool(parts & EXCLUDED_PARTS) or any(lowered.endswith(suffix) or f"{suffix}\\" in lowered for suffix in EXCLUDED_SUFFIXES)
 
 
+def _has_excluded_part(path: Path) -> bool:
+    parts = {part.lower() for part in path.parts}
+    return bool(parts & EXCLUDED_PARTS)
+
+
 def _redact_user_path(path_value: str) -> str:
     home = str(Path.home())
     if home and path_value.startswith(home):
@@ -248,7 +253,8 @@ class DiscoveryScanner:
         return bool(self.config.timeout_seconds and time.monotonic() - self._started > self.config.timeout_seconds)
 
     def _scan_roots(self) -> list[Path]:
-        roots: list[Path] = list(self.config.include_paths)
+        explicit_roots = [root for root in self.config.include_paths if root.exists()]
+        roots: list[Path] = list(explicit_roots)
         if self.config.include_user_dirs:
             home = Path.home()
             roots.extend([home / "Desktop", home / "Documents", home / "Downloads"])
@@ -276,7 +282,8 @@ class DiscoveryScanner:
         seen: set[str] = set()
         for root in roots:
             key = str(root).lower()
-            if key in seen or _is_excluded(root) or not root.exists():
+            explicit = root in explicit_roots
+            if key in seen or not root.exists() or (not explicit and _is_excluded(root)):
                 continue
             seen.add(key)
             deduped.append(root)
@@ -285,18 +292,25 @@ class DiscoveryScanner:
     def scan_common_folders(self, root: Path) -> list[DiscoveryCandidate]:
         candidates: list[DiscoveryCandidate] = []
         root_depth = len(root.parts)
+        explicit_root = root in self.config.include_paths
         for directory, dirnames, filenames in os.walk(root):
             current = Path(directory)
             if self._timed_out() or len(candidates) >= self.config.max_total_candidates:
                 break
-            if _is_excluded(current) or _is_hidden_or_system(current):
+            excluded = _has_excluded_part(current) if explicit_root else _is_excluded(current)
+            if excluded or _is_hidden_or_system(current):
                 dirnames[:] = []
                 continue
             depth = len(current.parts) - root_depth
             if depth >= self.config.max_depth:
                 dirnames[:] = []
             else:
-                dirnames[:] = [name for name in dirnames if not _is_hidden_or_system(current / name) and not _is_excluded(current / name)]
+                dirnames[:] = [
+                    name
+                    for name in dirnames
+                    if not _is_hidden_or_system(current / name)
+                    and not (_has_excluded_part(current / name) if explicit_root else _is_excluded(current / name))
+                ]
             limited_files = [current / name for name in filenames[: self.config.max_files_per_dir]]
             candidates.extend(self.scan_candidate_files(current, limited_files))
         return candidates
