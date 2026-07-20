@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .config import PROJECT_ROOT, CollectorConfig, load_config
+from .config import PROJECT_ROOT, CollectorConfig, collector_data_dir, load_config
 from .errors import ConfigError
 
 
@@ -56,9 +56,7 @@ def standard_config_path() -> Path:
     base_override = os.getenv("AIVA_COLLECTOR_STANDARD_DIR")
     if base_override:
         return Path(base_override) / "config.windows.json"
-    if sys.platform.startswith("win"):
-        return Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AIVA Collector" / "config.windows.json"
-    return PROJECT_ROOT / "config.windows.json"
+    return collector_data_dir() / "config.windows.json"
 
 
 def installed_config_dirs(*, exe_dir: Path | None = None) -> list[Path]:

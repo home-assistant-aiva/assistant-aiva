@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,16 +16,28 @@ from .token_store import load_token
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_MAPPING_KEYS = {"producto_nombre", "cantidad_vendida", "precio_venta"}
 WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+MUTABLE_PATH_KEYS = {"processed_dir", "error_dir", "output_dir", "state_dir", "log_file", "queue_dir", "processed_files_dir", "rejected_dir", "mappings_dir"}
 
 
 def _looks_like_windows_absolute_path(value: str) -> bool:
     return bool(WINDOWS_ABSOLUTE_RE.match(value)) or value.startswith("\\\\")
 
 
-def _resolve_path_value(value: str) -> Path:
+def collector_data_dir() -> Path:
+    override = os.getenv("AIVA_COLLECTOR_DATA_DIR")
+    if override:
+        return Path(override)
+    if sys.platform.startswith("win"):
+        return Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "AIVA" / "Collector"
+    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "aiva" / "collector"
+
+
+def _resolve_path_value(value: str, *, mutable: bool = False) -> Path:
     path = Path(value)
     if path.is_absolute() or _looks_like_windows_absolute_path(value):
         return path
+    if mutable:
+        return collector_data_dir() / path
     return PROJECT_ROOT / path
 
 
@@ -76,13 +89,13 @@ class CollectorConfig:
         value = self.raw.get(key)
         if not value:
             raise ConfigError(f"Falta config requerida: {key}")
-        return _resolve_path_value(str(value))
+        return _resolve_path_value(str(value), mutable=key in MUTABLE_PATH_KEYS)
 
     def optional_path(self, key: str) -> Path | None:
         value = self.raw.get(key)
         if not value:
             return None
-        return _resolve_path_value(str(value))
+        return _resolve_path_value(str(value), mutable=key in MUTABLE_PATH_KEYS)
 
     def require_send_ready(self) -> None:
         missing = []

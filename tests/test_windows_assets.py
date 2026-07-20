@@ -41,8 +41,8 @@ def test_windows_config_parses_and_does_not_contain_token(monkeypatch):
 
 def test_windows_paths_are_not_prefixed_on_linux():
     config = load_config(WINDOWS_CONFIG)
-    assert str(config.path("input_dir")) == "C:\\AIVA_Comercio\\entrada"
-    assert str(config.path("log_file")) == "C:\\AIVA_Comercio\\logs\\aiva_collector.log"
+    assert str(config.path("input_dir")) == "C:\\ProgramData\\AIVA\\Collector\\entrada"
+    assert str(config.path("log_file")) == "C:\\ProgramData\\AIVA\\Collector\\logs\\aiva_collector.log"
 
 
 def test_windows_paths_with_spaces_are_not_deformed():

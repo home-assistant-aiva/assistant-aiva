@@ -106,6 +106,8 @@ python -m aiva_collector.cli retry-pending --config config.local.json
 
 `run-auto` es "Procesar ahora": procesa cola pendiente, espera archivos estables, deduplica por hash, valida, envia summary si corresponde, registra `state/aiva_collector.db` y mueve archivos a `procesados`, `procesados/duplicados` o `errores`.
 
+En Windows RC3, el instalador `AIVA-Collector-Setup-v0.2.6-silent-rc3.exe` instala dos ejecutables: `aiva-collector.exe` para uso interactivo con consola y `aiva-collector-background.exe` para la tarea automatica silenciosa. La tarea programada usa exclusivamente `aiva-collector-background.exe run-auto --config "%ProgramData%\AIVA\Collector\config.local.json"`, conserva ProgramData y no pasa tokens por argumentos.
+
 `queue-status` muestra pendientes, reintentando, enviados, errores, proximo reintento y DB local. `retry-pending` intenta enviar ahora los pendientes sin imprimir token.
 
 El summary generado queda en `samples/output/last_summary.json` o en el `output_dir` configurado.

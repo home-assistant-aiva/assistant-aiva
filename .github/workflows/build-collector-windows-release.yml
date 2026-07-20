@@ -6,7 +6,7 @@ on:
       release_tag:
         description: "Release tag to publish"
         required: true
-        default: "v0.2.6-collector-discovery-rc2"
+        default: "v0.2.6-collector-discovery-rc3"
       publish_release:
         description: "Publish GitHub pre-release"
         required: true
@@ -14,7 +14,7 @@ on:
         default: false
   push:
     tags:
-      - "v0.2.6-collector-discovery-rc2"
+      - "v0.2.6-collector-discovery-rc3"
       - "v0.2.*collector*"
       - "collector-v*"
 
@@ -22,10 +22,11 @@ permissions:
   contents: write
 
 env:
-  AIVA_RELEASE_VERSION: "0.2.6-discovery-rc2"
-  AIVA_RELEASE_TITLE: "AIVA Collector v0.2.6 Discovery RC2"
-  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-discovery-rc2.exe"
-  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-discovery-rc2.zip"
+  AIVA_RELEASE_VERSION: "0.2.6-silent-rc3"
+  AIVA_RELEASE_TITLE: "AIVA Collector Discovery RC3"
+  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-silent-rc3.exe"
+  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.6rc3.manifest.json"
+  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-silent-rc3.zip"
 
 jobs:
   build-release:
@@ -34,6 +35,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -57,13 +60,14 @@ jobs:
         run: |
           python -m pytest
 
-      - name: Build aiva-collector.exe
+      - name: Build Windows executables
         run: |
           python scripts/build_windows_exe.py
 
       - name: Verify executable commands
         run: |
           .\dist\aiva-collector.exe --help
+          .\dist\aiva-collector-background.exe --help
           .\dist\aiva-collector.exe activate --help
           .\dist\aiva-collector.exe run-auto --help
           .\dist\aiva-collector.exe discover --help
@@ -135,8 +139,10 @@ jobs:
         run: |
           $installerSource = "dist\$env:AIVA_INSTALLER_ASSET"
           $manualSource = "dist\$env:AIVA_MANUAL_ZIP_ASSET"
+          $manifestSource = "dist\$env:AIVA_MANIFEST_ASSET"
           if (-not (Test-Path $installerSource)) { throw "Missing installer: $installerSource" }
           if (-not (Test-Path $manualSource)) { throw "Missing manual ZIP: $manualSource" }
+          if (-not (Test-Path $manifestSource)) { throw "Missing manifest: $manifestSource" }
           Copy-Item -LiteralPath "README-INSTALACION-COLLECTOR.txt" -Destination "dist\README-INSTALACION-COLLECTOR.txt" -Force
 
       - name: Generate SHA256SUMS
@@ -144,6 +150,7 @@ jobs:
         run: |
           $assets = @(
             "dist\$env:AIVA_INSTALLER_ASSET",
+            "dist\$env:AIVA_MANIFEST_ASSET",
             "dist\$env:AIVA_MANUAL_ZIP_ASSET",
             "dist\README-INSTALACION-COLLECTOR.txt"
           )
@@ -160,6 +167,7 @@ jobs:
         run: |
           $required = @(
             "dist\$env:AIVA_INSTALLER_ASSET",
+            "dist\$env:AIVA_MANIFEST_ASSET",
             "dist\$env:AIVA_MANUAL_ZIP_ASSET",
             "dist\SHA256SUMS.txt",
             "dist\README-INSTALACION-COLLECTOR.txt"
@@ -175,6 +183,7 @@ jobs:
           if-no-files-found: error
           path: |
             dist/${{ env.AIVA_INSTALLER_ASSET }}
+            dist/${{ env.AIVA_MANIFEST_ASSET }}
             dist/${{ env.AIVA_MANUAL_ZIP_ASSET }}
             dist/SHA256SUMS.txt
             dist/README-INSTALACION-COLLECTOR.txt
@@ -184,56 +193,53 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          name: AIVA Collector v0.2.6 Discovery RC2
+          name: AIVA Collector Discovery RC3
           prerelease: true
           draft: false
           fail_on_unmatched_files: true
           body: |
-            # AIVA Collector v0.2.6 Discovery RC2
+            # AIVA Collector Discovery RC3
 
-            Pre-release para validar Collector Discovery con migracion automatica de configuracion y filtros de ruido.
+            Pre-release para validar el instalador Windows silencioso RC3 del Collector.
 
             Incluye:
 
-            * deteccion segura de carpetas candidatas;
-            * deteccion de CSV/XLSX/XLS;
-            * deteccion por extension de SQLite/Access/Firebird;
-            * deteccion basica de servicios DB en Windows;
-            * comandos "Detectar fuentes sin enviar" y "Reportar fuentes detectadas";
-            * migracion automatica de config previa con backup;
-            * token resuelto desde config instalada o entorno;
-            * filtros para evitar Program Files, Desktop/Downloads genericos y software no comercial;
-            * integracion con Backend/Admin Fuentes de datos 6.4A.
+            * ejecucion automatica silenciosa con `aiva-collector-background.exe`;
+            * runner background sin consola y salida dirigida a logs con rotacion;
+            * datos, logs, estado, cola y configuracion en ProgramData;
+            * preservacion de configuracion, token, cola y estado en actualizaciones;
+            * tarea programada al iniciar sesion con delay de 60 segundos y repeticion cada 15 minutos;
+            * eliminacion solo de tareas conocidas anteriores: `AIVA Collector`, `AIVA Collector Scheduled`, `AIVA Collector Auto`;
+            * `run-auto` sin token en argumentos y sin discovery automatico repetido;
+            * costo faltante tratado como `null`, sin margen inventado;
+            * mejoras de logs, diagnostico y verificacion del paquete.
 
             No incluye todavia:
 
+            * FASE 6.4C;
             * sync automatico desde fuente confirmada;
-            * lectura real de bases;
-            * API REST generica;
-            * Google Sheets;
-            * email adjunto.
+            * prueba fisica final en la PC de Federico.
 
             Seguridad:
 
-            * no modifica archivos ni bases;
-            * no sube archivos del comercio;
-            * no lee contenido comercial completo;
-            * no envia Telegram real;
-            * no usa GPT.
+            * no se publican tokens ni configuraciones reales;
+            * el instalador conserva ProgramData por defecto;
+            * el paquete fue verificado por `verify_windows_exe_package.py`.
 
             Estado:
 
-            * RC2 / pre-release.
-            * Usar primero en ambiente controlado.
+            * RC3 / pre-release.
+            * Pendiente de prueba Windows fisica final por Federico.
 
             Validacion esperada:
 
-            * instalar en Windows;
-            * ejecutar dry-run;
-            * ejecutar report;
-            * revisar discoveries en Admin.
+            * instalar sobre INSTALADOR 2.5/RC anterior;
+            * confirmar que se conserva activacion y ProgramData;
+            * confirmar que la tarea usa `aiva-collector-background.exe`;
+            * revisar logs y estado luego del inicio de sesion.
           files: |
             dist/${{ env.AIVA_INSTALLER_ASSET }}
+            dist/${{ env.AIVA_MANIFEST_ASSET }}
             dist/${{ env.AIVA_MANUAL_ZIP_ASSET }}
             dist/SHA256SUMS.txt
             dist/README-INSTALACION-COLLECTOR.txt

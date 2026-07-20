@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import logging
@@ -55,7 +56,7 @@ from .validation import validate_normalized_data
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.6rc2"
+DEFAULT_COLLECTOR_VERSION = "0.2.6rc3"
 
 
 def default_config_path() -> str | None:
@@ -267,6 +268,40 @@ def _runtime_dirs(config: CollectorConfig) -> None:
         config.path(key).mkdir(parents=True, exist_ok=True)
     (config.path("processed_dir") / "duplicados").mkdir(parents=True, exist_ok=True)
     (config.path("state_dir") / "queue").mkdir(parents=True, exist_ok=True)
+
+
+@contextlib.contextmanager
+def _single_run_lock(config: CollectorConfig):
+    lock_path = config.path("state_dir") / "aiva_collector.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd: int | None = None
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, json.dumps({"pid": os.getpid(), "started_at": utc_now()}, ensure_ascii=True).encode("utf-8"))
+        yield True
+    except FileExistsError:
+        yield False
+    finally:
+        if fd is not None:
+            os.close(fd)
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _write_auto_run_state(config: CollectorConfig, payload: dict) -> Path:
+    state_dir = config.path("state_dir")
+    state_dir.mkdir(parents=True, exist_ok=True)
+    path = state_dir / "last_auto_run.json"
+    forbidden_keys = {"token", "authorization", "secret", "collector_" + "token"}
+    safe_payload = {
+        key: value
+        for key, value in payload.items()
+        if key.lower() not in forbidden_keys
+    }
+    path.write_text(json.dumps(safe_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    return path
 
 
 def _archive_file(config: CollectorConfig, path: Path, target_dir: Path, *, suffix: str | None = None) -> list[str]:
@@ -661,49 +696,114 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
     setup_logging(config)
     config.require_send_ready()
     _runtime_dirs(config)
-    client = CollectorClient(config)
-    conn = connect_local_state(local_db_path(config))
-    initial_queue = process_queue(conn, config, client=client)
-    files = discover_input_files(config)
-    if not files:
-        logging.info("run-auto: no hay archivos CSV/XLSX en input_dir")
-        conn.close()
-        print(
-            "Sin archivos para procesar. "
-            f"cola: enviados={initial_queue.sent} pendientes_reintentando={initial_queue.retrying} errores={initial_queue.errors}"
-        )
-        return 0
-    backend_mapping = _backend_mapping(config)
-    results: list[tuple[str, str | None]] = []
-    try:
-        for path in files:
-            status, message = _process_reliable_file(
-                config=config,
-                client=client,
-                conn=conn,
-                path=path,
-                backend_mapping=backend_mapping,
+    with _single_run_lock(config) as acquired:
+        if not acquired:
+            logging.info("run-auto skipped: another collector execution is already running")
+            _write_auto_run_state(
+                config,
+                {
+                    "started_at": utc_now(),
+                    "finished_at": utc_now(),
+                    "version": config.collector_version,
+                    "result": "skipped_already_running",
+                    "error_summary": None,
+                    "next_attempt": "scheduled",
+                },
             )
-            results.append((status, message))
-            logging.info("run-auto file=%s status=%s message=%s", path.name, status, message)
-        final_queue = process_queue(conn, config, client=client, force=True)
-    finally:
-        conn.close()
+            return 0
+        started_at = utc_now()
+        client = CollectorClient(config)
+        conn = connect_local_state(local_db_path(config))
+        initial_queue = process_queue(conn, config, client=client)
+        files = discover_input_files(config)
+        if not files:
+            logging.info("run-auto: no hay archivos CSV/XLSX en input_dir")
+            pending_count = queue_counts(conn).get("pending", 0)
+            conn.close()
+            _write_auto_run_state(
+                config,
+                {
+                    "started_at": started_at,
+                    "finished_at": utc_now(),
+                    "version": config.collector_version,
+                    "result": "ok",
+                    "files_found": 0,
+                    "files_processed": 0,
+                    "duplicates": 0,
+                    "rejected": 0,
+                    "summaries_sent": initial_queue.sent,
+                    "queue_pending": pending_count,
+                    "error_summary": None,
+                    "next_attempt": "scheduled",
+                },
+            )
+            print(
+                "Sin archivos para procesar. "
+                f"cola: enviados={initial_queue.sent} pendientes_reintentando={initial_queue.retrying} errores={initial_queue.errors}"
+            )
+            return 0
+        backend_mapping = _backend_mapping(config)
+        results: list[tuple[str, str | None]] = []
+        try:
+            for path in files:
+                status, message = _process_reliable_file(
+                    config=config,
+                    client=client,
+                    conn=conn,
+                    path=path,
+                    backend_mapping=backend_mapping,
+                )
+                results.append((status, message))
+                logging.info("run-auto file=%s status=%s message=%s", path.name, status, message)
+            final_queue = process_queue(conn, config, client=client, force=True)
+            queue_after = queue_counts(conn)
+        finally:
+            conn.close()
 
-    sent = sum(1 for status, _ in results if status == "sent") + initial_queue.sent + final_queue.sent
-    duplicates = sum(1 for status, _ in results if status == "duplicate")
-    pending = sum(1 for status, _ in results if status == "pending_send")
-    errors = sum(1 for status, _ in results if status == "error") + initial_queue.errors + final_queue.errors
-    print(f"run-auto finalizado: enviados={sent} duplicados={duplicates} pendientes={pending} errores={errors}")
-    if pending:
-        print("No se pudo conectar con AIVA. El archivo quedo pendiente y se reintentara automaticamente.")
-    save_state(
-        config,
-        last_summary_file=safe_display_path(config.path("output_dir") / "last_summary.json"),
-        last_idempotency_key_hash=None,
-        last_status="ok" if errors == 0 else "error",
-    )
-    return 0 if errors == 0 else 2
+        sent = sum(1 for status, _ in results if status == "sent") + initial_queue.sent + final_queue.sent
+        duplicates = sum(1 for status, _ in results if status == "duplicate")
+        pending = sum(1 for status, _ in results if status == "pending_send")
+        rejected = sum(1 for status, _ in results if status == "error")
+        errors = rejected + initial_queue.errors + final_queue.errors
+        error_summary = "; ".join(message for status, message in results if status == "error" and message)[:500] or None
+        logging.info(
+            "run-auto summary version=%s result=%s files_found=%s files_processed=%s duplicates=%s rejected=%s sent=%s pending=%s next_attempt=scheduled",
+            config.collector_version,
+            "ok" if errors == 0 else "error",
+            len(files),
+            len(results),
+            duplicates,
+            rejected,
+            sent,
+            pending,
+        )
+        _write_auto_run_state(
+            config,
+            {
+                "started_at": started_at,
+                "finished_at": utc_now(),
+                "version": config.collector_version,
+                "result": "ok" if errors == 0 else "error",
+                "files_found": len(files),
+                "files_processed": len(results),
+                "duplicates": duplicates,
+                "rejected": rejected,
+                "summaries_sent": sent,
+                "queue_pending": queue_after.get("pending", 0) + queue_after.get("retrying", 0),
+                "error_summary": error_summary,
+                "next_attempt": "scheduled",
+            },
+        )
+        print(f"run-auto finalizado: enviados={sent} duplicados={duplicates} pendientes={pending} errores={errors}")
+        if pending:
+            print("No se pudo conectar con AIVA. El archivo quedo pendiente y se reintentara automaticamente.")
+        save_state(
+            config,
+            last_summary_file=safe_display_path(config.path("output_dir") / "last_summary.json"),
+            last_idempotency_key_hash=None,
+            last_status="ok" if errors == 0 else "error",
+        )
+        return 0 if errors == 0 else 2
 
 
 def cmd_init_config(args: argparse.Namespace) -> int:

@@ -1,5 +1,5 @@
 #define AppName "AIVA Collector"
-#define AppVersion "0.2.6rc2"
+#define AppVersion "0.2.6rc3"
 #define AppPublisher "AIVA Comercial"
 #define AppExeName "aiva-collector.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\AIVA Collector
 DefaultGroupName=AIVA Collector
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
-OutputBaseFilename=AIVA-Collector-Setup-v0.2.6-discovery-rc2
+OutputBaseFilename=AIVA-Collector-Setup-v0.2.6-silent-rc3
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -24,24 +24,24 @@ UninstallDisplayIcon={app}\{#AppExeName}
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Dirs]
-Name: "C:\AIVA_Comercio"
-Name: "C:\AIVA_Comercio\entrada"
-Name: "C:\AIVA_Comercio\procesados"
-Name: "C:\AIVA_Comercio\errores"
-Name: "C:\AIVA_Comercio\procesados\duplicados"
-Name: "C:\AIVA_Comercio\output"
-Name: "C:\AIVA_Comercio\logs"
-Name: "C:\AIVA_Comercio\state"
-Name: "C:\AIVA_Comercio\state\queue"
-Name: "C:\AIVA_Comercio\diagnostico"
-Name: "{commonappdata}\AIVA Collector"
-Name: "{commonappdata}\AIVA Collector\backups"
+Name: "{commonappdata}\AIVA\Collector"
+Name: "{commonappdata}\AIVA\Collector\entrada"
+Name: "{commonappdata}\AIVA\Collector\procesados"
+Name: "{commonappdata}\AIVA\Collector\rechazados"
+Name: "{commonappdata}\AIVA\Collector\procesados\duplicados"
+Name: "{commonappdata}\AIVA\Collector\ultimo_summary"
+Name: "{commonappdata}\AIVA\Collector\logs"
+Name: "{commonappdata}\AIVA\Collector\estado"
+Name: "{commonappdata}\AIVA\Collector\estado\queue"
+Name: "{commonappdata}\AIVA\Collector\mapeos"
+Name: "{commonappdata}\AIVA\Collector\diagnostico"
+Name: "{commonappdata}\AIVA\Collector\backups"
 
 [Files]
 Source: "..\..\dist\aiva-collector.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\aiva-collector-background.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\windows_runtime\*.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\windows\config.windows.example.json"; DestDir: "C:\AIVA_Comercio"; DestName: "config.local.json"; Flags: onlyifdoesntexist ignoreversion
-Source: "..\..\windows\config.windows.example.json"; DestDir: "{commonappdata}\AIVA Collector"; DestName: "config.windows.json"; Flags: onlyifdoesntexist ignoreversion
+Source: "..\..\windows\config.windows.example.json"; DestDir: "{commonappdata}\AIVA\Collector"; DestName: "config.windows.json"; Flags: onlyifdoesntexist ignoreversion
 Source: "..\..\windows\config.windows.example.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\docs\aiva_collector_windows_installer.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\docs\aiva_collector_windows_exe.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -68,5 +68,5 @@ Name: "{autodesktop}\AIVA Collector - Activar"; Filename: "{app}\activate.bat"; 
 Name: "desktopicon"; Description: "Crear acceso directo de validacion en el escritorio"; GroupDescription: "Accesos directos adicionales:"; Flags: unchecked
 
 [Run]
+Filename: "{app}\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated
 Filename: "{app}\activate.bat"; Description: "Activar AIVA Collector"; Flags: postinstall skipifsilent nowait
-Filename: "{app}\run_discovery_dry.bat"; Description: "Ejecutar deteccion segura de fuentes al finalizar instalacion"; Flags: postinstall skipifsilent nowait

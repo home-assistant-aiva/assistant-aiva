@@ -320,7 +320,8 @@ def update_demo_state(config_path: Path, *, report_id: str | None, idempotency_c
     config = json.loads(config_path.read_text(encoding="utf-8"))
     state_dir = Path(str(config.get("state_dir") or "state"))
     if not state_dir.is_absolute():
-        state_dir = PROJECT_ROOT / state_dir
+        data_dir = os.getenv("AIVA_COLLECTOR_DATA_DIR")
+        state_dir = Path(data_dir) / state_dir if data_dir else PROJECT_ROOT / state_dir
     state_path = state_dir / "collector_state.json"
     if not state_path.exists():
         return

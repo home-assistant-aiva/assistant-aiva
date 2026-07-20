@@ -28,7 +28,7 @@ Discovery detecta posibles fuentes de datos en la PC Windows del comercio para q
 
 Discovery trabaja en modo seguro por defecto. Para archivos usa metadata: nombre, extension, tamano y fecha de modificacion. Los ejemplos enviados son solo nombres de archivo, sin rutas completas. `detected_path` se envia porque el instalador lo necesita para confirmar la fuente.
 
-Discovery no imprime tokens ni secretos. En RC2 puede reutilizar un token heredado desde una configuracion instalada para migracion automatica; si el backend no esta disponible, los discoveries pendientes se guardan en la cola offline existente como payload JSON sanitizado, sin archivos originales ni contenido de filas.
+Discovery no imprime tokens ni secretos. Desde RC2 puede reutilizar un token heredado desde una configuracion instalada para migracion automatica; si el backend no esta disponible, los discoveries pendientes se guardan en la cola offline existente como payload JSON sanitizado, sin archivos originales ni contenido de filas.
 
 ## Carpetas escaneadas
 

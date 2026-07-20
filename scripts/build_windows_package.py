@@ -13,7 +13,7 @@ from typing import Iterable
 
 
 PACKAGE_NAME = "aiva-collector-windows-manual"
-DEFAULT_VERSION = "0.2.6rc2"
+DEFAULT_VERSION = "0.2.6rc3"
 ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
 
@@ -131,6 +131,8 @@ def read_version(root: Path = ROOT) -> str:
 
 
 def public_asset_version(version: str) -> str:
+    if version == "0.2.6rc3":
+        return "0.2.6-silent-rc3"
     if version == "0.2.6rc2":
         return "0.2.6-discovery-rc2"
     if version == "0.2.6rc1":

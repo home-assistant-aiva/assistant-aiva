@@ -3,12 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from aiva_collector.cli import DEFAULT_BACKEND_URL, DEFAULT_COLLECTOR_VERSION, build_parser, main, safe_display_path
+from aiva_collector.cli import DEFAULT_BACKEND_URL, DEFAULT_COLLECTOR_VERSION, _single_run_lock, build_parser, main, safe_display_path
+from aiva_collector.config import CollectorConfig
 
 
-def test_cli_run_once_dry_generates_last_summary(monkeypatch):
+def test_cli_run_once_dry_generates_last_summary(monkeypatch, tmp_path):
     monkeypatch.delenv("AIVA_COLLECTOR_TOKEN", raising=False)
-    output = Path("samples/output/last_summary.json")
+    monkeypatch.setenv("AIVA_COLLECTOR_DATA_DIR", str(tmp_path))
+    output = tmp_path / "samples" / "output" / "last_summary.json"
     if output.exists():
         output.unlink()
     code = main(["run-once", "--config", "configs/example_config.json"])
@@ -18,16 +20,18 @@ def test_cli_run_once_dry_generates_last_summary(monkeypatch):
     assert data["metadata"]["filas_validas"] > 0
 
 
-def test_cli_send_without_token_fails(monkeypatch, capsys):
+def test_cli_send_without_token_fails(monkeypatch, capsys, tmp_path):
     monkeypatch.delenv("AIVA_COLLECTOR_TOKEN", raising=False)
+    monkeypatch.setenv("AIVA_COLLECTOR_DATA_DIR", str(tmp_path))
     code = main(["run-once", "--config", "configs/example_config.json", "--send"])
     captured = capsys.readouterr()
     assert code == 2
     assert "Falta token" in captured.err
 
 
-def test_cli_send_alias_without_token_fails(monkeypatch, capsys):
+def test_cli_send_alias_without_token_fails(monkeypatch, capsys, tmp_path):
     monkeypatch.delenv("AIVA_COLLECTOR_TOKEN", raising=False)
+    monkeypatch.setenv("AIVA_COLLECTOR_DATA_DIR", str(tmp_path))
     code = main(["send", "--config", "configs/example_config.json"])
     captured = capsys.readouterr()
     assert code == 2
@@ -93,6 +97,18 @@ def test_run_auto_without_files_exits_ok(tmp_path, monkeypatch, capsys):
 
     assert code == 0
     assert "Sin archivos" in capsys.readouterr().out
+
+
+def test_run_auto_lock_prevents_overlapping_execution(tmp_path):
+    config = CollectorConfig(raw={"state_dir": str(tmp_path / "state")}, config_path=tmp_path / "config.json")
+
+    with _single_run_lock(config) as first:
+        assert first is True
+        with _single_run_lock(config) as second:
+            assert second is False
+
+    with _single_run_lock(config) as third:
+        assert third is True
 
 
 def test_queue_status_outputs_counts_without_token(tmp_path, monkeypatch, capsys):
@@ -181,7 +197,8 @@ def test_retry_pending_attempts_send_without_printing_token(tmp_path, monkeypatc
     assert "token-test" not in out
 
 
-def test_move_processed_false_keeps_file():
+def test_move_processed_false_keeps_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("AIVA_COLLECTOR_DATA_DIR", str(tmp_path))
     source = Path("samples/input/ventas_demo.csv")
     assert source.exists()
     code = main(["run-once", "--config", "configs/example_config.json"])

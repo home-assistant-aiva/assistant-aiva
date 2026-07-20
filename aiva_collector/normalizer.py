@@ -42,6 +42,18 @@ def parse_number(value: Any) -> float | None:
         return None
 
 
+def cost_status(raw_value: Any, parsed: float | None) -> str:
+    if raw_value is None or str(raw_value).strip() == "":
+        return "missing"
+    if parsed is None:
+        return "invalid"
+    if parsed < 0:
+        return "negative"
+    if parsed == 0:
+        return "zero"
+    return "valid"
+
+
 def parse_date(value: Any, date_format: str) -> date | None:
     if value is None or value == "":
         return None
@@ -72,6 +84,9 @@ def normalize_rows(raw_rows: list[dict[str, Any]], config: CollectorConfig) -> N
         producto_nombre = clean_string(mapped("producto_nombre"))
         cantidad_vendida = parse_number(mapped("cantidad_vendida"))
         precio_venta = parse_number(mapped("precio_venta"))
+        costo_raw = mapped("costo_unitario")
+        costo_unitario = parse_number(costo_raw)
+        costo_estado = cost_status(costo_raw, costo_unitario)
         reasons = []
         if not producto_nombre:
             reasons.append("producto_nombre requerido")
@@ -95,7 +110,8 @@ def normalize_rows(raw_rows: list[dict[str, Any]], config: CollectorConfig) -> N
                 "categoria": clean_string(mapped("categoria")) or "Sin categoria",
                 "cantidad_vendida": cantidad_vendida,
                 "precio_venta": precio_venta,
-                "costo_unitario": parse_number(mapped("costo_unitario")),
+                "costo_unitario": costo_unitario if costo_estado in {"valid", "zero"} else None,
+                "costo_estado": costo_estado,
                 "stock_actual": parse_number(mapped("stock_actual")),
             }
         )

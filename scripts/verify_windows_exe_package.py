@@ -27,6 +27,8 @@ VERSION = read_version()
 
 
 def public_asset_version(version: str) -> str:
+    if version == "0.2.6rc3":
+        return "0.2.6-silent-rc3"
     if version == "0.2.6rc2":
         return "0.2.6-discovery-rc2"
     if version == "0.2.6rc1":
@@ -39,6 +41,7 @@ SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 INNO_PATH = ROOT / "packaging" / "inno" / "aiva_collector_setup.iss"
 DIST_DIR = ROOT / "dist"
 EXE_PATH = DIST_DIR / "aiva-collector.exe"
+BACKGROUND_EXE_PATH = DIST_DIR / "aiva-collector-background.exe"
 INSTALLER_PATH = DIST_DIR / f"AIVA-Collector-Setup-v{ASSET_VERSION}.exe"
 TECH_ZIP_PATH = DIST_DIR / f"aiva-collector-windows-exe-v{VERSION}.zip"
 MANIFEST_PATH = DIST_DIR / f"AIVA-Collector-Installer-v{VERSION}.manifest.json"
@@ -64,6 +67,7 @@ SECRET_REGEXES = [
 ]
 TECH_ZIP_FILES = [
     ROOT / "dist" / "aiva-collector.exe",
+    ROOT / "dist" / "aiva-collector-background.exe",
     ROOT / "docs" / "aiva_collector_windows_exe.md",
     ROOT / "docs" / "aiva_collector_windows_installer.md",
     ROOT / "windows" / "config.windows.example.json",
@@ -114,8 +118,11 @@ def assert_spec_safe(spec_path: Path = SPEC_PATH) -> None:
     assert_text_file_safe(spec_path)
     required = [
         'name="aiva-collector"',
+        'name="aiva-collector-background"',
         "console=True",
+        "console=False",
         "aiva_collector_entrypoint.py",
+        "aiva_collector_background_entrypoint.py",
         '"requests"',
         '"openpyxl"',
         '"certifi"',
@@ -136,10 +143,12 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
     required = [
         f"OutputBaseFilename=AIVA-Collector-Setup-v{ASSET_VERSION}",
         "Source: \"..\\..\\dist\\aiva-collector.exe\"",
-        "DestName: \"config.local.json\"; Flags: onlyifdoesntexist",
-        "C:\\AIVA_Comercio\\entrada",
-        "C:\\AIVA_Comercio\\state\\queue",
-        "C:\\AIVA_Comercio\\diagnostico",
+        "Source: \"..\\..\\dist\\aiva-collector-background.exe\"",
+        "DestName: \"config.windows.json\"; Flags: onlyifdoesntexist",
+        "{commonappdata}\\AIVA\\Collector\\entrada",
+        "{commonappdata}\\AIVA\\Collector\\estado\\queue",
+        "{commonappdata}\\AIVA\\Collector\\diagnostico",
+        'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated',
         "activate.bat",
         "run_auto.bat",
         "run_queue_status.bat",
@@ -162,6 +171,26 @@ def assert_runtime_wrappers_safe(root: Path = ROOT) -> None:
         lowered = text.lower()
         if path.name != "run_send.bat" and "--send" in lowered:
             raise VerifyError(f"{path} no debe ejecutar envio")
+        if path.name == "install_scheduled_task.bat":
+            xml_text = lowered.replace("^", "")
+            if "aiva-collector-background.exe" not in lowered:
+                raise VerifyError("La tarea automatica debe usar aiva-collector-background.exe")
+            for forbidden in ("<command>%~dp0aiva-collector.exe</command>", "<command>run_auto.bat</command>", "<command>cmd.exe</command>", "powershell"):
+                if forbidden in xml_text:
+                    raise VerifyError(f"install_scheduled_task.bat programa comando prohibido: {forbidden}")
+            for required in (
+                "<hidden>true</hidden>",
+                "<multipleinstancespolicy>ignorenew</multipleinstancespolicy>",
+                "<delay>pt60s</delay>",
+                "<interval>pt15m</interval>",
+                "<executiontimelimit>%task_limit%</executiontimelimit>",
+                "<restartonfailure><interval>pt5m</interval><count>3</count></restartonfailure>",
+                '<arguments>run-auto --config "%aiva_root%\\config.local.json"</arguments>',
+            ):
+                if required not in xml_text:
+                    raise VerifyError(f"install_scheduled_task.bat no configura {required}")
+            if "aiva_collector_token" in xml_text or "collector_token" in xml_text:
+                raise VerifyError("install_scheduled_task.bat no debe pasar token en argumentos")
         if path.name == "collect_diagnostics.bat":
             for forbidden in ("curl", "invoke-webrequest", "invoke-restmethod", "--send"):
                 if forbidden in lowered:
@@ -240,12 +269,14 @@ def verify(create_zip: bool = False, require_artifacts: bool = False) -> dict[st
 
     artifacts = []
     if require_artifacts:
-        for path in (EXE_PATH, INSTALLER_PATH):
+        for path in (EXE_PATH, BACKGROUND_EXE_PATH, INSTALLER_PATH):
             if not path.exists():
                 raise VerifyError(f"No existe artifact requerido: {path}")
             artifacts.append(path)
     elif EXE_PATH.exists():
         artifacts.append(EXE_PATH)
+        if BACKGROUND_EXE_PATH.exists():
+            artifacts.append(BACKGROUND_EXE_PATH)
     if create_zip:
         tech_zip = create_technical_zip()
         assert_zip_safe(tech_zip)

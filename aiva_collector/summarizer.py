@@ -8,8 +8,8 @@ from typing import Any
 from .config import CollectorConfig
 
 
-def _money(value: float | None) -> float:
-    return round(float(value or 0), 2)
+def _money(value: float | None) -> float | None:
+    return None if value is None else round(float(value), 2)
 
 
 def _product_key(row: dict[str, Any]) -> tuple[str, str, str]:
@@ -44,12 +44,17 @@ def build_summary(
                 "facturacion_total": 0.0,
                 "costo_total_estimado": 0.0,
                 "cantidad_con_costo": 0.0,
+                "cost_status_counts": {"missing": 0, "invalid": 0, "negative": 0, "zero": 0, "valid": 0},
                 "stock_actual": None,
             },
         )
         qty = float(row["cantidad_vendida"])
         price = float(row["precio_venta"])
         cost = row.get("costo_unitario")
+        status = str(row.get("costo_estado") or ("valid" if cost is not None else "missing"))
+        if status not in item["cost_status_counts"]:
+            status = "invalid"
+        item["cost_status_counts"][status] += 1
         item["cantidad_vendida"] += qty
         item["facturacion_total"] += qty * price
         if cost is not None:
@@ -63,32 +68,40 @@ def build_summary(
     for item in grouped.values():
         qty = item["cantidad_vendida"]
         facturacion = item["facturacion_total"]
-        costo_total = item["costo_total_estimado"]
-        margen = facturacion - costo_total if item["cantidad_con_costo"] > 0 else 0
+        has_valid_cost = item["cantidad_con_costo"] > 0
+        costo_total = item["costo_total_estimado"] if has_valid_cost else None
+        margen = facturacion - costo_total if costo_total is not None else None
+        stock_actual = item["stock_actual"]
         productos.append(
             {
                 "producto_codigo": item["producto_codigo"],
                 "producto_nombre": item["producto_nombre"],
                 "categoria": item["categoria"],
-                "cantidad_vendida": _money(qty),
-                "precio_venta_promedio": _money(facturacion / qty if qty else 0),
-                "facturacion_total": _money(facturacion),
-                "costo_unitario_promedio": _money(costo_total / item["cantidad_con_costo"] if item["cantidad_con_costo"] else 0),
+                "cantidad_vendida": _money(qty) or 0,
+                "precio_venta_promedio": _money(facturacion / qty) if qty else None,
+                "facturacion_total": _money(facturacion) or 0,
+                "costo_unitario_promedio": _money(costo_total / item["cantidad_con_costo"]) if has_valid_cost else None,
                 "costo_total_estimado": _money(costo_total),
                 "margen_bruto_estimado": _money(margen),
-                "margen_porcentaje_estimado": _money((margen / facturacion * 100) if facturacion else 0),
-                "stock_actual": _money(item["stock_actual"] or 0),
-                "dias_sin_ventas": 30 if qty <= 0 and (item["stock_actual"] or 0) > 0 else 0,
-                "venta_promedio_diaria": _money(qty / period_days),
+                "margen_porcentaje_estimado": _money((margen / facturacion * 100) if margen is not None and facturacion else None),
+                "stock_actual": _money(stock_actual) if stock_actual is not None else None,
+                "dias_sin_ventas": 30 if qty <= 0 and (stock_actual or 0) > 0 else 0,
+                "venta_promedio_diaria": _money(qty / period_days) or 0,
+                "costo_estado": "valid" if has_valid_cost else _dominant_missing_cost_status(item["cost_status_counts"]),
             }
         )
 
     productos.sort(key=lambda p: p["facturacion_total"], reverse=True)
     productos = productos[:max_products]
     total_facturacion = sum(p["facturacion_total"] for p in productos)
-    total_costo = sum(p["costo_total_estimado"] for p in productos)
-    total_margen = total_facturacion - total_costo
-    productos_con_costo = sum(1 for p in productos if p["costo_total_estimado"] > 0)
+    costs = [p["costo_total_estimado"] for p in productos if p["costo_total_estimado"] is not None]
+    margins = [p["margen_bruto_estimado"] for p in productos if p["margen_bruto_estimado"] is not None]
+    total_costo = sum(costs) if costs else None
+    total_margen = sum(margins) if margins else None
+    productos_con_costo = sum(1 for p in productos if p["costo_total_estimado"] is not None)
+    productos_costo_cero = sum(1 for p in productos if p.get("costo_estado") == "zero")
+    productos_costo_invalido = sum(1 for p in productos if p.get("costo_estado") == "invalid")
+    productos_costo_negativo = sum(1 for p in productos if p.get("costo_estado") == "negative")
 
     return {
         "commerce_id": config.commerce_id,
@@ -101,9 +114,13 @@ def build_summary(
             "facturacion_total": _money(total_facturacion),
             "costo_total_estimado": _money(total_costo),
             "margen_bruto_estimado": _money(total_margen),
-            "margen_porcentaje_estimado": _money((total_margen / total_facturacion * 100) if total_facturacion else 0),
+            "margen_porcentaje_estimado": _money((total_margen / total_facturacion * 100) if total_margen is not None and total_facturacion else None),
             "productos_con_costo": productos_con_costo,
             "productos_sin_costo": len(productos) - productos_con_costo,
+            "cobertura_costos_porcentaje": _money(productos_con_costo / len(productos) * 100) if productos else 0,
+            "productos_costo_cero": productos_costo_cero,
+            "productos_costo_invalido": productos_costo_invalido,
+            "productos_costo_negativo": productos_costo_negativo,
         },
         "metadata": {
             "sistema_origen": "excel_folder",
@@ -114,6 +131,13 @@ def build_summary(
         },
         "collector_version": config.collector_version,
     }
+
+
+def _dominant_missing_cost_status(counts: dict[str, int]) -> str:
+    for status in ("negative", "invalid", "missing", "zero"):
+        if counts.get(status, 0) > 0:
+            return status
+    return "missing"
 
 
 def stable_summary_hash(summary: dict[str, Any]) -> str:

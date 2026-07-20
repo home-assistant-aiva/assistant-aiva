@@ -36,7 +36,9 @@ C:\AIVA_Comercio\config.local.json
 
 La base sale de `windows/config.windows.example.json`. Si el archivo ya existe, no lo pisa.
 
-El instalador RC2 migra automaticamente una configuracion previa valida a `C:\ProgramData\AIVA Collector\config.windows.json` y crea backup local si debe reemplazar una config invalida. Los comandos del EXE resuelven el token desde entorno, config instalada heredada o token protegido por activacion, sin imprimirlo.
+El instalador RC3 conserva `C:\ProgramData\AIVA\Collector`, instala la tarea automatica silenciosa con `aiva-collector-background.exe` y migra automaticamente una configuracion previa valida si corresponde. Los comandos del EXE resuelven el token desde entorno, config instalada heredada o token protegido por activacion, sin imprimirlo.
+
+La tarea programada creada por RC3 usa el comando `run-auto`, no recibe token por argumentos, no ejecuta discovery automatico repetido y reemplaza solamente tareas conocidas anteriores: `AIVA Collector`, `AIVA Collector Scheduled` y `AIVA Collector Auto`.
 
 ## Accesos directos
 
