@@ -154,7 +154,7 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
         "{commonappdata}\\AIVA\\Collector\\estado\\queue",
         "{commonappdata}\\AIVA\\Collector\\diagnostico",
         'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated',
-        'Filename: "{app}\\aiva-collector-background.exe"; Parameters: "prepare-config"; Flags: runhidden waituntilterminated',
+        'Filename: "{app}\\aiva-collector.exe"; Parameters: "prepare-config"; Flags: runhidden waituntilterminated',
         "activate.bat",
         "configure_source.bat",
         "run_auto.bat",

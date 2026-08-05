@@ -70,6 +70,6 @@ Name: "{autodesktop}\AIVA Collector"; Filename: "{app}\{#AppExeName}"; WorkingDi
 Name: "desktopicon"; Description: "Crear acceso directo de validacion en el escritorio"; GroupDescription: "Accesos directos adicionales:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\aiva-collector-background.exe"; Parameters: "prepare-config"; Flags: runhidden waituntilterminated
+Filename: "{app}\aiva-collector.exe"; Parameters: "prepare-config"; Flags: runhidden waituntilterminated
 Filename: "{app}\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated
 Filename: "{app}\activate.bat"; Description: "Activar AIVA Collector"; Flags: postinstall skipifsilent nowait
