@@ -154,9 +154,14 @@ jobs:
           $legacy | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $migrationRoot "config.windows.json")
           $env:AIVA_COLLECTOR_STANDARD_DIR = $migrationRoot
           $env:AIVA_COLLECTOR_CONFIG_SEARCH_DIRS = $migrationRoot
+          .\dist\aiva-collector.exe diagnose-config --no-migrate
           .\dist\aiva-collector-background.exe prepare-config
           $canonical = Join-Path $migrationRoot "config.local.json"
-          if (-not (Test-Path $canonical)) { throw "Legacy config was not migrated to config.local.json" }
+          if (-not (Test-Path $canonical)) {
+            $backgroundLog = Join-Path $env:ProgramData "AIVA\Collector\logs\background-runner.log"
+            if (Test-Path $backgroundLog) { Get-Content -LiteralPath $backgroundLog }
+            throw "Legacy config was not migrated to config.local.json"
+          }
           $migrated = Get-Content -Raw -LiteralPath $canonical | ConvertFrom-Json
           if (-not $migrated.commerce_id -or -not $migrated.collector_id) { throw "Migrated config lost activation identity" }
 
