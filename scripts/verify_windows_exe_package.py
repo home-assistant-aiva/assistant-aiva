@@ -27,6 +27,8 @@ VERSION = read_version()
 
 
 def public_asset_version(version: str) -> str:
+    if version == "0.2.6rc5":
+        return "0.2.6-source-setup-rc5"
     if version == "0.2.6rc4":
         return "0.2.6-interactive-rc4"
     if version == "0.2.6rc3":
@@ -74,6 +76,7 @@ TECH_ZIP_FILES = [
     ROOT / "docs" / "aiva_collector_windows_installer.md",
     ROOT / "windows" / "config.windows.example.json",
     ROOT / "packaging" / "windows_runtime" / "run_validate.bat",
+    ROOT / "packaging" / "windows_runtime" / "configure_source.bat",
     ROOT / "packaging" / "windows_runtime" / "activate.bat",
     ROOT / "packaging" / "windows_runtime" / "run_dry.bat",
     ROOT / "packaging" / "windows_runtime" / "run_auto.bat",
@@ -146,12 +149,14 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
         f"OutputBaseFilename=AIVA-Collector-Setup-v{ASSET_VERSION}",
         "Source: \"..\\..\\dist\\aiva-collector.exe\"",
         "Source: \"..\\..\\dist\\aiva-collector-background.exe\"",
-        "DestName: \"config.windows.json\"; Flags: onlyifdoesntexist",
+        "DestName: \"config.local.json\"; Flags: onlyifdoesntexist",
         "{commonappdata}\\AIVA\\Collector\\entrada",
         "{commonappdata}\\AIVA\\Collector\\estado\\queue",
         "{commonappdata}\\AIVA\\Collector\\diagnostico",
         'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated',
+        'Filename: "{app}\\aiva-collector-background.exe"; Parameters: "prepare-config"; Flags: runhidden waituntilterminated',
         "activate.bat",
+        "configure_source.bat",
         "run_auto.bat",
         "run_queue_status.bat",
         "run_retry_pending.bat",

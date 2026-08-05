@@ -22,10 +22,13 @@ def test_inno_script_is_safe_and_preserves_existing_config():
     verify_windows_exe_package.assert_inno_safe()
     content = Path("packaging/inno/aiva_collector_setup.iss").read_text(encoding="utf-8")
     assert "onlyifdoesntexist" in content
-    assert "AIVA-Collector-Setup-v0.2.6-interactive-rc4" in content
+    assert "AIVA-Collector-Setup-v0.2.6-source-setup-rc5" in content
     assert "aiva-collector-background.exe" in content
     assert 'Name: "{group}\\AIVA Collector"; Filename: "{app}\\{#AppExeName}"' in content
     assert 'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated' in content
+    assert 'Filename: "{app}\\aiva-collector-background.exe"; Parameters: "prepare-config"; Flags: runhidden waituntilterminated' in content
+    assert 'DestName: "config.local.json"; Flags: onlyifdoesntexist' in content
+    assert "config.windows.json\"; Flags: onlyifdoesntexist" not in content
     assert "run_discovery_dry.bat" not in content.split("[Run]", maxsplit=1)[1]
 
 

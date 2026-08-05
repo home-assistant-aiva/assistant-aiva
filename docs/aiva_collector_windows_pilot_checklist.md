@@ -21,7 +21,7 @@ Resultado esperado: el directorio de instalacion no contiene estado, logs, cola 
 
 ## 3. Ubicaciones finales
 
-- Configuracion: `C:\ProgramData\AIVA\Collector\config.windows.json`.
+- Configuracion: `C:\ProgramData\AIVA\Collector\config.local.json`.
 - Logs: `C:\ProgramData\AIVA\Collector\logs`.
 - Estado local: `C:\ProgramData\AIVA\Collector\estado`.
 - Cola offline: `C:\ProgramData\AIVA\Collector\estado\queue`.
@@ -40,7 +40,7 @@ Resultado esperado: todas las carpetas existen y sobreviven a reinicio, actualiz
 3. Ejecutar `AIVA Collector - Activar`.
 4. No guardar tokens en documentos ni capturas.
 
-Resultado esperado: `config.windows.json` queda con `commerce_id`, `collector_id` y el token queda en almacenamiento local seguro o variable de entorno, no impreso en logs.
+Resultado esperado: `config.local.json` queda con `commerce_id`, `collector_id` y el token queda en almacenamiento local seguro o variable de entorno, no impreso en logs.
 
 ## 5. Carpeta de entrada
 
@@ -68,7 +68,7 @@ Resultado esperado: el summary del XLSX coincide con el CSV en cantidad de produ
 
 ## 8. Mapeo de columnas
 
-Validar `column_mapping` en `config.windows.json` o desde admin.
+Validar `column_mapping` en `config.local.json` o desde admin.
 
 Resultado esperado: si cambian nombres de columnas, el Collector bloquea el envio y pide revisar mapeo; no inventa columnas.
 

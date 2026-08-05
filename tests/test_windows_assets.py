@@ -11,6 +11,7 @@ WINDOWS_CONFIG = WINDOWS_DIR / "config.windows.example.json"
 BAT_FILES = [
     WINDOWS_DIR / "check_python.bat",
     WINDOWS_DIR / "collect_diagnostics.bat",
+    WINDOWS_DIR / "configure_source.bat",
     WINDOWS_DIR / "install_manual.bat",
     WINDOWS_DIR / "install_dependencies.bat",
     WINDOWS_DIR / "run_validate.bat",
@@ -144,6 +145,7 @@ def test_non_send_bats_do_not_execute_send():
         "install_manual.bat",
         "install_dependencies.bat",
         "collect_diagnostics.bat",
+        "configure_source.bat",
     ):
         content = (WINDOWS_DIR / name).read_text(encoding="utf-8")
         assert "--send" not in content

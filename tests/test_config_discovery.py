@@ -32,7 +32,7 @@ def _write_config(path: Path, **overrides) -> Path:
 
 def test_detects_config_next_to_exe(tmp_path, monkeypatch):
     config_path = _write_config(tmp_path / "exe" / "config.windows.json")
-    monkeypatch.setenv("AIVA_COLLECTOR_STANDARD_CONFIG", str(tmp_path / "standard" / "config.windows.json"))
+    monkeypatch.setenv("AIVA_COLLECTOR_STANDARD_CONFIG", str(tmp_path / "standard" / "config.local.json"))
 
     result = resolve_runtime_config(search_dirs=[config_path.parent])
 
@@ -67,7 +67,7 @@ def test_ignores_example_template_and_selects_recent_valid(tmp_path):
 
 def test_migrates_config_to_standard_and_backs_up_invalid_existing(tmp_path):
     source = _write_config(tmp_path / "AIVA_Comercio" / "config.local.json")
-    standard = tmp_path / "ProgramData" / "AIVA Collector" / "config.windows.json"
+    standard = tmp_path / "ProgramData" / "AIVA" / "Collector" / "config.local.json"
     standard.parent.mkdir(parents=True)
     standard.write_text('{"backend_url": ""}', encoding="utf-8")
 
@@ -95,6 +95,39 @@ def test_diagnose_config_does_not_print_token(tmp_path, monkeypatch, capsys):
     assert code == 0
     assert "secret-token" not in out
     assert '"selected_token_configured": true' in out
+
+
+def test_explicit_missing_standard_path_migrates_legacy_windows_config(tmp_path, monkeypatch):
+    standard = tmp_path / "ProgramData" / "AIVA" / "Collector" / "config.local.json"
+    legacy = _write_config(tmp_path / "ProgramData" / "AIVA" / "Collector" / "config.windows.json")
+    monkeypatch.setenv("AIVA_COLLECTOR_STANDARD_CONFIG", str(standard))
+    monkeypatch.setenv("AIVA_COLLECTOR_CONFIG_SEARCH_DIRS", str(legacy.parent))
+
+    result = resolve_runtime_config(standard)
+
+    assert result.selected_path == standard
+    assert result.migrated is True
+    assert standard.exists()
+    assert result.config.commerce_id == "commerce"
+
+
+def test_explicit_placeholder_standard_path_is_replaced_by_legacy_config(tmp_path, monkeypatch):
+    standard = _write_config(
+        tmp_path / "ProgramData" / "AIVA" / "Collector" / "config.local.json",
+        commerce_id="REEMPLAZAR_COMMERCE_ID",
+        collector_id="REEMPLAZAR_COLLECTOR_ID",
+    )
+    legacy = _write_config(standard.parent / "config.windows.json", commerce_id="commerce-real", collector_id="collector-real")
+    monkeypatch.setenv("AIVA_COLLECTOR_STANDARD_CONFIG", str(standard))
+    monkeypatch.setenv("AIVA_COLLECTOR_CONFIG_SEARCH_DIRS", str(legacy.parent))
+
+    result = resolve_runtime_config(standard)
+
+    assert result.selected_path == standard
+    assert result.migrated is True
+    assert result.backup_path is not None and result.backup_path.exists()
+    assert result.config.commerce_id == "commerce-real"
+    assert result.config.collector_id == "collector-real"
 
 
 def test_discover_report_uses_token_from_config(tmp_path, monkeypatch):

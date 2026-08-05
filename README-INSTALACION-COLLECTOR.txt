@@ -1,72 +1,84 @@
-AIVA Collector Discovery RC4
-===================================
+AIVA Collector Source Setup RC5
+================================
 
 Esta version es candidata / pre-release. Usar primero en ambiente controlado.
 
-Instalacion
------------
+Instalacion o actualizacion
+---------------------------
 
-1. Instalar AIVA Collector con AIVA-Collector-Setup-v0.2.6-interactive-rc4.exe.
+1. Ejecutar como administrador AIVA-Collector-Setup-v0.2.6-source-setup-rc5.exe.
+2. Se puede instalar desde cero o encima de RC4/RC3/INSTALADOR 2.5.
+3. No borrar C:\ProgramData\AIVA\Collector.
+4. El instalador conserva activacion, token seguro, estado, cola, mapeos y logs.
+5. RC5 unifica la configuracion activa en:
 
-Actualizacion desde instalador 2.5/RC anteriores:
-- El instalador conserva %PROGRAMDATA%\AIVA\Collector.
-- Conserva config.local.json, token seguro, estado, cola offline, mapeos y logs.
-- La tarea nueva usa aiva-collector-background.exe sin consola.
-- La tarea se registra al iniciar sesion, con 60 segundos de demora, repeticion cada 15 minutos, Hidden=true, IgnoreNew, timeout de 30 minutos y reintento cada 5 minutos hasta 3 veces.
-- Al instalar la tarea nueva se eliminan solo tareas conocidas anteriores: AIVA Collector, AIVA Collector Scheduled, AIVA Collector Auto.
-- No vuelve a activar el Collector si ya existe config.local.json y token guardado.
-- No ejecuta discovery automatico repetido desde la tarea; la tarea solo corre run-auto.
+   C:\ProgramData\AIVA\Collector\config.local.json
 
-Rollback:
-- Desinstalar AIVA Collector desde Windows. Por defecto no borrar %PROGRAMDATA%\AIVA\Collector.
-- Reinstalar el instalador anterior aprobado.
-- Ejecutar "AIVA Collector - Instalar tarea automatica" si se requiere restaurar la tarea manualmente.
-- Si se desea un rollback limpio completo, copiar primero %PROGRAMDATA%\AIVA\Collector como backup operativo.
-2. El instalador detecta y migra automaticamente configuraciones previas a C:\ProgramData\AIVA Collector\config.windows.json.
-3. Si no hay configuracion valida, ejecutar "AIVA Collector - Activar".
-4. Ejecutar "AIVA Collector - Diagnosticar configuracion" si se quiere revisar la migracion sin mostrar secretos.
-5. Ejecutar "AIVA Collector - Detectar fuentes sin enviar".
-6. Revisar el resultado local.
-7. Ejecutar "AIVA Collector - Reportar fuentes detectadas" solo cuando corresponda.
-8. Verificar en Admin: AIVA Comercial > Fuentes de datos > Fuentes detectadas.
-9. Convertir la discovery en fuente desde Admin antes de activarla.
+6. Si existe config.windows.json de RC4, se migra automaticamente sin borrar el original.
+7. La tarea automatica sigue usando aiva-collector-background.exe sin consola cada 15 minutos.
 
-Seguridad y privacidad
-----------------------
+Primera configuracion
+---------------------
 
-- AIVA solo detecta posibles fuentes.
-- AIVA no modifica archivos, bases, ventas, stock ni precios.
-- AIVA no sube archivos del comercio.
-- AIVA no lee contenido comercial completo en esta fase.
-- AIVA no se conecta a bases reales en esta fase.
-- AIVA no envia Telegram real desde Discovery.
-- AIVA no usa GPT ni LLM desde Discovery.
+1. Abrir AIVA Collector.
+2. Si la PC es nueva, elegir Activar Collector e ingresar el codigo de activacion.
+3. Elegir Configurar o cambiar fuente.
+4. Seleccionar una opcion:
 
-Incluye
--------
+   - Carpeta predeterminada de AIVA:
+     C:\ProgramData\AIVA\Collector\entrada
+     AIVA mueve los archivos terminados a procesados/rechazados.
 
-- Deteccion segura de carpetas candidatas.
-- Deteccion de CSV, XLSX y XLS.
-- Deteccion por extension de SQLite, Access y Firebird.
-- Deteccion basica de servicios DB en Windows sin conectarse.
-- Migracion automatica de configuracion previa con backup local.
-- Filtro estricto para evitar Program Files, Desktop/Downloads genericos y software no comercial.
-- Comando local dry-run.
-- Reporte de metadata segura al backend de Fuentes de datos.
+   - Otra carpeta manual, por ejemplo C:\Ventas:
+     AIVA trabaja en modo solo lectura y no mueve ni borra originales.
 
-Notas RC4
+   - Buscar carpetas automaticamente:
+     AIVA muestra candidatas y la persona confirma cual usar.
+
+5. Elegir Probar fuente sin enviar.
+6. Si la prueba es correcta, elegir Procesar ahora.
+
+Control de duplicados
+---------------------
+
+- Se conserva la deduplicacion por hash local y la idempotencia del backend.
+- Copiar el mismo archivo no genera ventas duplicadas.
+- Probar fuente sin enviar puede repetirse y no marca archivos como enviados.
+- No existe un boton comun para forzar duplicados reales.
+
+Ejecucion automatica
+--------------------
+
+- Tarea: AIVA Collector Auto.
+- Ejecutable: aiva-collector-background.exe.
+- Argumentos: run-auto --config "%ProgramData%\AIVA\Collector\config.local.json".
+- Inicio de sesion con demora de 60 segundos.
+- Repeticion cada 15 minutos.
+- Hidden=true, IgnoreNew, timeout 30 minutos y 3 reintentos cada 5 minutos.
+- No usa run_auto.bat, cmd.exe ni PowerShell.
+
+Seguridad
 ---------
 
-- Al abrir aiva-collector.exe sin argumentos aparece un menu interactivo y la ventana permanece abierta.
-- El acceso "AIVA Collector - Procesar ahora" mantiene visible el resultado hasta presionar una tecla.
-- Ejecucion automatica silenciosa mediante aiva-collector-background.exe.
-- Salida del runner background dirigida a logs en ProgramData con rotacion.
-- Costo faltante tratado como null, sin margen inventado.
-- El background silencioso de RC3 fue validado fisicamente por Federico.
-- Pendiente de prueba fisica del menu interactivo RC4 por Federico.
-- FASE 6.4C todavia no incluida.
+- El instalador no contiene tokens ni configuraciones reales.
+- La seleccion manual no cambia commerce_id, collector_id ni activacion.
+- La carpeta externa se configura en modo solo lectura.
+- AIVA envia resumenes, no archivos crudos.
 
-Proximo paso
-------------
+Alcance
+-------
 
-Convertir la discovery en fuente desde Admin. La sincronizacion automatica desde fuente confirmada corresponde a la siguiente fase.
+RC5 incorpora configuracion local guiada y lectura automatica de la carpeta elegida.
+No incorpora el flujo completo Admin/backend de FASE 6.4C, APIs ni lectura real de bases locales.
+
+Prueba fisica pendiente
+-----------------------
+
+Federico debe confirmar en Windows que:
+
+- la instalacion conserva activacion;
+- la configuracion manual persiste al reiniciar;
+- Probar fuente sin enviar no mueve el archivo;
+- Procesar ahora envia una sola vez;
+- el duplicado no vuelve a enviarse;
+- la tarea automatica usa la misma fuente sin abrir ventanas.

@@ -47,7 +47,7 @@ from .local_state import (
 from .logging_setup import setup_logging
 from .normalizer import normalize_rows
 from .offline_queue import enqueue_payload, process_queue
-from .readers import detect_columns, discover_input_files, read_file
+from .readers import SUPPORTED_SUFFIXES, detect_columns, discover_input_files, read_file
 from .state import save_state
 from .summarizer import build_summary, idempotency_key
 from .token_store import save_token
@@ -56,7 +56,7 @@ from .validation import validate_normalized_data
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.6rc4"
+DEFAULT_COLLECTOR_VERSION = "0.2.6rc5"
 
 
 def default_config_path() -> str | None:
@@ -404,12 +404,12 @@ def _normalize_backend_url(value: str) -> str:
 def _write_activation_config(path: Path, *, backend_url: str, response: dict) -> None:
     defaults = dict(response.get("config_defaults") or {})
     config = {
+        **defaults,
         "backend_url": backend_url.rstrip("/"),
         "commerce_id": response["commerce_id"],
         "collector_id": response["collector_id"],
-        "collector_version": response.get("collector_version") or DEFAULT_COLLECTOR_VERSION,
+        "collector_version": DEFAULT_COLLECTOR_VERSION,
         "collector_token_env": "AIVA_COLLECTOR_TOKEN",
-        **defaults,
     }
     config.pop("collector_token", None)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1131,6 +1131,199 @@ def cmd_diagnose_config(args: argparse.Namespace) -> int:
     return 0 if resolved else 2
 
 
+def _source_files(path: Path) -> list[Path]:
+    try:
+        return sorted(
+            item
+            for item in path.iterdir()
+            if item.is_file() and item.suffix.lower() in SUPPORTED_SUFFIXES
+        )
+    except OSError as exc:
+        raise ConfigError(f"No se puede leer la carpeta: {path}. Detalle: {exc}") from exc
+
+
+def _normalize_source_path(value: str) -> Path:
+    cleaned = value.strip().strip('"').strip("'")
+    if not cleaned:
+        raise ConfigError("Ingresá una carpeta válida.")
+    return Path(os.path.expandvars(os.path.expanduser(cleaned)))
+
+
+def _validate_source_path(path: Path, *, create: bool = False) -> list[Path]:
+    if create:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ConfigError(f"No se pudo crear la carpeta: {path}. Detalle: {exc}") from exc
+    if not path.exists():
+        raise ConfigError(f"La carpeta no existe: {path}")
+    if not path.is_dir():
+        raise ConfigError(f"La ruta no es una carpeta: {path}")
+    return _source_files(path)
+
+
+def _write_source_config(config: CollectorConfig, *, path: Path, managed: bool) -> tuple[Path, Path | None, int]:
+    files = _validate_source_path(path, create=managed)
+    config_path = config.config_path
+    raw = dict(config.raw)
+    raw.update(
+        {
+            "collector_version": DEFAULT_COLLECTOR_VERSION,
+            "input_dir": str(path),
+            "source_mode": "aiva_managed" if managed else "external_read_only",
+            "move_processed_files": managed,
+            "move_error_files": managed,
+            "keep_original_files": not managed,
+            "source_configured_at": utc_now(),
+        }
+    )
+    backup: Path | None = None
+    if config_path.exists():
+        backup_dir = config_path.parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup = backup_dir / f"config.source.{stamp}.json"
+        shutil.copy2(config_path, backup)
+    temporary = config_path.with_name(config_path.name + ".tmp")
+    temporary.write_text(json.dumps(raw, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    os.replace(temporary, config_path)
+    return config_path, backup, len(files)
+
+
+def _print_current_source(config: CollectorConfig) -> None:
+    path = config.path("input_dir")
+    mode = str(config.raw.get("source_mode") or "legacy")
+    mode_label = {
+        "aiva_managed": "Carpeta administrada por AIVA",
+        "external_read_only": "Carpeta externa en modo solo lectura",
+        "legacy": "Configuración heredada",
+    }.get(mode, mode)
+    try:
+        file_count = len(_source_files(path)) if path.exists() and path.is_dir() else 0
+        status = "disponible" if path.exists() and path.is_dir() else "no disponible"
+    except ConfigError:
+        file_count = 0
+        status = "sin permisos de lectura"
+    print("Fuente activa")
+    print(f"Carpeta: {path}")
+    print(f"Modo: {mode_label}")
+    print(f"Estado: {status}")
+    print(f"Archivos CSV/XLSX detectados: {file_count}")
+
+
+def _save_source_choice(config: CollectorConfig, path: Path, *, managed: bool) -> int:
+    config_path, _backup, file_count = _write_source_config(config, path=path, managed=managed)
+    print("Fuente local configurada correctamente.")
+    print(f"Carpeta: {path}")
+    print(f"Archivos CSV/XLSX detectados: {file_count}")
+    print(f"Configuración activa: {config_path}")
+    if managed:
+        print("AIVA moverá los archivos procesados a su carpeta de procesados.")
+    else:
+        print("Modo solo lectura: AIVA no moverá ni borrará archivos de esta carpeta.")
+    if file_count == 0:
+        print("La carpeta quedó conectada, pero todavía no contiene archivos CSV/XLSX.")
+    print("La tarea automática usará esta misma fuente cada 15 minutos.")
+    return 0
+
+
+def _discovered_source_paths(config: CollectorConfig) -> list[Path]:
+    discovery_config = DiscoveryConfig.from_collector_config(config, dry_run=True, safe_mode=True)
+    candidates = DiscoveryScanner(discovery_config).scan()
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if item.source_type != "watched_folder" or not item.detected_path:
+            continue
+        path = Path(item.detected_path)
+        key = str(path).lower()
+        if key not in seen:
+            seen.add(key)
+            paths.append(path)
+    return paths
+
+
+def _choose_discovered_source(config: CollectorConfig) -> int:
+    paths = _discovered_source_paths(config)
+    if not paths:
+        print("No se encontraron carpetas candidatas. Elegí la opción manual e ingresá la ruta.")
+        return 0
+    print("Carpetas encontradas:")
+    for index, path in enumerate(paths, start=1):
+        print(f"{index}. {path}")
+    print("0. Cancelar")
+    try:
+        choice = input("Elegí la carpeta que querés usar: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        choice = "0"
+    if choice == "0":
+        print("Configuración cancelada.")
+        return 0
+    if not choice.isdigit() or not 1 <= int(choice) <= len(paths):
+        raise ConfigError("Selección inválida.")
+    return _save_source_choice(config, paths[int(choice) - 1], managed=False)
+
+
+def _interactive_source_setup(config: CollectorConfig) -> int:
+    while True:
+        print()
+        print("Configurar fuente de datos")
+        print("=" * 30)
+        print("1. Usar carpeta predeterminada de AIVA")
+        print("2. Elegir otra carpeta manualmente")
+        print("3. Buscar carpetas automáticamente")
+        print("4. Ver fuente actualmente conectada")
+        print("0. Volver")
+        try:
+            choice = input("\nElegí una opción: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if choice == "0":
+            return 0
+        if choice == "1":
+            return _save_source_choice(config, config.config_path.parent / "entrada", managed=True)
+        if choice == "2":
+            try:
+                value = input(r"Pegá la ruta de la carpeta (ejemplo C:\Ventas): ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nConfiguración cancelada.")
+                return 0
+            return _save_source_choice(config, _normalize_source_path(value), managed=False)
+        if choice == "3":
+            return _choose_discovered_source(config)
+        if choice == "4":
+            _print_current_source(config)
+            continue
+        print("Opción inválida.")
+
+
+def cmd_configure_source(args: argparse.Namespace) -> int:
+    config = _load_runtime_config(args)
+    if args.show_current:
+        _print_current_source(config)
+        return 0
+    if args.use_default:
+        return _save_source_choice(config, config.config_path.parent / "entrada", managed=True)
+    if args.path:
+        return _save_source_choice(config, _normalize_source_path(args.path), managed=False)
+    if args.discover:
+        return _choose_discovered_source(config)
+    return _interactive_source_setup(config)
+
+
+def cmd_prepare_config(args: argparse.Namespace) -> int:
+    try:
+        runtime = resolve_runtime_config(None, migrate=True)
+    except ConfigError:
+        print("No hay una activación previa para migrar. La configuración se creará al activar el Collector.")
+        return 0
+    print(f"Configuración preparada: {runtime.selected_path}")
+    if runtime.migrated:
+        print("Se migró una configuración anterior sin modificar el token ni el estado local.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aiva-collector")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1194,6 +1387,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_diagnose.add_argument("--no-migrate", action="store_true")
     p_diagnose.set_defaults(func=cmd_diagnose_config)
 
+    p_source = sub.add_parser("configure-source")
+    p_source.add_argument("--config", default=config_default)
+    source_group = p_source.add_mutually_exclusive_group()
+    source_group.add_argument("--path")
+    source_group.add_argument("--use-default", action="store_true")
+    source_group.add_argument("--discover", action="store_true")
+    source_group.add_argument("--show-current", action="store_true")
+    p_source.set_defaults(func=cmd_configure_source)
+
+    p_prepare = sub.add_parser("prepare-config")
+    p_prepare.set_defaults(func=cmd_prepare_config)
+
     p_service_status = sub.add_parser("service-status")
     p_service_status.add_argument("--config", default=config_default)
     p_service_status.set_defaults(func=cmd_status)
@@ -1210,13 +1415,15 @@ def _pause_interactive() -> None:
 def interactive_menu() -> int:
     options: dict[str, tuple[str, list[str]]] = {
         "1": ("Procesar ahora", ["run-auto"]),
-        "2": ("Estado de conexion", ["status"]),
-        "3": ("Estado de cola", ["queue-status"]),
-        "4": ("Reintentar pendientes", ["retry-pending"]),
-        "5": ("Detectar fuentes sin enviar", ["discover", "--dry-run"]),
-        "6": ("Reportar fuentes detectadas", ["discover", "--report"]),
-        "7": ("Diagnosticar configuracion", ["diagnose-config"]),
-        "8": ("Activar Collector", ["activate", "--install-task"]),
+        "2": ("Configurar o cambiar fuente", ["configure-source"]),
+        "3": ("Probar fuente sin enviar", ["run-once"]),
+        "4": ("Ver fuente conectada", ["configure-source", "--show-current"]),
+        "5": ("Estado de conexion", ["status"]),
+        "6": ("Estado de cola", ["queue-status"]),
+        "7": ("Reintentar pendientes", ["retry-pending"]),
+        "8": ("Reportar fuentes detectadas", ["discover", "--report"]),
+        "9": ("Diagnosticar configuracion", ["diagnose-config"]),
+        "10": ("Activar Collector", ["activate", "--install-task"]),
     }
 
     while True:
@@ -1243,7 +1450,7 @@ def interactive_menu() -> int:
             continue
 
         label, command = selected
-        if choice == "6":
+        if choice == "8":
             try:
                 confirmation = input(
                     "Esta opcion enviara metadata segura de las fuentes detectadas. "

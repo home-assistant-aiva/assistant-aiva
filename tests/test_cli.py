@@ -83,6 +83,13 @@ def test_cli_exposes_discover_and_diagnose_help():
     assert diagnose.value.code == 0
 
 
+def test_cli_exposes_source_configuration_help():
+    parser = build_parser()
+    with pytest.raises(SystemExit) as configure:
+        parser.parse_args(["configure-source", "--help"])
+    assert configure.value.code == 0
+
+
 def test_cli_without_args_opens_interactive_menu(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda _prompt: "0")
 
@@ -111,17 +118,109 @@ def test_interactive_menu_processes_now_and_keeps_result_visible(monkeypatch, ca
     assert "Procesar ahora" in out
 
 
+def test_interactive_menu_opens_source_configuration(monkeypatch):
+    import aiva_collector.cli as cli
+
+    commands = []
+    answers = iter(["2", "", "0"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr(cli, "main", lambda command: commands.append(command) or 0)
+
+    assert interactive_menu() == 0
+    assert commands == [["configure-source"]]
+
+
 def test_interactive_menu_requires_confirmation_before_reporting(monkeypatch, capsys):
     import aiva_collector.cli as cli
 
     commands = []
-    answers = iter(["6", "NO", "", "0"])
+    answers = iter(["8", "NO", "", "0"])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
     monkeypatch.setattr(cli, "main", lambda command: commands.append(command) or 0)
 
     assert interactive_menu() == 0
     assert commands == []
     assert "Operacion cancelada. No se envio nada." in capsys.readouterr().out
+
+
+def test_configure_external_source_is_read_only_and_preserves_identity(tmp_path, capsys):
+    source = tmp_path / "Ventas"
+    source.mkdir()
+    (source / "ventas.csv").write_text("producto,cantidad\nMate,1\n", encoding="utf-8")
+    config_path = tmp_path / "config.local.json"
+    data = json.loads(Path("configs/example_config.json").read_text(encoding="utf-8"))
+    data.update(
+        {
+            "commerce_id": "commerce-real",
+            "collector_id": "collector-real",
+            "collector_token": "token-no-mostrar",
+            "state_dir": str(tmp_path / "state"),
+            "processed_dir": str(tmp_path / "processed"),
+            "error_dir": str(tmp_path / "error"),
+            "output_dir": str(tmp_path / "output"),
+            "log_file": str(tmp_path / "logs" / "collector.log"),
+        }
+    )
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    assert main(["configure-source", "--config", str(config_path), "--path", str(source)]) == 0
+
+    updated = json.loads(config_path.read_text(encoding="utf-8"))
+    assert updated["commerce_id"] == "commerce-real"
+    assert updated["collector_id"] == "collector-real"
+    assert updated["collector_token"] == "token-no-mostrar"
+    assert updated["input_dir"] == str(source)
+    assert updated["source_mode"] == "external_read_only"
+    assert updated["move_processed_files"] is False
+    assert updated["move_error_files"] is False
+    assert updated["keep_original_files"] is True
+    assert "token-no-mostrar" not in capsys.readouterr().out
+    assert list((tmp_path / "backups").glob("config.source.*.json"))
+
+
+def test_configure_default_source_creates_managed_input(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.local.json"
+    data = json.loads(Path("configs/example_config.json").read_text(encoding="utf-8"))
+    data.update(
+        {
+            "commerce_id": "commerce",
+            "collector_id": "collector",
+            "input_dir": str(tmp_path / "old"),
+            "state_dir": str(tmp_path / "state"),
+            "processed_dir": str(tmp_path / "processed"),
+            "error_dir": str(tmp_path / "error"),
+            "output_dir": str(tmp_path / "output"),
+            "log_file": str(tmp_path / "logs" / "collector.log"),
+        }
+    )
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    assert main(["configure-source", "--config", str(config_path), "--use-default"]) == 0
+
+    updated = json.loads(config_path.read_text(encoding="utf-8"))
+    assert updated["input_dir"] == str(tmp_path / "entrada")
+    assert Path(updated["input_dir"]).is_dir()
+    assert updated["source_mode"] == "aiva_managed"
+    assert updated["move_processed_files"] is True
+    assert updated["move_error_files"] is True
+    assert updated["keep_original_files"] is False
+
+
+def test_show_current_source_does_not_send_or_change_config(tmp_path, capsys):
+    source = tmp_path / "Ventas"
+    source.mkdir()
+    config_path = tmp_path / "config.local.json"
+    data = json.loads(Path("configs/example_config.json").read_text(encoding="utf-8"))
+    data.update({"input_dir": str(source), "source_mode": "external_read_only"})
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+    before = config_path.read_bytes()
+
+    assert main(["configure-source", "--config", str(config_path), "--show-current"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Carpeta externa en modo solo lectura" in out
+    assert str(source) in out
+    assert config_path.read_bytes() == before
 
 
 def test_run_auto_without_files_exits_ok(tmp_path, monkeypatch, capsys):

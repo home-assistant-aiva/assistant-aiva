@@ -1,5 +1,5 @@
 {
-  "collector_version": "0.2.6rc4",
+  "collector_version": "0.2.6rc5",
   "backend_url": "http://187.77.44.118:8080",
   "commerce_id": "REEMPLAZAR_COMMERCE_ID",
   "collector_id": "REEMPLAZAR_COLLECTOR_ID",
@@ -18,6 +18,7 @@
   "move_processed_files": true,
   "move_error_files": true,
   "keep_original_files": false,
+  "source_mode": "aiva_managed",
   "discovery": {
     "enabled": true,
     "max_depth": 3,

@@ -1,4 +1,4 @@
-name: Build Collector Windows Discovery Release
+name: Build Collector Windows Source Setup Release
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       release_tag:
         description: "Release tag to publish"
         required: true
-        default: "v0.2.6-collector-discovery-rc4"
+        default: "v0.2.6-collector-discovery-rc5"
       publish_release:
         description: "Publish GitHub pre-release"
         required: true
@@ -14,20 +14,20 @@ on:
         default: false
   push:
     branches:
-      - "fix/collector-interactive-menu-rc4"
+      - "fix/collector-source-setup-rc5"
     tags:
-      - "v0.2.6-collector-discovery-rc4"
+      - "v0.2.6-collector-discovery-rc5"
 
 permissions:
   contents: write
 
 env:
-  AIVA_RELEASE_TAG: "v0.2.6-collector-discovery-rc4"
-  AIVA_RELEASE_VERSION: "0.2.6-interactive-rc4"
-  AIVA_RELEASE_TITLE: "AIVA Collector Discovery RC4"
-  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-interactive-rc4.exe"
-  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.6rc4.manifest.json"
-  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-interactive-rc4.zip"
+  AIVA_RELEASE_TAG: "v0.2.6-collector-discovery-rc5"
+  AIVA_RELEASE_VERSION: "0.2.6-source-setup-rc5"
+  AIVA_RELEASE_TITLE: "AIVA Collector Source Setup RC5"
+  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-source-setup-rc5.exe"
+  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.6rc5.manifest.json"
+  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-source-setup-rc5.zip"
 
 jobs:
   build-release:
@@ -72,6 +72,8 @@ jobs:
           .\dist\aiva-collector.exe activate --help
           .\dist\aiva-collector.exe run-auto --help
           .\dist\aiva-collector.exe discover --help
+          .\dist\aiva-collector.exe configure-source --help
+          .\dist\aiva-collector-background.exe prepare-config --help
 
       - name: Verify interactive executable stays open without arguments
         shell: pwsh
@@ -79,6 +81,7 @@ jobs:
           $menuOutput = "0" | .\dist\aiva-collector.exe 2>&1
           if ($LASTEXITCODE -ne 0) { throw "Interactive executable failed with exit code $LASTEXITCODE" }
           if (-not ($menuOutput -match "Procesar ahora")) { throw "Interactive menu was not displayed" }
+          if (-not ($menuOutput -match "Configurar o cambiar fuente")) { throw "Source setup option was not displayed" }
           if (-not ($menuOutput -match "Cerrando AIVA Collector")) { throw "Interactive menu did not exit cleanly" }
 
       - name: Create demo config for executable validation
@@ -121,6 +124,38 @@ jobs:
           $parsed = $discoveryJson | ConvertFrom-Json
           if (-not ($parsed.items | Where-Object { $_.source_type -eq "watched_folder" })) { throw "watched_folder discovery not found" }
           if (-not ($parsed.items | Where-Object { $_.source_type -eq "database" -and $_.detected_engine -eq "sqlite" })) { throw "sqlite discovery not found" }
+
+      - name: Verify guided source setup and read-only dry-run
+        shell: pwsh
+        run: |
+          $sourceRoot = Join-Path $env:RUNNER_TEMP "aiva_manual_source"
+          New-Item -ItemType Directory -Force -Path $sourceRoot | Out-Null
+          Copy-Item -LiteralPath "samples\input\ventas_demo.csv" -Destination (Join-Path $sourceRoot "ventas_demo.csv") -Force
+          .\dist\aiva-collector.exe configure-source --config "$env:AIVA_DEMO_CONFIG" --path "$sourceRoot"
+          $configured = Get-Content -Raw -LiteralPath "$env:AIVA_DEMO_CONFIG" | ConvertFrom-Json
+          if ($configured.input_dir -ne $sourceRoot) { throw "Manual source path was not saved" }
+          if ($configured.source_mode -ne "external_read_only") { throw "Manual source is not read-only" }
+          if ($configured.move_processed_files -ne $false) { throw "Manual source could move processed files" }
+          if ($configured.move_error_files -ne $false) { throw "Manual source could move rejected files" }
+          if ($configured.keep_original_files -ne $true) { throw "Manual source does not preserve originals" }
+          $sourceOutput = .\dist\aiva-collector.exe configure-source --config "$env:AIVA_DEMO_CONFIG" --show-current 2>&1
+          if (-not ($sourceOutput -match "Carpeta externa en modo solo lectura")) { throw "Active source mode was not displayed" }
+          .\dist\aiva-collector.exe run-once --config "$env:AIVA_DEMO_CONFIG"
+          if (-not (Test-Path (Join-Path $sourceRoot "ventas_demo.csv"))) { throw "Dry-run modified the source file" }
+
+      - name: Verify RC4 config migration to canonical config.local.json
+        shell: pwsh
+        run: |
+          $migrationRoot = Join-Path $env:RUNNER_TEMP "aiva_config_migration"
+          New-Item -ItemType Directory -Force -Path $migrationRoot | Out-Null
+          Copy-Item -LiteralPath "$env:AIVA_DEMO_CONFIG" -Destination (Join-Path $migrationRoot "config.windows.json") -Force
+          $env:AIVA_COLLECTOR_STANDARD_DIR = $migrationRoot
+          $env:AIVA_COLLECTOR_CONFIG_SEARCH_DIRS = $migrationRoot
+          .\dist\aiva-collector-background.exe prepare-config
+          $canonical = Join-Path $migrationRoot "config.local.json"
+          if (-not (Test-Path $canonical)) { throw "Legacy config was not migrated to config.local.json" }
+          $migrated = Get-Content -Raw -LiteralPath $canonical | ConvertFrom-Json
+          if (-not $migrated.commerce_id -or -not $migrated.collector_id) { throw "Migrated config lost activation identity" }
 
       - name: Verify packaging definitions before installer
         run: |
@@ -198,23 +233,30 @@ jobs:
             dist/README-INSTALACION-COLLECTOR.txt
 
       - name: Publish GitHub pre-release
-        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/fix/collector-interactive-menu-rc4' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/fix/collector-source-setup-rc5' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || env.AIVA_RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
-          name: AIVA Collector Discovery RC4
+          name: AIVA Collector Source Setup RC5
           prerelease: true
           draft: false
           fail_on_unmatched_files: true
           body: |
-            # AIVA Collector Discovery RC4
+            # AIVA Collector Source Setup RC5
 
-            Pre-release para validar el menu interactivo del Collector en Windows.
+            Pre-release para validar la configuracion guiada de fuentes del Collector en Windows.
 
             Incluye:
 
             * `aiva-collector.exe` abre un menu visible al ejecutarlo sin argumentos;
+            * opcion guiada `Configurar o cambiar fuente`;
+            * carpeta predeterminada administrada por AIVA;
+            * carpeta manual o detectada en modo solo lectura, sin mover ni borrar originales;
+            * opcion para ver la fuente activa y cantidad de CSV/XLSX disponibles;
+            * prueba repetible sin enviar ni alterar la deduplicacion;
+            * configuracion canonica unificada en `config.local.json`;
+            * migracion automatica desde `config.windows.json` de RC4;
             * acceso directo principal `AIVA Collector` en el menu Inicio;
             * `Procesar ahora` mantiene visible el resultado y los errores;
             * ejecucion automatica silenciosa con `aiva-collector-background.exe`;
@@ -229,8 +271,8 @@ jobs:
 
             No incluye todavia:
 
-            * FASE 6.4C;
-            * sync automatico desde fuente confirmada;
+            * flujo completo Admin/backend de FASE 6.4C;
+            * conectores API o lectura real de bases locales;
             * prueba fisica final en la PC de Federico.
 
             Seguridad:
@@ -241,16 +283,18 @@ jobs:
 
             Estado:
 
-            * RC4 / pre-release.
-            * El background silencioso de RC3 ya fue validado fisicamente por Federico.
-            * Pendiente de validar fisicamente el menu interactivo de RC4.
+            * RC5 / pre-release.
+            * El background silencioso y el menu RC4 ya fueron validados fisicamente por Federico.
+            * Pendiente de validar fisicamente la configuracion de fuente de RC5.
 
             Validacion esperada:
 
-            * instalar sobre RC3/INSTALADOR 2.5;
+            * instalar sobre RC4 o desde cero;
             * abrir `AIVA Collector` y comprobar que el menu permanece visible;
-            * ejecutar `Procesar ahora` y leer el resultado sin que la ventana se cierre;
+            * configurar la carpeta `C:\Ventas` o la carpeta predeterminada;
+            * ejecutar `Probar fuente sin enviar` y luego `Procesar ahora`;
             * confirmar que se conserva activacion y ProgramData;
+            * confirmar que la fuente elegida sigue activa despues de reiniciar;
             * confirmar que la tarea usa `aiva-collector-background.exe`;
             * revisar logs y estado luego del inicio de sesion.
           files: |

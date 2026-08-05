@@ -55,8 +55,8 @@ def standard_config_path() -> Path:
         return Path(override)
     base_override = os.getenv("AIVA_COLLECTOR_STANDARD_DIR")
     if base_override:
-        return Path(base_override) / "config.windows.json"
-    return collector_data_dir() / "config.windows.json"
+        return Path(base_override) / "config.local.json"
+    return collector_data_dir() / "config.local.json"
 
 
 def installed_config_dirs(*, exe_dir: Path | None = None) -> list[Path]:
@@ -147,6 +147,11 @@ def _has_placeholder(data: dict[str, Any], path: Path) -> bool:
     return any(item in text for item in PLACEHOLDERS)
 
 
+def _identity_has_placeholder(data: dict[str, Any]) -> bool:
+    text = " ".join(str(data.get(key, "")) for key in ("backend_url", "commerce_id", "collector_id")).lower()
+    return any(item in text for item in PLACEHOLDERS)
+
+
 def _path_contains(path: Path, needles: tuple[str, ...]) -> bool:
     lowered = str(path).lower()
     return any(needle in lowered for needle in needles)
@@ -166,7 +171,8 @@ def score_config_candidate(path: Path) -> ConfigCandidate:
     has_commerce = _value_present(data, "commerce_id")
     has_collector = _value_present(data, "collector_id")
     has_token = config_has_token(data)
-    valid = has_backend and has_commerce and has_collector
+    has_placeholder = _has_placeholder(data, path)
+    valid = has_backend and has_commerce and has_collector and not _identity_has_placeholder(data)
     score = 0.0
     if has_backend:
         score += 30
@@ -183,7 +189,7 @@ def score_config_candidate(path: Path) -> ConfigCandidate:
     lowered = str(path).lower()
     if any(word in lowered for word in ("example", "template", "sample")):
         score -= 50
-    if _has_placeholder(data, path):
+    if has_placeholder:
         score -= 40
     score += min(max((modified_at or 0.0) / 1_000_000_000, 0.0), 3.0)
     reason = "valid" if valid else "missing_required_fields"
@@ -219,7 +225,7 @@ def migrate_config_to_standard_location(source: Path, *, standard_path: Path | N
         backup_dir = standard.parent / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = backup_dir / f"config.windows.{stamp}.json"
+        backup = backup_dir / f"config.previous.{stamp}.json"
         shutil.copy2(standard, backup)
     else:
         backup = None
@@ -248,13 +254,24 @@ def resolve_runtime_config(
     search_dirs: list[Path] | None = None,
 ) -> RuntimeConfigResult:
     if config_arg:
-        config = load_config(config_arg)
-        return RuntimeConfigResult(
-            config=config,
-            selected_path=config.config_path,
-            standard_path=standard_config_path(),
-            candidates=[score_config_candidate(config.config_path)],
-        )
+        requested = Path(config_arg)
+        try:
+            config = load_config(requested)
+        except ConfigError:
+            # La tarea de Windows usa siempre la ruta canonica. Si una version
+            # anterior dejo solo config.windows.json, permitimos que el mismo
+            # arranque la encuentre y la migre sin perder la activacion.
+            if requested.resolve() != standard_config_path().resolve():
+                raise
+        else:
+            candidate = score_config_candidate(config.config_path)
+            if requested.resolve() != standard_config_path().resolve() or candidate.valid:
+                return RuntimeConfigResult(
+                    config=config,
+                    selected_path=config.config_path,
+                    standard_path=standard_config_path(),
+                    candidates=[candidate],
+                )
     env_config = os.getenv("AIVA_COLLECTOR_CONFIG")
     if env_config:
         config = load_config(env_config)

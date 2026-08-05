@@ -36,15 +36,18 @@ C:\AIVA_Comercio\config.local.json
 
 La base sale de `windows/config.windows.example.json`. Si el archivo ya existe, no lo pisa.
 
-El instalador RC4 conserva `C:\ProgramData\AIVA\Collector`, instala la tarea automatica silenciosa con `aiva-collector-background.exe` y migra automaticamente una configuracion previa valida si corresponde. Al abrir `aiva-collector.exe` sin argumentos muestra un menu interactivo que permanece visible. Los comandos del EXE resuelven el token desde entorno, config instalada heredada o token protegido por activacion, sin imprimirlo.
+El instalador RC5 conserva `C:\ProgramData\AIVA\Collector`, instala la tarea automatica silenciosa con `aiva-collector-background.exe` y migra automaticamente `config.windows.json` de RC4 a la ruta canonica `config.local.json`. Al abrir `aiva-collector.exe` sin argumentos muestra un menu interactivo que permanece visible. Los comandos del EXE resuelven el token desde entorno, config instalada heredada o token protegido por activacion, sin imprimirlo.
 
-La tarea programada creada por RC4 usa el comando `run-auto`, no recibe token por argumentos, no ejecuta discovery automatico repetido y reemplaza solamente tareas conocidas anteriores: `AIVA Collector`, `AIVA Collector Scheduled` y `AIVA Collector Auto`.
+La tarea programada creada por RC5 usa el comando `run-auto`, no recibe token por argumentos, no ejecuta discovery automatico repetido y reemplaza solamente tareas conocidas anteriores: `AIVA Collector`, `AIVA Collector Scheduled` y `AIVA Collector Auto`.
+
+La opcion `Configurar o cambiar fuente` permite usar la carpeta administrada por AIVA, pegar una ruta manual o elegir una carpeta detectada. Las carpetas externas quedan en modo solo lectura: el Collector no mueve ni borra sus archivos.
 
 ## Accesos directos
 
 El menu inicio incluye:
 
 - AIVA Collector
+- AIVA Collector - Configurar fuente
 - AIVA Collector - Procesar ahora
 - AIVA Collector - Validar configuracion
 - AIVA Collector - Prueba sin enviar
