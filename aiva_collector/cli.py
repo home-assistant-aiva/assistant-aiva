@@ -56,7 +56,7 @@ from .validation import validate_normalized_data
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.6rc3"
+DEFAULT_COLLECTOR_VERSION = "0.2.6rc4"
 
 
 def default_config_path() -> str | None:
@@ -1200,9 +1200,83 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _pause_interactive() -> None:
+    try:
+        input("\nPresiona Enter para volver al menu...")
+    except (EOFError, KeyboardInterrupt):
+        print()
+
+
+def interactive_menu() -> int:
+    options: dict[str, tuple[str, list[str]]] = {
+        "1": ("Procesar ahora", ["run-auto"]),
+        "2": ("Estado de conexion", ["status"]),
+        "3": ("Estado de cola", ["queue-status"]),
+        "4": ("Reintentar pendientes", ["retry-pending"]),
+        "5": ("Detectar fuentes sin enviar", ["discover", "--dry-run"]),
+        "6": ("Reportar fuentes detectadas", ["discover", "--report"]),
+        "7": ("Diagnosticar configuracion", ["diagnose-config"]),
+        "8": ("Activar Collector", ["activate", "--install-task"]),
+    }
+
+    while True:
+        print()
+        print(f"AIVA Collector {DEFAULT_COLLECTOR_VERSION}")
+        print("=" * 32)
+        for key, (label, _command) in options.items():
+            print(f"{key}. {label}")
+        print("0. Salir")
+
+        try:
+            choice = input("\nElegi una opcion: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nCerrando AIVA Collector.")
+            return 0
+
+        if choice == "0":
+            print("Cerrando AIVA Collector.")
+            return 0
+        selected = options.get(choice)
+        if selected is None:
+            print("Opcion invalida.")
+            _pause_interactive()
+            continue
+
+        label, command = selected
+        if choice == "6":
+            try:
+                confirmation = input(
+                    "Esta opcion enviara metadata segura de las fuentes detectadas. "
+                    "Escribi DETECTAR para continuar: "
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                confirmation = ""
+            if confirmation.upper() != "DETECTAR":
+                print("Operacion cancelada. No se envio nada.")
+                _pause_interactive()
+                continue
+
+        print(f"\n{label}\n{'-' * len(label)}")
+        try:
+            exit_code = main(command)
+        except KeyboardInterrupt:
+            print("\nOperacion cancelada.", file=sys.stderr)
+            exit_code = 130
+        except Exception as exc:
+            logging.exception("interactive command failed: %s", command[0])
+            print(f"Error inesperado: {exc}", file=sys.stderr)
+            exit_code = 2
+        if exit_code != 0:
+            print(f"La operacion termino con error (codigo {exit_code}).", file=sys.stderr)
+        _pause_interactive()
+
+
 def main(argv: list[str] | None = None) -> int:
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if not effective_argv:
+        return interactive_menu()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
     try:
         return int(args.func(args))
     except CollectorError as exc:

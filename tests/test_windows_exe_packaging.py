@@ -22,8 +22,9 @@ def test_inno_script_is_safe_and_preserves_existing_config():
     verify_windows_exe_package.assert_inno_safe()
     content = Path("packaging/inno/aiva_collector_setup.iss").read_text(encoding="utf-8")
     assert "onlyifdoesntexist" in content
-    assert "AIVA-Collector-Setup-v0.2.6-silent-rc3" in content
+    assert "AIVA-Collector-Setup-v0.2.6-interactive-rc4" in content
     assert "aiva-collector-background.exe" in content
+    assert 'Name: "{group}\\AIVA Collector"; Filename: "{app}\\{#AppExeName}"' in content
     assert 'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated' in content
     assert "run_discovery_dry.bat" not in content.split("[Run]", maxsplit=1)[1]
 
@@ -37,6 +38,10 @@ def test_installer_runtime_wrappers_are_safe():
     assert "<arguments>run-auto --config \"%aiva_root%\\config.local.json\"</arguments>" in xml_content
     assert "run_auto.bat" not in xml_content
     assert "powershell" not in xml_content
+    run_auto = Path("packaging/windows_runtime/run_auto.bat").read_text(encoding="utf-8").lower()
+    assert "aiva-collector.exe" in run_auto
+    assert "aiva-collector-background.exe" not in run_auto
+    assert "pause" in run_auto
 
 
 def test_verify_without_artifacts_writes_manifest(tmp_path, monkeypatch):

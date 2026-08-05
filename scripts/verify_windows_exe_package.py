@@ -27,6 +27,8 @@ VERSION = read_version()
 
 
 def public_asset_version(version: str) -> str:
+    if version == "0.2.6rc4":
+        return "0.2.6-interactive-rc4"
     if version == "0.2.6rc3":
         return "0.2.6-silent-rc3"
     if version == "0.2.6rc2":
@@ -195,6 +197,11 @@ def assert_runtime_wrappers_safe(root: Path = ROOT) -> None:
             for forbidden in ("curl", "invoke-webrequest", "invoke-restmethod", "--send"):
                 if forbidden in lowered:
                     raise VerifyError(f"Diagnostico contiene accion prohibida: {forbidden}")
+        if path.name == "run_auto.bat":
+            if "pause" not in lowered:
+                raise VerifyError("run_auto.bat debe mantener visible el resultado manual")
+            if "aiva-collector-background.exe" in lowered:
+                raise VerifyError("run_auto.bat manual no debe usar el runner background")
     run_send = (root / "packaging" / "windows_runtime" / "run_send.bat").read_text(encoding="utf-8")
     token_check = run_send.find('if "%AIVA_COLLECTOR_TOKEN%"==""')
     prompt = run_send.find("Escribi ENVIAR")

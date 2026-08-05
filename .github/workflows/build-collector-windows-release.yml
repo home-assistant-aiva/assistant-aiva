@@ -6,27 +6,28 @@ on:
       release_tag:
         description: "Release tag to publish"
         required: true
-        default: "v0.2.6-collector-discovery-rc3"
+        default: "v0.2.6-collector-discovery-rc4"
       publish_release:
         description: "Publish GitHub pre-release"
         required: true
         type: boolean
         default: false
   push:
+    branches:
+      - "fix/collector-interactive-menu-rc4"
     tags:
-      - "v0.2.6-collector-discovery-rc3"
-      - "v0.2.*collector*"
-      - "collector-v*"
+      - "v0.2.6-collector-discovery-rc4"
 
 permissions:
   contents: write
 
 env:
-  AIVA_RELEASE_VERSION: "0.2.6-silent-rc3"
-  AIVA_RELEASE_TITLE: "AIVA Collector Discovery RC3"
-  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-silent-rc3.exe"
-  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.6rc3.manifest.json"
-  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-silent-rc3.zip"
+  AIVA_RELEASE_TAG: "v0.2.6-collector-discovery-rc4"
+  AIVA_RELEASE_VERSION: "0.2.6-interactive-rc4"
+  AIVA_RELEASE_TITLE: "AIVA Collector Discovery RC4"
+  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-interactive-rc4.exe"
+  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.6rc4.manifest.json"
+  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-interactive-rc4.zip"
 
 jobs:
   build-release:
@@ -71,6 +72,14 @@ jobs:
           .\dist\aiva-collector.exe activate --help
           .\dist\aiva-collector.exe run-auto --help
           .\dist\aiva-collector.exe discover --help
+
+      - name: Verify interactive executable stays open without arguments
+        shell: pwsh
+        run: |
+          $menuOutput = "0" | .\dist\aiva-collector.exe 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "Interactive executable failed with exit code $LASTEXITCODE" }
+          if (-not ($menuOutput -match "Procesar ahora")) { throw "Interactive menu was not displayed" }
+          if (-not ($menuOutput -match "Cerrando AIVA Collector")) { throw "Interactive menu did not exit cleanly" }
 
       - name: Create demo config for executable validation
         shell: pwsh
@@ -189,21 +198,25 @@ jobs:
             dist/README-INSTALACION-COLLECTOR.txt
 
       - name: Publish GitHub pre-release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/fix/collector-interactive-menu-rc4' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          name: AIVA Collector Discovery RC3
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || env.AIVA_RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: AIVA Collector Discovery RC4
           prerelease: true
           draft: false
           fail_on_unmatched_files: true
           body: |
-            # AIVA Collector Discovery RC3
+            # AIVA Collector Discovery RC4
 
-            Pre-release para validar el instalador Windows silencioso RC3 del Collector.
+            Pre-release para validar el menu interactivo del Collector en Windows.
 
             Incluye:
 
+            * `aiva-collector.exe` abre un menu visible al ejecutarlo sin argumentos;
+            * acceso directo principal `AIVA Collector` en el menu Inicio;
+            * `Procesar ahora` mantiene visible el resultado y los errores;
             * ejecucion automatica silenciosa con `aiva-collector-background.exe`;
             * runner background sin consola y salida dirigida a logs con rotacion;
             * datos, logs, estado, cola y configuracion en ProgramData;
@@ -228,12 +241,15 @@ jobs:
 
             Estado:
 
-            * RC3 / pre-release.
-            * Pendiente de prueba Windows fisica final por Federico.
+            * RC4 / pre-release.
+            * El background silencioso de RC3 ya fue validado fisicamente por Federico.
+            * Pendiente de validar fisicamente el menu interactivo de RC4.
 
             Validacion esperada:
 
-            * instalar sobre INSTALADOR 2.5/RC anterior;
+            * instalar sobre RC3/INSTALADOR 2.5;
+            * abrir `AIVA Collector` y comprobar que el menu permanece visible;
+            * ejecutar `Procesar ahora` y leer el resultado sin que la ventana se cierre;
             * confirmar que se conserva activacion y ProgramData;
             * confirmar que la tarea usa `aiva-collector-background.exe`;
             * revisar logs y estado luego del inicio de sesion.

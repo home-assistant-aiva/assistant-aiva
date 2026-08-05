@@ -1,5 +1,5 @@
 #define AppName "AIVA Collector"
-#define AppVersion "0.2.6rc3"
+#define AppVersion "0.2.6rc4"
 #define AppPublisher "AIVA Comercial"
 #define AppExeName "aiva-collector.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\AIVA Collector
 DefaultGroupName=AIVA Collector
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
-OutputBaseFilename=AIVA-Collector-Setup-v0.2.6-silent-rc3
+OutputBaseFilename=AIVA-Collector-Setup-v0.2.6-interactive-rc4
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -47,6 +47,7 @@ Source: "..\..\docs\aiva_collector_windows_installer.md"; DestDir: "{app}"; Flag
 Source: "..\..\docs\aiva_collector_windows_exe.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
+Name: "{group}\AIVA Collector"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Activar"; Filename: "{app}\activate.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Abrir carpeta de entrada"; Filename: "{app}\open_input_folder.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Prueba sin enviar"; Filename: "{app}\run_dry.bat"; WorkingDir: "{app}"
@@ -62,7 +63,7 @@ Name: "{group}\AIVA Collector - Instalar tarea automatica"; Filename: "{app}\ins
 Name: "{group}\AIVA Collector - Quitar tarea automatica"; Filename: "{app}\uninstall_scheduled_task.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Validar configuracion"; Filename: "{app}\run_validate.bat"; WorkingDir: "{app}"
 Name: "{group}\AIVA Collector - Abrir resultados"; Filename: "{app}\open_output_folder.bat"; WorkingDir: "{app}"
-Name: "{autodesktop}\AIVA Collector - Activar"; Filename: "{app}\activate.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\AIVA Collector"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Crear acceso directo de validacion en el escritorio"; GroupDescription: "Accesos directos adicionales:"; Flags: unchecked

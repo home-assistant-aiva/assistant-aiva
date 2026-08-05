@@ -36,14 +36,16 @@ C:\AIVA_Comercio\config.local.json
 
 La base sale de `windows/config.windows.example.json`. Si el archivo ya existe, no lo pisa.
 
-El instalador RC3 conserva `C:\ProgramData\AIVA\Collector`, instala la tarea automatica silenciosa con `aiva-collector-background.exe` y migra automaticamente una configuracion previa valida si corresponde. Los comandos del EXE resuelven el token desde entorno, config instalada heredada o token protegido por activacion, sin imprimirlo.
+El instalador RC4 conserva `C:\ProgramData\AIVA\Collector`, instala la tarea automatica silenciosa con `aiva-collector-background.exe` y migra automaticamente una configuracion previa valida si corresponde. Al abrir `aiva-collector.exe` sin argumentos muestra un menu interactivo que permanece visible. Los comandos del EXE resuelven el token desde entorno, config instalada heredada o token protegido por activacion, sin imprimirlo.
 
-La tarea programada creada por RC3 usa el comando `run-auto`, no recibe token por argumentos, no ejecuta discovery automatico repetido y reemplaza solamente tareas conocidas anteriores: `AIVA Collector`, `AIVA Collector Scheduled` y `AIVA Collector Auto`.
+La tarea programada creada por RC4 usa el comando `run-auto`, no recibe token por argumentos, no ejecuta discovery automatico repetido y reemplaza solamente tareas conocidas anteriores: `AIVA Collector`, `AIVA Collector Scheduled` y `AIVA Collector Auto`.
 
 ## Accesos directos
 
 El menu inicio incluye:
 
+- AIVA Collector
+- AIVA Collector - Procesar ahora
 - AIVA Collector - Validar configuracion
 - AIVA Collector - Prueba sin enviar
 - AIVA Collector - Detectar fuentes sin enviar

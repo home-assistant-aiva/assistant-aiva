@@ -3,7 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from aiva_collector.cli import DEFAULT_BACKEND_URL, DEFAULT_COLLECTOR_VERSION, _single_run_lock, build_parser, main, safe_display_path
+from aiva_collector.cli import (
+    DEFAULT_BACKEND_URL,
+    DEFAULT_COLLECTOR_VERSION,
+    _single_run_lock,
+    build_parser,
+    interactive_menu,
+    main,
+    safe_display_path,
+)
 from aiva_collector.config import CollectorConfig
 
 
@@ -73,6 +81,47 @@ def test_cli_exposes_discover_and_diagnose_help():
         parser.parse_args(["diagnose-config", "--help"])
     assert discover.value.code == 0
     assert diagnose.value.code == 0
+
+
+def test_cli_without_args_opens_interactive_menu(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "0")
+
+    code = main([])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert f"AIVA Collector {DEFAULT_COLLECTOR_VERSION}" in out
+    assert "1. Procesar ahora" in out
+    assert "Cerrando AIVA Collector." in out
+
+
+def test_interactive_menu_processes_now_and_keeps_result_visible(monkeypatch, capsys):
+    import aiva_collector.cli as cli
+
+    commands = []
+    answers = iter(["1", "", "0"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr(cli, "main", lambda command: commands.append(command) or 0)
+
+    code = interactive_menu()
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert commands == [["run-auto"]]
+    assert "Procesar ahora" in out
+
+
+def test_interactive_menu_requires_confirmation_before_reporting(monkeypatch, capsys):
+    import aiva_collector.cli as cli
+
+    commands = []
+    answers = iter(["6", "NO", "", "0"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr(cli, "main", lambda command: commands.append(command) or 0)
+
+    assert interactive_menu() == 0
+    assert commands == []
+    assert "Operacion cancelada. No se envio nada." in capsys.readouterr().out
 
 
 def test_run_auto_without_files_exits_ok(tmp_path, monkeypatch, capsys):

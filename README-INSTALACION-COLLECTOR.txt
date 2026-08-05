@@ -1,4 +1,4 @@
-AIVA Collector Discovery RC3
+AIVA Collector Discovery RC4
 ===================================
 
 Esta version es candidata / pre-release. Usar primero en ambiente controlado.
@@ -6,7 +6,7 @@ Esta version es candidata / pre-release. Usar primero en ambiente controlado.
 Instalacion
 -----------
 
-1. Instalar AIVA Collector con AIVA-Collector-Setup-v0.2.6-silent-rc3.exe.
+1. Instalar AIVA Collector con AIVA-Collector-Setup-v0.2.6-interactive-rc4.exe.
 
 Actualizacion desde instalador 2.5/RC anteriores:
 - El instalador conserva %PROGRAMDATA%\AIVA\Collector.
@@ -54,13 +54,16 @@ Incluye
 - Comando local dry-run.
 - Reporte de metadata segura al backend de Fuentes de datos.
 
-Notas RC3
+Notas RC4
 ---------
 
+- Al abrir aiva-collector.exe sin argumentos aparece un menu interactivo y la ventana permanece abierta.
+- El acceso "AIVA Collector - Procesar ahora" mantiene visible el resultado hasta presionar una tecla.
 - Ejecucion automatica silenciosa mediante aiva-collector-background.exe.
 - Salida del runner background dirigida a logs en ProgramData con rotacion.
 - Costo faltante tratado como null, sin margen inventado.
-- Pendiente de prueba fisica final por Federico.
+- El background silencioso de RC3 fue validado fisicamente por Federico.
+- Pendiente de prueba fisica del menu interactivo RC4 por Federico.
 - FASE 6.4C todavia no incluida.
 
 Proximo paso
