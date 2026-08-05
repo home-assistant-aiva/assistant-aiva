@@ -148,7 +148,10 @@ jobs:
         run: |
           $migrationRoot = Join-Path $env:RUNNER_TEMP "aiva_config_migration"
           New-Item -ItemType Directory -Force -Path $migrationRoot | Out-Null
-          Copy-Item -LiteralPath "$env:AIVA_DEMO_CONFIG" -Destination (Join-Path $migrationRoot "config.windows.json") -Force
+          $legacy = Get-Content -Raw -LiteralPath "$env:AIVA_DEMO_CONFIG" | ConvertFrom-Json
+          $legacy.commerce_id = "commerce_rc4_migration_test"
+          $legacy.collector_id = "collector_rc4_migration_test"
+          $legacy | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $migrationRoot "config.windows.json")
           $env:AIVA_COLLECTOR_STANDARD_DIR = $migrationRoot
           $env:AIVA_COLLECTOR_CONFIG_SEARCH_DIRS = $migrationRoot
           .\dist\aiva-collector-background.exe prepare-config
