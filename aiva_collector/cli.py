@@ -56,7 +56,7 @@ from .validation import validate_normalized_data
 
 WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.6rc3"
+DEFAULT_COLLECTOR_VERSION = "0.2.6rc6"
 
 
 def default_config_path() -> str | None:

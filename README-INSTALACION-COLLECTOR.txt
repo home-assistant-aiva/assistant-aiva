@@ -1,4 +1,4 @@
-AIVA Collector Discovery RC3
+AIVA Collector Discovery RC6
 ===================================
 
 Esta version es candidata / pre-release. Usar primero en ambiente controlado.
@@ -6,7 +6,7 @@ Esta version es candidata / pre-release. Usar primero en ambiente controlado.
 Instalacion
 -----------
 
-1. Instalar AIVA Collector con AIVA-Collector-Setup-v0.2.6-silent-rc3.exe.
+1. Instalar AIVA Collector con AIVA-Collector-Setup-v0.2.6-discovery-rc6.exe.
 
 Actualizacion desde instalador 2.5/RC anteriores:
 - El instalador conserva %PROGRAMDATA%\AIVA\Collector.
@@ -54,9 +54,13 @@ Incluye
 - Comando local dry-run.
 - Reporte de metadata segura al backend de Fuentes de datos.
 
-Notas RC3
+Notas RC6
 ---------
 
+- Reporta fuentes detectadas al endpoint seguro del Collector sin X-AIVA-Secret.
+- Usa Authorization Bearer del Collector y X-AIVA-Collector-Id.
+- Reporta la fuente elegida en config como selected_explicit para dejarla activa.
+- Muestra errores HTTP concretos ante 401, 403, 404 y 422.
 - Ejecucion automatica silenciosa mediante aiva-collector-background.exe.
 - Salida del runner background dirigida a logs en ProgramData con rotacion.
 - Costo faltante tratado como null, sin margen inventado.

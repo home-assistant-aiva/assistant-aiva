@@ -6,7 +6,7 @@ on:
       release_tag:
         description: "Release tag to publish"
         required: true
-        default: "v0.2.6-collector-discovery-rc3"
+        default: "v0.2.6-collector-discovery-rc6"
       publish_release:
         description: "Publish GitHub pre-release"
         required: true
@@ -14,7 +14,7 @@ on:
         default: false
   push:
     tags:
-      - "v0.2.6-collector-discovery-rc3"
+      - "v0.2.6-collector-discovery-rc6"
       - "v0.2.*collector*"
       - "collector-v*"
 
@@ -22,11 +22,11 @@ permissions:
   contents: write
 
 env:
-  AIVA_RELEASE_VERSION: "0.2.6-silent-rc3"
-  AIVA_RELEASE_TITLE: "AIVA Collector Discovery RC3"
-  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-silent-rc3.exe"
-  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.6rc3.manifest.json"
-  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-silent-rc3.zip"
+  AIVA_RELEASE_VERSION: "0.2.6-discovery-rc6"
+  AIVA_RELEASE_TITLE: "AIVA Collector Discovery RC6"
+  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-discovery-rc6.exe"
+  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.6rc6.manifest.json"
+  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-discovery-rc6.zip"
 
 jobs:
   build-release:
@@ -193,17 +193,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          name: AIVA Collector Discovery RC3
+          name: AIVA Collector Discovery RC6
           prerelease: true
           draft: false
           fail_on_unmatched_files: true
           body: |
-            # AIVA Collector Discovery RC3
+            # AIVA Collector Discovery RC6
 
-            Pre-release para validar el instalador Windows silencioso RC3 del Collector.
+            Pre-release para validar RC6 end-to-end de deteccion de fuentes del Collector.
 
             Incluye:
 
+            * reporte de discoveries por `POST /commerce/collector/data-source-discoveries`;
+            * autenticacion con `Authorization: Bearer <collector_token>` y `X-AIVA-Collector-Id`;
+            * sin dependencia de `X-AIVA-Secret` en PCs cliente;
+            * reporte de fuente seleccionada en config como `selected_explicit`;
+            * errores HTTP concretos para 401, 403, 404 y 422;
             * ejecucion automatica silenciosa con `aiva-collector-background.exe`;
             * runner background sin consola y salida dirigida a logs con rotacion;
             * datos, logs, estado, cola y configuracion en ProgramData;
@@ -228,7 +233,7 @@ jobs:
 
             Estado:
 
-            * RC3 / pre-release.
+            * RC6 / pre-release.
             * Pendiente de prueba Windows fisica final por Federico.
 
             Validacion esperada:

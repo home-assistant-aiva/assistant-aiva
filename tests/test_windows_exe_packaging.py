@@ -22,7 +22,7 @@ def test_inno_script_is_safe_and_preserves_existing_config():
     verify_windows_exe_package.assert_inno_safe()
     content = Path("packaging/inno/aiva_collector_setup.iss").read_text(encoding="utf-8")
     assert "onlyifdoesntexist" in content
-    assert "AIVA-Collector-Setup-v0.2.6-silent-rc3" in content
+    assert "AIVA-Collector-Setup-v0.2.6-discovery-rc6" in content
     assert "aiva-collector-background.exe" in content
     assert 'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated' in content
     assert "run_discovery_dry.bat" not in content.split("[Run]", maxsplit=1)[1]
