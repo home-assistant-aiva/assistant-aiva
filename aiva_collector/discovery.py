@@ -224,6 +224,7 @@ class DiscoveryReportResult:
     duplicate: int = 0
     queued: int = 0
     errors: int = 0
+    error_details: list[str] = field(default_factory=list)
 
 
 def _utc_from_timestamp(value: float) -> str:
@@ -633,6 +634,7 @@ class DiscoveryReporter:
             result.duplicate += one.duplicate
             result.queued += one.queued
             result.errors += one.errors
+            result.error_details.extend(one.error_details)
         return result
 
     def report_one(self, payload: dict[str, Any]) -> DiscoveryReportResult:
@@ -651,6 +653,7 @@ class DiscoveryReporter:
                 return result
             logging.error("Discovery backend error: %s", exc)
             result.errors += 1
+            result.error_details.append(str(exc))
         return result
 
     def queue_if_offline(self, payload: dict[str, Any], last_error: str) -> None:

@@ -97,6 +97,33 @@ def test_post_status_uses_backend_error_message_field(monkeypatch):
     assert "message" not in captured["kwargs"]["json"]
 
 
+def test_post_data_source_discovery_uses_collector_endpoint_and_auth(monkeypatch):
+    monkeypatch.setenv("AIVA_COLLECTOR_TOKEN", "super-secret-token")
+    config = load_config("configs/example_config.json")
+    captured = {}
+
+    class Response:
+        status_code = 201
+        content = b'{"ok": true, "discovery": {"discovery_id": "dsd-1"}}'
+
+        def json(self):
+            return {"ok": True, "discovery": {"discovery_id": "dsd-1"}}
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return Response()
+
+    monkeypatch.setattr("aiva_collector.client.requests.post", fake_post)
+    response = CollectorClient(config).post_data_source_discovery({"source_type": "watched_folder", "name": "Ventas", "raw_discovery": {"token": "secret"}})
+
+    assert response["_http_status_code"] == 201
+    assert captured["url"].endswith("/commerce/collector/data-source-discoveries")
+    assert captured["kwargs"]["headers"]["Authorization"] == "Bearer super-secret-token"
+    assert "X-AIVA-Secret" not in captured["kwargs"]["headers"]
+    assert "raw_discovery" not in captured["kwargs"]["json"]
+
+
 def test_activate_collector_posts_code_without_printing_token(monkeypatch, capsys):
     captured = {}
 

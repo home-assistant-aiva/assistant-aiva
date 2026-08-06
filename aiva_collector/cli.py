@@ -448,9 +448,49 @@ def cmd_activate(args: argparse.Namespace) -> int:
     print("AIVA Collector activado correctamente.")
     print(f"Config: {config_path}")
     print("Token guardado de forma segura. No se muestra en pantalla.")
+    _run_activation_discovery(config)
     if args.install_task:
         _install_scheduled_task_if_available()
     return 0
+
+
+def _run_activation_discovery(config: CollectorConfig) -> None:
+    try:
+        _report_selected_input_source(config)
+        discovery_config = DiscoveryConfig.from_collector_config(config, dry_run=False, safe_mode=True)
+        scanner = DiscoveryScanner(discovery_config)
+        candidates = scanner.scan()
+        if not candidates:
+            print("Discovery inicial: sin candidatos encontrados.")
+            return
+        result = DiscoveryReporter(config).report_discoveries(candidates, scanner)
+        print(
+            "Discovery inicial: "
+            f"candidatos={len(candidates)} enviados={result.sent} duplicados={result.duplicate} "
+            f"encolados={result.queued} errores={result.errors}"
+        )
+        for detail in result.error_details[:3]:
+            print(f"Discovery inicial error: {detail}", file=sys.stderr)
+    except Exception as exc:
+        logging.warning("activation discovery failed: %s", exc)
+        print(f"Discovery inicial no completado: {exc}", file=sys.stderr)
+
+
+def _report_selected_input_source(config: CollectorConfig) -> None:
+    try:
+        selected_path = config.path("input_dir")
+    except ConfigError:
+        return
+    payload = {
+        "source_type": "watched_folder",
+        "name": "Fuente seleccionada en Collector",
+        "detected_path": str(selected_path),
+        "confidence": 1.0,
+        "capabilities": {"csv": True, "xlsx": True, "read_only": True},
+        "sample_metadata": {"selected_explicit": True, "source": "collector_config"},
+        "selected_explicit": True,
+    }
+    CollectorClient(config).post_data_source_discovery(payload)
 
 
 def _collect_auto(
@@ -1087,6 +1127,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
             f"intentados={result.attempted} enviados={result.sent} duplicados={result.duplicate} "
             f"encolados={result.queued} errores={result.errors}"
         )
+        for detail in result.error_details[:5]:
+            print(f"Discovery error: {detail}", file=sys.stderr)
     return 0 if result.errors == 0 else 2
 
 

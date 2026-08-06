@@ -23,18 +23,6 @@ def _headers(config: CollectorConfig, idem_key: str | None = None) -> dict[str, 
     return headers
 
 
-def _admin_headers(config: CollectorConfig) -> dict[str, str]:
-    secret_env = str(config.raw.get("discovery_admin_secret_env", "") or config.raw.get("admin_secret_env", "")).strip()
-    if secret_env:
-        import os
-
-        secret = os.getenv(secret_env)
-        if not secret:
-            raise BackendError(f"Falta secret de discovery: configurar {secret_env}")
-        return {"X-AIVA-Secret": secret, "X-AIVA-Collector-Id": config.collector_id}
-    return _headers(config)
-
-
 def _safe_error(response: requests.Response) -> BackendError:
     try:
         detail = response.json()
@@ -56,13 +44,17 @@ def _safe_error(response: requests.Response) -> BackendError:
     elif status == 400:
         message = f"Solicitud invalida al backend: {detail}"
     elif status == 401:
-        message = "Token invalido o no autorizado"
+        message = f"Backend respondio HTTP 401: token invalido o no autorizado ({detail})"
     elif status == 402:
         message = "Comercio sin pago o suspendido"
     elif status == 403:
-        message = "Comercio inactivo o deshabilitado"
+        message = f"Backend respondio HTTP 403: comercio inactivo, deshabilitado o sin permiso ({detail})"
+    elif status == 404:
+        message = f"Backend respondio HTTP 404: endpoint o recurso no encontrado ({detail})"
     elif status == 409:
         message = "Summary duplicado (duplicate_summary)"
+    elif status == 422:
+        message = f"Backend respondio HTTP 422: payload invalido ({detail})"
     else:
         message = f"Backend respondio HTTP {status}: {detail}"
     return BackendError(message, status_code=status)
@@ -163,9 +155,9 @@ class CollectorClient:
         request_payload.pop("raw_discovery", None)
         try:
             response = requests.post(
-                f"{self.config.backend_url}/admin/commerce/businesses/{self.config.commerce_id}/data-source-discoveries",
+                f"{self.config.backend_url}/commerce/collector/data-source-discoveries",
                 json=request_payload,
-                headers=_admin_headers(self.config),
+                headers=_headers(self.config),
                 timeout=self.timeout,
             )
         except RequestException as exc:

@@ -280,12 +280,66 @@ def test_activate_empty_backend_url_uses_default(monkeypatch, tmp_path):
     monkeypatch.setattr("aiva_collector.cli.activate_collector", fake_activate)
     monkeypatch.setattr("aiva_collector.cli.save_token", lambda *args, **kwargs: None)
     monkeypatch.setattr("aiva_collector.cli.CollectorClient.service_status", lambda self: {})
+    monkeypatch.setattr("aiva_collector.cli._run_activation_discovery", lambda config: None)
 
     code = main(["activate", "--config", str(tmp_path / "config.json")])
 
     assert code == 0
     assert captured["kwargs"]["backend_url"] == DEFAULT_BACKEND_URL
     assert captured["kwargs"]["collector_version"] == DEFAULT_COLLECTOR_VERSION
+
+
+def test_activate_runs_initial_discovery(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr("aiva_collector.cli.stable_machine_id", lambda: "machine-test")
+    monkeypatch.setattr("aiva_collector.cli.socket.gethostname", lambda: "host-test")
+    monkeypatch.setattr(
+        "aiva_collector.cli.activate_collector",
+        lambda **kwargs: {
+            "commerce_id": "commerce-1",
+            "collector_id": "collector-1",
+            "collector_token": "aiva_col_secret",
+            "collector_version": "0.2.1",
+            "config_defaults": {
+                "input_dir": str(tmp_path / "input"),
+                "processed_dir": str(tmp_path / "processed"),
+                "error_dir": str(tmp_path / "error"),
+                "output_dir": str(tmp_path / "output"),
+                "state_dir": str(tmp_path / "state"),
+                "log_file": str(tmp_path / "logs" / "aiva_collector.log"),
+                "column_mapping": {"producto_nombre": "producto", "cantidad_vendida": "cantidad", "precio_venta": "precio"},
+            },
+        },
+    )
+    monkeypatch.setattr("aiva_collector.cli.save_token", lambda *args, **kwargs: None)
+    monkeypatch.setattr("aiva_collector.cli.CollectorClient.service_status", lambda self: {})
+    monkeypatch.setattr("aiva_collector.cli._run_activation_discovery", lambda config: calls.append(config.collector_id))
+
+    assert main(["activate", "--backend-url", "http://backend", "--code", "AIVA-8F3K-91QZ", "--config", str(tmp_path / "config.json")]) == 0
+    assert calls == ["collector-1"]
+
+
+def test_selected_input_source_is_reported_as_explicit_active_candidate(monkeypatch, tmp_path):
+    from aiva_collector.cli import _report_selected_input_source
+    from aiva_collector.config import CollectorConfig
+
+    payloads = []
+    config = CollectorConfig(
+        raw={
+            "backend_url": "http://backend",
+            "commerce_id": "commerce-1",
+            "collector_id": "collector-1",
+            "collector_token": "aiva_col_secret",
+            "input_dir": str(tmp_path / "Ventas"),
+        },
+        config_path=tmp_path / "config.json",
+    )
+    monkeypatch.setattr("aiva_collector.cli.CollectorClient.post_data_source_discovery", lambda self, payload: payloads.append(payload) or {"ok": True})
+
+    _report_selected_input_source(config)
+
+    assert payloads[0]["selected_explicit"] is True
+    assert payloads[0]["detected_path"] == str(tmp_path / "Ventas")
 
 
 def test_activate_detects_code_pasted_in_backend_url(monkeypatch, capsys):
