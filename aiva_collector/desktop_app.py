@@ -17,6 +17,7 @@ from .desktop_service import (
     OperationResult,
     activate_installation,
     configure_source_folder,
+    export_diagnostics,
     load_dashboard_snapshot,
     logs_folder,
     open_folder,
@@ -230,6 +231,7 @@ class CollectorApp:
         ttk.Label(footer, textvariable=self.activity_var, style="Muted.TLabel").pack(side="left")
         ttk.Button(footer, text="Abrir datos", style="Link.TButton", command=self.open_source_folder).pack(side="right")
         ttk.Button(footer, text="Ver registros", style="Link.TButton", command=self.open_logs).pack(side="right", padx=(0, 8))
+        ttk.Button(footer, text="Exportar diagnóstico", style="Link.TButton", command=self.export_diagnostics).pack(side="right", padx=(0, 8))
 
     def _metric_card(self, parent: ttk.Frame, column: int, heading: str, value: str, detail: str) -> tuple[tk.StringVar, tk.StringVar]:
         frame = tk.Frame(parent, bg=COLORS["surface"], highlightthickness=1, highlightbackground=COLORS["border"], padx=18, pady=15)
@@ -286,7 +288,9 @@ class CollectorApp:
         sync_value, sync_detail = self.sync_card
         sync_value.set(_friendly_time(snapshot.last_run_at))
         sync_detail.set(
-            f"Procesados {snapshot.files_processed} · Enviados {snapshot.summaries_sent} · Pendientes {snapshot.queue_pending}"
+            f"Encontrados {snapshot.files_found} · Elegibles {snapshot.files_eligible} · Omitidos {snapshot.files_skipped} · "
+            f"Procesados {snapshot.files_processed} · Enviados {snapshot.summaries_sent} · Duplicados {snapshot.duplicates} · "
+            f"Pendientes {snapshot.queue_pending} · Rechazados {snapshot.rejected}"
         )
 
         self.connect_button.configure(text="Volver a vincular" if snapshot.token_configured else "Conectar con AIVA")
@@ -379,6 +383,9 @@ class CollectorApp:
         result = open_folder(logs_folder())
         if not result.ok:
             messagebox.showerror(result.title, result.message, parent=self.root)
+
+    def export_diagnostics(self) -> None:
+        self._run_async(export_diagnostics, progress="Preparando diagnostico saneado...")
 
 
 def self_check() -> int:

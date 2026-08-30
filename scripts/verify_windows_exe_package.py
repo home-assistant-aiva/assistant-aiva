@@ -27,8 +27,8 @@ VERSION = read_version()
 
 
 def public_asset_version(version: str) -> str:
-    if version == "0.2.7rc1":
-        return "0.2.7-desktop-rc1"
+    if version in {"0.2.7rc1", "0.2.7rc2"}:
+        return f"0.2.7-desktop-{version[-3:]}"
     if version == "0.2.6rc6":
         return "0.2.6-discovery-rc6"
     if version == "0.2.6rc3":

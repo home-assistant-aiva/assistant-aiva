@@ -25,7 +25,7 @@ def test_inno_script_is_safe_and_preserves_existing_config():
     verify_windows_exe_package.assert_inno_safe()
     content = Path("packaging/inno/aiva_collector_setup.iss").read_text(encoding="utf-8")
     assert "onlyifdoesntexist" in content
-    assert "AIVA-Collector-Setup-v0.2.7-desktop-rc1" in content
+    assert "AIVA-Collector-Setup-v0.2.7-desktop-rc2" in content
     assert "aiva-collector-cli.exe" in content
     assert "aiva-collector-background.exe" in content
     assert 'Name: "{group}\\AIVA Collector"; Filename: "{app}\\{#AppExeName}"' in content

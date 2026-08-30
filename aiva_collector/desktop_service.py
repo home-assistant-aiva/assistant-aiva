@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import sqlite3
 import subprocess
 import sys
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +30,7 @@ from .config import collector_data_dir
 from .config_discovery import resolve_runtime_config, standard_config_path
 from .errors import CollectorError, ConfigError
 from .local_state import local_db_path
+from .file_fingerprint import compute_file_sha256
 from .token_store import save_token
 
 
@@ -56,8 +61,14 @@ class DashboardSnapshot:
     scheduled_task_installed: bool | None
     last_run_at: str | None
     last_result: str | None
+    files_found: int
+    files_eligible: int
+    files_skipped: int
     files_processed: int
     summaries_sent: int
+    duplicates: int
+    rejected: int
+    needs_review: int
     queue_pending: int
     last_error: str | None
 
@@ -143,8 +154,14 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
             scheduled_task_installed=task_installed,
             last_run_at=None,
             last_result=None,
+            files_found=0,
+            files_eligible=0,
+            files_skipped=0,
             files_processed=0,
             summaries_sent=0,
+            duplicates=0,
+            rejected=0,
+            needs_review=0,
             queue_pending=0,
             last_error=str(exc),
         )
@@ -168,7 +185,7 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
 
     if not token_configured:
         state = "setup"
-        title = "Falta activar AIVA Collector"
+        title = "Falta conectar AIVA Collector"
         detail = "Usá un código de activación para conectar este equipo de forma segura."
     elif not source_exists:
         state = "attention"
@@ -206,8 +223,14 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         scheduled_task_installed=task_installed,
         last_run_at=str(auto_state.get("finished_at") or auto_state.get("started_at") or "") or None,
         last_result=last_result,
+        files_found=int(auto_state.get("files_found") or 0),
+        files_eligible=int(auto_state.get("files_eligible") or 0),
+        files_skipped=int(auto_state.get("files_skipped") or 0),
         files_processed=int(auto_state.get("files_processed") or 0),
         summaries_sent=int(auto_state.get("summaries_sent") or 0),
+        duplicates=int(auto_state.get("duplicates") or 0),
+        rejected=int(auto_state.get("rejected") or 0),
+        needs_review=int(auto_state.get("needs_review") or 0),
         queue_pending=pending,
         last_error=last_error or token_error,
     )
@@ -312,15 +335,39 @@ def synchronize_now() -> OperationResult:
         return OperationResult(False, "No se pudo sincronizar", str(exc))
     except Exception as exc:  # pragma: no cover - last-resort desktop boundary
         return OperationResult(False, "No se pudo sincronizar", f"Error interno del Collector: {exc}")
-    if code != 0:
-        return OperationResult(False, "Sincronización con observaciones", "Revisá el estado y el registro de actividad.")
     snapshot = load_dashboard_snapshot()
-    if snapshot.source_files == 0 and snapshot.files_processed == 0:
+    if code != 0:
+        if snapshot.queue_pending:
+            return OperationResult(
+                False,
+                "Archivo pendiente de envío",
+                f"Hay {snapshot.queue_pending} envío(s) pendiente(s). AIVA volverá a intentar automáticamente.",
+            )
+        return OperationResult(
+            False,
+            "Sincronización con observaciones",
+            snapshot.last_error or "Revisá el estado y el registro de actividad.",
+        )
+    if snapshot.source_files == 0 and snapshot.files_found == 0:
         return OperationResult(True, "Collector activo", "No había archivos nuevos. AIVA seguirá observando la carpeta automáticamente.")
+    if snapshot.files_skipped and snapshot.files_processed == 0:
+        return OperationResult(
+            True,
+            "Archivo encontrado, sin reenvio",
+            snapshot.last_error or f"Encontrados: {snapshot.files_found}. Omitidos: {snapshot.files_skipped}.",
+        )
+    if snapshot.needs_review:
+        return OperationResult(
+            True,
+            "Mapeo pendiente de revisión",
+            "Detecté las columnas y envié la sugerencia a Admin. Guardá el mapeo y volvé a sincronizar.",
+        )
     return OperationResult(
         True,
         "Sincronización finalizada",
-        f"Procesados: {snapshot.files_processed}. Enviados: {snapshot.summaries_sent}. Pendientes: {snapshot.queue_pending}.",
+        f"Encontrados: {snapshot.files_found}. Elegibles: {snapshot.files_eligible}. Procesados: {snapshot.files_processed}. "
+        f"Enviados: {snapshot.summaries_sent}. Duplicados: {snapshot.duplicates}. Pendientes: {snapshot.queue_pending}. "
+        f"Rechazados: {snapshot.rejected}.",
     )
 
 
@@ -344,3 +391,142 @@ def logs_folder() -> Path:
         return resolve_runtime_config().config.path("log_file").parent
     except CollectorError:
         return collector_data_dir() / "logs"
+
+
+def _sanitize_diagnostic_text(value: str) -> str:
+    value = re.sub(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+", r"\1[REDACTED]", value)
+    value = re.sub(
+        r'(?i)("?(?:collector_' r'token|token|password|secret|api_key)"?\s*[:=]\s*"?)[^"\s,}]+',
+        r"\1[REDACTED]",
+        value,
+    )
+    commercial_markers = re.compile(
+        r"(?i)(?:payload|sample_preview|raw_rows?|sales?_rows?|filas?\s+de\s+ventas?|"
+        r"producto|precio|costo|stock|cantidad(?:_vendida)?|unit_(?:price|cost)|quantity_sold)"
+    )
+    return "\n".join(
+        "[REDACTED COMMERCIAL DATA]" if commercial_markers.search(line) else line
+        for line in value.splitlines()
+    )
+
+
+def _sanitize_config(value: Any) -> Any:
+    forbidden = {"token", "password", "secret", "authorization", "api_key", "access_token", "refresh_token", "activation_code"}
+    if isinstance(value, dict):
+        return {
+            key: (
+                "[REDACTED]"
+                if str(key).lower() in forbidden or any(marker in str(key).lower() for marker in ("token", "password", "secret", "authorization", "activation_code"))
+                else _sanitize_config(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_config(item) for item in value]
+    return value
+
+
+def _scheduled_task_diagnostics() -> dict[str, Any]:
+    if not sys.platform.startswith("win"):
+        return {"platform": sys.platform, "installed": None, "detail": "Disponible durante la validacion en Windows."}
+    try:
+        result = subprocess.run(
+            ["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"installed": False, "error": str(exc)[:300]}
+    return {
+        "installed": result.returncode == 0,
+        "return_code": result.returncode,
+        "detail": _sanitize_diagnostic_text((result.stdout or result.stderr)[:12000]),
+    }
+
+
+def _local_state_diagnostics(db_path: Path) -> dict[str, Any]:
+    if not db_path.exists():
+        return {"exists": False, "path": str(db_path)}
+    uri = f"file:{db_path.as_posix()}?mode=ro"
+    try:
+        with sqlite3.connect(uri, uri=True, timeout=3) as conn:
+            conn.row_factory = sqlite3.Row
+            quick_check = conn.execute("PRAGMA quick_check").fetchone()[0]
+            schema = [row[0] for row in conn.execute("SELECT sql FROM sqlite_master WHERE type IN ('table', 'index') AND sql IS NOT NULL ORDER BY name")]
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            file_columns = {row[1] for row in conn.execute("PRAGMA table_info(processed_files)")} if "processed_files" in tables else set()
+            allowed_file_columns = [
+                column
+                for column in (
+                    "file_id", "commerce_id", "collector_id", "backend_url", "file_name", "file_size",
+                    "file_mtime", "file_sha256", "status", "detected_at", "processed_at", "sent_at",
+                    "rows_total", "rows_valid", "rows_invalid", "backend_response_code",
+                    "processing_started_at", "lease_expires_at", "created_at", "updated_at",
+                )
+                if column in file_columns
+            ]
+            files = [
+                dict(row)
+                for row in (conn.execute(f"SELECT {', '.join(allowed_file_columns)} FROM processed_files ORDER BY updated_at DESC LIMIT 200") if allowed_file_columns else [])
+            ]
+            events = [
+                {**dict(row), "message": _sanitize_diagnostic_text(str(row["message"] or ""))}
+                for row in conn.execute("SELECT file_id, event_type, level, message, created_at FROM processed_file_events ORDER BY created_at DESC LIMIT 300")
+            ] if "processed_file_events" in tables else []
+            queue = [dict(row) for row in conn.execute("SELECT file_id, status, retry_count, next_retry_at, created_at, updated_at FROM upload_queue ORDER BY updated_at DESC LIMIT 200")] if "upload_queue" in tables else []
+        return {"exists": True, "path": str(db_path), "quick_check": quick_check, "schema": schema, "processed_files": files, "events": events, "upload_queue": queue}
+    except sqlite3.Error as exc:
+        return {"exists": True, "path": str(db_path), "error": str(exc)[:500]}
+
+
+def export_diagnostics() -> OperationResult:
+    try:
+        runtime = resolve_runtime_config()
+        config = runtime.config
+        diagnostic_dir = collector_data_dir() / "diagnostico"
+        diagnostic_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = diagnostic_dir / "aiva-collector-diagnostico-rc2.zip"
+        input_dir = config.path("input_dir")
+        file_metadata = []
+        for path in sorted(input_dir.iterdir()) if input_dir.exists() else []:
+            if not path.is_file() or path.suffix.lower() not in SUPPORTED_SOURCE_SUFFIXES:
+                continue
+            try:
+                stat = path.stat()
+                file_metadata.append({
+                    "name": path.name,
+                    "extension": path.suffix.lower(),
+                    "size": stat.st_size,
+                    "modified_at_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                    "sha256": compute_file_sha256(path),
+                })
+            except OSError as exc:
+                file_metadata.append({"name": path.name, "error": str(exc)[:300]})
+        auto_state = _read_json(config.path("state_dir") / "last_auto_run.json")
+        config_payload = _sanitize_config(dict(config.raw))
+        local_state = _local_state_diagnostics(local_db_path(config))
+        log_path = config.path("log_file")
+        log_text = _sanitize_diagnostic_text(log_path.read_text(encoding="utf-8", errors="replace")[-500_000:]) if log_path.exists() else ""
+        manifest = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "version": config.collector_version or DEFAULT_COLLECTOR_VERSION,
+            "runtime_config": str(runtime.selected_path),
+            "scheduled_task": _scheduled_task_diagnostics(),
+            "last_auto_run": auto_state,
+            "source_files": file_metadata,
+            "local_state": local_state,
+        }
+        with tempfile.TemporaryDirectory(prefix="aiva-diagnostic-", dir=diagnostic_dir) as temporary:
+            root = Path(temporary)
+            (root / "config.sanitized.json").write_text(json.dumps(config_payload, indent=2, ensure_ascii=True), encoding="utf-8")
+            (root / "diagnostic.json").write_text(_sanitize_diagnostic_text(json.dumps(manifest, indent=2, ensure_ascii=True)), encoding="utf-8")
+            (root / "collector.sanitized.log").write_text(log_text, encoding="utf-8")
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for path in root.iterdir():
+                    archive.write(path, arcname=path.name)
+        digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+        return OperationResult(True, "Diagnostico exportado", f"ZIP: {zip_path}\nSHA-256: {digest}")
+    except (CollectorError, OSError, ValueError) as exc:
+        return OperationResult(False, "No se pudo exportar el diagnostico", str(exc))

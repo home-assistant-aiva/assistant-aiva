@@ -1,6 +1,6 @@
 # AIVA Collector para Windows
 
-El instalador Desktop RC1 separa las tres responsabilidades del Collector:
+El instalador Desktop RC2 separa las tres responsabilidades del Collector:
 
 - `aiva-collector.exe`: aplicación gráfica para el cliente;
 - `aiva-collector-cli.exe`: comandos técnicos y soporte;
@@ -73,7 +73,7 @@ El build se ejecuta con el workflow:
 
 Artefactos esperados:
 
-- `AIVA-Collector-Setup-v0.2.7-desktop-rc1.exe`;
-- `AIVA-Collector-Installer-v0.2.7rc1.manifest.json`;
-- `aiva-collector-windows-manual-v0.2.7-desktop-rc1.zip`;
+- `AIVA-Collector-Setup-v0.2.7-desktop-rc2.exe`;
+- `AIVA-Collector-Installer-v0.2.7rc2.manifest.json`;
+- `aiva-collector-windows-manual-v0.2.7-desktop-rc2.zip`;
 - `SHA256SUMS.txt`.

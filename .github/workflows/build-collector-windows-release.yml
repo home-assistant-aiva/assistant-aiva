@@ -6,7 +6,7 @@ on:
       release_tag:
         description: "Release tag to publish"
         required: true
-        default: "v0.2.7-collector-desktop-rc1"
+        default: "v0.2.7-collector-desktop-rc2"
       publish_release:
         description: "Publish GitHub pre-release"
         required: true
@@ -14,7 +14,7 @@ on:
         default: false
   push:
     branches:
-      - "release/collector-desktop-rc1"
+      - "release/collector-desktop-rc2"
     tags:
       - "v0.2.*collector*"
       - "collector-v*"
@@ -23,12 +23,12 @@ permissions:
   contents: write
 
 env:
-  AIVA_RELEASE_TAG: "v0.2.7-collector-desktop-rc1"
-  AIVA_RELEASE_VERSION: "0.2.7-desktop-rc1"
-  AIVA_RELEASE_TITLE: "AIVA Collector Desktop RC1"
-  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.7-desktop-rc1.exe"
-  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.7rc1.manifest.json"
-  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.7-desktop-rc1.zip"
+  AIVA_RELEASE_TAG: "v0.2.7-collector-desktop-rc2"
+  AIVA_RELEASE_VERSION: "0.2.7-desktop-rc2"
+  AIVA_RELEASE_TITLE: "AIVA Collector Desktop RC2"
+  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.7-desktop-rc2.exe"
+  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.7rc2.manifest.json"
+  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.7-desktop-rc2.zip"
 
 jobs:
   build-release:
@@ -195,17 +195,17 @@ jobs:
             dist/README-INSTALACION-COLLECTOR.txt
 
       - name: Publish GitHub pre-release
-        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/release/collector-desktop-rc1' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/release/collector-desktop-rc2' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_type == 'tag' && github.ref_name || env.AIVA_RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
-          name: AIVA Collector Desktop RC1
+          name: AIVA Collector Desktop RC2
           prerelease: true
           draft: false
           fail_on_unmatched_files: true
           body: |
-            # AIVA Collector Desktop RC1
+            # AIVA Collector Desktop RC2
 
             Pre-release para validar la aplicación visible y la conexión automática del Collector en Windows.
 
@@ -245,7 +245,7 @@ jobs:
 
             Estado:
 
-            * Desktop RC1 / pre-release.
+            * Desktop RC2 / pre-release.
             * Pendiente de prueba Windows fisica final por Federico.
 
             Validacion esperada:

@@ -34,6 +34,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             file_id TEXT PRIMARY KEY,
             commerce_id TEXT NULL,
             collector_id TEXT NULL,
+            backend_url TEXT NULL,
             file_path TEXT NOT NULL,
             file_name TEXT NOT NULL,
             file_size INTEGER NULL,
@@ -53,10 +54,11 @@ def init_db(conn: sqlite3.Connection) -> None:
             backend_response_json TEXT NULL,
             error_message TEXT NULL,
             retry_count INTEGER DEFAULT 0,
+            processing_started_at TEXT NULL,
+            lease_expires_at TEXT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_processed_files_sha256 ON processed_files(file_sha256);
         CREATE INDEX IF NOT EXISTS idx_processed_files_normalized_hash ON processed_files(normalized_data_hash);
         CREATE INDEX IF NOT EXISTS idx_processed_files_status ON processed_files(status);
         CREATE INDEX IF NOT EXISTS idx_processed_files_name ON processed_files(file_name);
@@ -89,6 +91,26 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_upload_queue_status ON upload_queue(status);
         """
     )
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(processed_files)").fetchall()}
+    for name, definition in (
+        ("backend_url", "TEXT NULL"),
+        ("processing_started_at", "TEXT NULL"),
+        ("lease_expires_at", "TEXT NULL"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE processed_files ADD COLUMN {name} {definition}")
+    # RC1 deduplicated globally by SHA. Keep all rows and scope uniqueness to the
+    # activated collector and destination from RC2 onward.
+    conn.execute("DROP INDEX IF EXISTS idx_processed_files_sha256")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_processed_files_context_sha256
+        ON processed_files(
+            COALESCE(commerce_id, ''), COALESCE(collector_id, ''),
+            COALESCE(backend_url, ''), file_sha256
+        )
+        """
+    )
     conn.commit()
 
 
@@ -106,8 +128,28 @@ def _safe_response_json(value: Any) -> str | None:
     return json.dumps(safe, ensure_ascii=True, sort_keys=True)[:2000]
 
 
-def get_by_sha256(conn: sqlite3.Connection, file_sha256: str) -> dict[str, Any] | None:
-    row = conn.execute("SELECT * FROM processed_files WHERE file_sha256 = ?", (file_sha256,)).fetchone()
+def get_by_sha256(
+    conn: sqlite3.Connection,
+    file_sha256: str,
+    *,
+    commerce_id: str | None = None,
+    collector_id: str | None = None,
+    backend_url: str | None = None,
+) -> dict[str, Any] | None:
+    if commerce_id is None and collector_id is None and backend_url is None:
+        row = conn.execute("SELECT * FROM processed_files WHERE file_sha256 = ? ORDER BY updated_at DESC LIMIT 1", (file_sha256,)).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT * FROM processed_files
+            WHERE file_sha256 = ?
+              AND COALESCE(commerce_id, '') = COALESCE(?, '')
+              AND COALESCE(collector_id, '') = COALESCE(?, '')
+              AND (COALESCE(backend_url, '') = COALESCE(?, '') OR backend_url IS NULL)
+            ORDER BY updated_at DESC LIMIT 1
+            """,
+            (file_sha256, commerce_id, collector_id, backend_url),
+        ).fetchone()
     return dict(row) if row else None
 
 
@@ -122,6 +164,7 @@ def upsert_detected_file(
     file_id: str,
     commerce_id: str | None,
     collector_id: str | None,
+    backend_url: str | None = None,
     path: Path,
     file_sha256: str,
     status: str = "detected",
@@ -131,15 +174,18 @@ def upsert_detected_file(
     conn.execute(
         """
         INSERT INTO processed_files (
-            file_id, commerce_id, collector_id, file_path, file_name, file_size, file_mtime,
+            file_id, commerce_id, collector_id, backend_url, file_path, file_name, file_size, file_mtime,
             file_sha256, detected_at, status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(file_id) DO UPDATE SET
             file_path=excluded.file_path,
             file_name=excluded.file_name,
             file_size=excluded.file_size,
             file_mtime=excluded.file_mtime,
+            commerce_id=excluded.commerce_id,
+            collector_id=excluded.collector_id,
+            backend_url=excluded.backend_url,
             status=excluded.status,
             updated_at=excluded.updated_at
         """,
@@ -147,6 +193,7 @@ def upsert_detected_file(
             file_id,
             commerce_id,
             collector_id,
+            backend_url,
             str(path),
             path.name,
             stat.st_size,

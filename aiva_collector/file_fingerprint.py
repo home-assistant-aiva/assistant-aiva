@@ -51,8 +51,23 @@ def compute_normalized_data_hash(normalized_rows_or_summary: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def build_file_id(file_sha256: str, file_name: str) -> str:
-    base = f"{file_sha256}|{Path(file_name).name}"
+def build_file_id(
+    file_sha256: str,
+    file_name: str,
+    *,
+    commerce_id: str | None = None,
+    collector_id: str | None = None,
+    backend_url: str | None = None,
+) -> str:
+    base = "|".join(
+        (
+            str(commerce_id or ""),
+            str(collector_id or ""),
+            str(backend_url or "").rstrip("/").lower(),
+            file_sha256,
+            Path(file_name).name,
+        )
+    )
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 

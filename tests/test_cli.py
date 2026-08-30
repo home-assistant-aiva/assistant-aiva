@@ -125,7 +125,13 @@ def test_read_only_source_skips_unchanged_sent_file_but_detects_change(tmp_path)
     source = tmp_path / "ventas.csv"
     source.write_text("producto,cantidad\nA,1\n", encoding="utf-8")
     config = CollectorConfig(
-        raw={"state_dir": str(tmp_path / "state"), "source_read_only": True},
+        raw={
+            "state_dir": str(tmp_path / "state"),
+            "source_read_only": True,
+            "backend_url": "http://backend",
+            "commerce_id": "commerce-1",
+            "collector_id": "collector-1",
+        },
         config_path=tmp_path / "config.json",
     )
     conn = connect(tmp_path / "state" / "collector.db")
@@ -135,6 +141,7 @@ def test_read_only_source_skips_unchanged_sent_file_but_detects_change(tmp_path)
             file_id="file-1",
             commerce_id="commerce-1",
             collector_id="collector-1",
+            backend_url="http://backend",
             path=source,
             file_sha256="sha-1",
         )

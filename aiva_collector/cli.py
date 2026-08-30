@@ -10,7 +10,7 @@ import socket
 import shutil
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -56,7 +56,9 @@ from .validation import validate_normalized_data
 
 WINDOWS_DEFAULT_CONFIG = r"C:\ProgramData\AIVA\Collector\config.windows.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.7rc1"
+DEFAULT_COLLECTOR_VERSION = "0.2.7rc2"
+PROCESSING_LEASE_MINUTES = 15
+RUN_LOCK_LEASE_MINUTES = 30
 
 
 def default_config_path() -> str | None:
@@ -177,6 +179,8 @@ def _collect(config: CollectorConfig, *, backend_mapping: dict[str, str] | None 
     rows_read = 0
     for path in files:
         raw_rows = read_file(path, config)
+        if not raw_rows:
+            raise ValidationError("El archivo no contiene registros para procesar.")
         rows_read += len(raw_rows)
         effective_config, mapping_result = _resolve_mapping_for_rows(config, raw_rows, backend_mapping=backend_mapping)
         if mapping_result.status != "auto_approved":
@@ -276,6 +280,18 @@ def _single_run_lock(config: CollectorConfig):
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd: int | None = None
     try:
+        if lock_path.exists():
+            try:
+                lock_state = json.loads(lock_path.read_text(encoding="utf-8"))
+                started_at = datetime.fromisoformat(str(lock_state.get("started_at") or ""))
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=timezone.utc)
+                stale = started_at <= datetime.now(timezone.utc) - timedelta(minutes=RUN_LOCK_LEASE_MINUTES)
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                stale = True
+            if stale:
+                logging.warning("run-auto recovered stale lock path=%s", lock_path)
+                lock_path.unlink(missing_ok=True)
         fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(fd, json.dumps({"pid": os.getpid(), "started_at": utc_now()}, ensure_ascii=True).encode("utf-8"))
         yield True
@@ -304,12 +320,34 @@ def _write_auto_run_state(config: CollectorConfig, payload: dict) -> Path:
     return path
 
 
-def _filter_unchanged_read_only_files(config: CollectorConfig, conn, files: list[Path]) -> list[Path]:
+def _backend_target(config: CollectorConfig) -> str:
+    return config.backend_url.strip().rstrip("/").lower()
+
+
+def _lease_is_active(value: object) -> bool:
+    if not value:
+        return False
+    try:
+        expires_at = datetime.fromisoformat(str(value))
+    except ValueError:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at > datetime.now(timezone.utc)
+
+
+def _filter_unchanged_read_only_files(
+    config: CollectorConfig,
+    conn,
+    files: list[Path],
+    *,
+    skipped_details: list[dict[str, str]] | None = None,
+) -> list[Path]:
     if not _config_bool(config, "source_read_only", False):
         return files
     selected: list[Path] = []
     skipped = 0
-    terminal_or_queued = {"sent", "duplicate", "pending_send", "retrying", "processing"}
+    terminal_or_queued = {"sent", "duplicate", "pending_send", "retrying"}
     for path in files:
         try:
             stat = path.stat()
@@ -318,22 +356,43 @@ def _filter_unchanged_read_only_files(config: CollectorConfig, conn, files: list
             continue
         row = conn.execute(
             """
-            SELECT file_size, file_mtime, status
+            SELECT file_id, file_size, file_mtime, status, lease_expires_at
             FROM processed_files
             WHERE file_path = ?
+              AND COALESCE(commerce_id, '') = COALESCE(?, '')
+              AND COALESCE(collector_id, '') = COALESCE(?, '')
+              AND (COALESCE(backend_url, '') = COALESCE(?, '') OR backend_url IS NULL)
             ORDER BY updated_at DESC
             LIMIT 1
             """,
-            (str(path),),
+            (str(path), config.commerce_id, config.collector_id, _backend_target(config)),
         ).fetchone()
         current_mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
         if (
             row
-            and str(row["status"]) in terminal_or_queued
+            and (str(row["status"]) in terminal_or_queued or (str(row["status"]) == "processing" and _lease_is_active(row["lease_expires_at"])))
             and int(row["file_size"] or -1) == int(stat.st_size)
             and str(row["file_mtime"] or "") == current_mtime
         ):
             skipped += 1
+            status = str(row["status"])
+            reason = {
+                "sent": "El archivo ya fue enviado a este comercio.",
+                "duplicate": "El Backend ya habia recibido este archivo.",
+                "pending_send": "El archivo esta pendiente de envio.",
+                "retrying": "El archivo esta pendiente de envio y se reintentara automaticamente.",
+                "processing": "El archivo tiene un procesamiento activo en otra ejecucion.",
+            }.get(status, "El archivo no es elegible en esta ejecucion.")
+            if skipped_details is not None:
+                skipped_details.append({"file_name": path.name, "status": status, "reason": reason})
+            add_event(
+                conn,
+                file_id=str(row["file_id"]),
+                event_type="file_skipped",
+                level="info",
+                message=reason,
+                context={"file_name": path.name, "status": status},
+            )
             continue
         selected.append(path)
     if skipped:
@@ -601,22 +660,45 @@ def _process_reliable_file(
         return "skipped", message
 
     file_sha256 = compute_file_sha256(path)
+    backend_target = _backend_target(config)
     existing_path = conn.execute(
-        "SELECT * FROM processed_files WHERE file_path = ? AND status IN ('pending_send', 'retrying', 'processing') ORDER BY updated_at DESC LIMIT 1",
-        (str(path),),
+        """
+        SELECT * FROM processed_files
+        WHERE file_path = ? AND status IN ('pending_send', 'retrying', 'processing')
+          AND COALESCE(commerce_id, '') = COALESCE(?, '')
+          AND COALESCE(collector_id, '') = COALESCE(?, '')
+          AND (COALESCE(backend_url, '') = COALESCE(?, '') OR backend_url IS NULL)
+        ORDER BY updated_at DESC LIMIT 1
+        """,
+        (str(path), config.commerce_id, config.collector_id, backend_target),
     ).fetchone()
     if existing_path:
         row = dict(existing_path)
+        if row.get("status") != "processing" or _lease_is_active(row.get("lease_expires_at")):
+            add_event(
+                conn,
+                file_id=row["file_id"],
+                event_type="pending_send_skipped",
+                level="info",
+                message="Archivo ya tiene payload pendiente o un procesamiento activo; no se parseo nuevamente.",
+                context={"file_name": path.name, "status": row.get("status")},
+            )
+            return "pending_send", "Archivo pendiente de envio; se reintentara desde la cola offline."
         add_event(
             conn,
             file_id=row["file_id"],
-            event_type="pending_send_skipped",
-            level="info",
-            message="Archivo ya tiene payload pendiente; no se parseo nuevamente.",
-            context={"file_name": path.name, "status": row.get("status")},
+            event_type="abandoned_processing_recovered",
+            level="warning",
+            message="Se recupero un procesamiento abandonado de una ejecucion interrumpida.",
+            context={"file_name": path.name, "previous_updated_at": row.get("updated_at")},
         )
-        return "pending_send", "Archivo pendiente de envio; se reintentara desde la cola offline."
-    existing = get_by_sha256(conn, file_sha256)
+    existing = get_by_sha256(
+        conn,
+        file_sha256,
+        commerce_id=config.commerce_id,
+        collector_id=config.collector_id,
+        backend_url=backend_target,
+    )
     if existing and existing.get("status") == "sent":
         duplicate_dir = config.path("processed_dir") / "duplicados"
         moved = _archive_file(config, path, duplicate_dir, suffix="duplicate") if _config_bool(config, "move_processed_files", True) else []
@@ -629,7 +711,7 @@ def _process_reliable_file(
             context={"file_name": path.name, "moved": moved},
         )
         return "duplicate", "Archivo duplicado detectado. No se envio nuevamente."
-    if existing and existing.get("status") in {"pending_send", "retrying", "processing"}:
+    if existing and existing.get("status") in {"pending_send", "retrying"}:
         add_event(
             conn,
             file_id=existing["file_id"],
@@ -640,23 +722,76 @@ def _process_reliable_file(
         )
         return "pending_send", "Archivo pendiente de envio; se reintentara desde la cola offline."
 
-    file_id = existing["file_id"] if existing else build_file_id(file_sha256, path.name)
+    if existing and existing.get("status") == "processing" and _lease_is_active(existing.get("lease_expires_at")):
+        return "skipped", "El archivo tiene un procesamiento activo en otra ejecucion."
+
+    file_id = existing["file_id"] if existing else build_file_id(
+        file_sha256,
+        path.name,
+        commerce_id=config.commerce_id,
+        collector_id=config.collector_id,
+        backend_url=backend_target,
+    )
     upsert_detected_file(
         conn,
         file_id=file_id,
         commerce_id=config.commerce_id,
         collector_id=config.collector_id,
+        backend_url=backend_target,
         path=path,
         file_sha256=file_sha256,
         status="processing",
+    )
+    update_file_state(
+        conn,
+        file_id,
+        processing_started_at=utc_now(),
+        lease_expires_at=(datetime.now(timezone.utc) + timedelta(minutes=PROCESSING_LEASE_MINUTES)).isoformat(),
     )
     add_event(conn, file_id=file_id, event_type="processing_started", level="info", message="Procesamiento iniciado.")
 
     try:
         raw_rows = read_file(path, config)
+        if not raw_rows:
+            raise ValidationError("El archivo no contiene registros para procesar.")
         effective_config, mapping_result = _resolve_mapping_for_rows(config, raw_rows, backend_mapping=backend_mapping)
+        if backend_mapping is None or mapping_result.mapping != backend_mapping:
+            try:
+                candidate_response = client.post_mapping_candidate(
+                    _mapping_candidate_payload(path, raw_rows, mapping_result, config)
+                )
+                add_event(
+                    conn,
+                    file_id=file_id,
+                    event_type="mapping_candidate_sent",
+                    level="info",
+                    message="Mapeo de columnas informado al Backend.",
+                    context={
+                        "status": mapping_result.status,
+                        "candidate_id": (candidate_response.get("candidate") or {}).get("id"),
+                    },
+                )
+            except BackendError as exc:
+                add_event(
+                    conn,
+                    file_id=file_id,
+                    event_type="mapping_candidate_error",
+                    level="warning",
+                    message=str(exc),
+                    context={"status": mapping_result.status},
+                )
+                if mapping_result.status != "auto_approved":
+                    update_file_state(conn, file_id, status="needs_mapping", error_message=str(exc), lease_expires_at=None)
+                    return "needs_review", "No se pudo informar el mapeo sugerido; se reintentara."
         if mapping_result.status != "auto_approved":
-            raise ValidationError("AIVA necesita revisar el mapeo de columnas desde el admin.")
+            update_file_state(
+                conn,
+                file_id,
+                status="needs_mapping",
+                error_message="AIVA necesita revisar el mapeo de columnas desde el admin.",
+                lease_expires_at=None,
+            )
+            return "needs_review", "No pude reconocer todas las columnas. El mapeo sugerido esta disponible en Admin."
         result = normalize_rows(raw_rows, effective_config)
         validation = validate_normalized_data(
             raw_rows=raw_rows,
@@ -666,7 +801,7 @@ def _process_reliable_file(
         )
     except Exception as exc:
         message = str(exc)
-        update_file_state(conn, file_id, status="error", error_message=message, processed_at=utc_now())
+        update_file_state(conn, file_id, status="error", error_message=message, processed_at=utc_now(), lease_expires_at=None)
         add_event(conn, file_id=file_id, event_type="processing_error", level="error", message=message)
         if _config_bool(config, "move_error_files", True):
             moved = _archive_file(config, path, config.path("error_dir"), suffix="error")
@@ -687,6 +822,7 @@ def _process_reliable_file(
         rows_valid=validation.rows_valid,
         rows_invalid=validation.rows_invalid,
         error_message="; ".join(validation.blocking_errors) if validation.blocking_errors else None,
+        lease_expires_at=None,
     )
     for warning in validation.warnings:
         add_event(conn, file_id=file_id, event_type="validation_warning", level="warning", message=warning)
@@ -735,6 +871,7 @@ def _process_reliable_file(
                 sent_at=utc_now(),
                 backend_response_code=409,
                 error_message=str(exc),
+                lease_expires_at=None,
             )
             add_event(conn, file_id=file_id, event_type="backend_duplicate", level="info", message=str(exc), context={"moved": moved})
             return "duplicate", "Backend informo summary duplicado. No se reenvio."
@@ -744,6 +881,7 @@ def _process_reliable_file(
             status="pending_send",
             backend_response_code=exc.status_code,
             error_message=str(exc),
+            lease_expires_at=None,
         )
         enqueue_payload(
             conn,
@@ -764,6 +902,7 @@ def _process_reliable_file(
         backend_summary_id=response.get("summary_id") or response.get("id"),
         backend_response_code=response.get("_http_status_code", 200),
         backend_response_json=response,
+        lease_expires_at=None,
     )
     add_event(conn, file_id=file_id, event_type="sent", level="info", message="Summary enviado correctamente.", context={"moved": moved})
     return "sent", "Summary enviado correctamente."
@@ -784,6 +923,11 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
     with _single_run_lock(config) as acquired:
         if not acquired:
             logging.info("run-auto skipped: another collector execution is already running")
+            try:
+                locked_files = discover_input_files(config)
+            except (CollectorError, OSError):
+                locked_files = []
+            lock_reason = "Hay otra sincronizacion activa. AIVA reintentara cuando termine."
             _write_auto_run_state(
                 config,
                 {
@@ -791,7 +935,20 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
                     "finished_at": utc_now(),
                     "version": config.collector_version,
                     "result": "skipped_already_running",
-                    "error_summary": None,
+                    "files_found": len(locked_files),
+                    "files_eligible": 0,
+                    "files_skipped": len(locked_files),
+                    "skipped_details": [
+                        {"file_name": path.name, "status": "lock_active", "reason": lock_reason}
+                        for path in locked_files
+                    ],
+                    "files_processed": 0,
+                    "summaries_sent": 0,
+                    "duplicates": 0,
+                    "rejected": 0,
+                    "needs_review": 0,
+                    "queue_pending": 0,
+                    "error_summary": lock_reason,
                     "next_attempt": "scheduled",
                 },
             )
@@ -800,11 +957,20 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         client = CollectorClient(config)
         conn = connect_local_state(local_db_path(config))
         initial_queue = process_queue(conn, config, client=client)
-        files = _filter_unchanged_read_only_files(config, conn, discover_input_files(config))
+        discovered_files = discover_input_files(config)
+        skipped_details: list[dict[str, str]] = []
+        files = _filter_unchanged_read_only_files(
+            config,
+            conn,
+            discovered_files,
+            skipped_details=skipped_details,
+        )
         if not files:
-            logging.info("run-auto: no hay archivos CSV/XLSX en input_dir")
-            pending_count = queue_counts(conn).get("pending", 0)
+            logging.info("run-auto: encontrados=%s elegibles=0 omitidos=%s", len(discovered_files), len(skipped_details))
+            counts = queue_counts(conn)
+            pending_count = counts.get("pending", 0) + counts.get("retrying", 0) + counts.get("processing", 0)
             conn.close()
+            skip_summary = "; ".join(item["reason"] for item in skipped_details)[:500] or None
             _write_auto_run_state(
                 config,
                 {
@@ -812,20 +978,23 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
                     "finished_at": utc_now(),
                     "version": config.collector_version,
                     "result": "ok",
-                    "files_found": 0,
+                    "files_found": len(discovered_files),
+                    "files_eligible": 0,
+                    "files_skipped": len(skipped_details),
+                    "skipped_details": skipped_details,
                     "files_processed": 0,
                     "duplicates": 0,
                     "rejected": 0,
                     "summaries_sent": initial_queue.sent,
                     "queue_pending": pending_count,
-                    "error_summary": None,
+                    "error_summary": skip_summary,
                     "next_attempt": "scheduled",
                 },
             )
-            print(
-                "Sin archivos para procesar. "
-                f"cola: enviados={initial_queue.sent} pendientes_reintentando={initial_queue.retrying} errores={initial_queue.errors}"
-            )
+            if skipped_details:
+                print(f"Archivos encontrados={len(discovered_files)} elegibles=0 omitidos={len(skipped_details)}. {skip_summary}")
+            else:
+                print("Sin archivos CSV/XLSX en la carpeta configurada.")
             return 0
         backend_mapping = _backend_mapping(config)
         results: list[tuple[str, str | None]] = []
@@ -849,14 +1018,17 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         duplicates = sum(1 for status, _ in results if status == "duplicate")
         pending = sum(1 for status, _ in results if status == "pending_send")
         rejected = sum(1 for status, _ in results if status == "error")
+        needs_review = sum(1 for status, _ in results if status == "needs_review")
+        skipped = len(skipped_details) + sum(1 for status, _ in results if status == "skipped")
+        processed = sum(1 for status, _ in results if status in {"sent", "pending_send", "error"})
         errors = rejected + initial_queue.errors + final_queue.errors
         error_summary = "; ".join(message for status, message in results if status == "error" and message)[:500] or None
         logging.info(
             "run-auto summary version=%s result=%s files_found=%s files_processed=%s duplicates=%s rejected=%s sent=%s pending=%s next_attempt=scheduled",
             config.collector_version,
             "ok" if errors == 0 else "error",
-            len(files),
-            len(results),
+            len(discovered_files),
+            processed,
             duplicates,
             rejected,
             sent,
@@ -869,17 +1041,25 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
                 "finished_at": utc_now(),
                 "version": config.collector_version,
                 "result": "ok" if errors == 0 else "error",
-                "files_found": len(files),
-                "files_processed": len(results),
+                "files_found": len(discovered_files),
+                "files_eligible": len(files),
+                "files_skipped": skipped,
+                "skipped_details": skipped_details,
+                "files_processed": processed,
                 "duplicates": duplicates,
                 "rejected": rejected,
+                "needs_review": needs_review,
                 "summaries_sent": sent,
                 "queue_pending": queue_after.get("pending", 0) + queue_after.get("retrying", 0),
                 "error_summary": error_summary,
                 "next_attempt": "scheduled",
             },
         )
-        print(f"run-auto finalizado: enviados={sent} duplicados={duplicates} pendientes={pending} errores={errors}")
+        print(
+            f"run-auto finalizado: encontrados={len(discovered_files)} elegibles={len(files)} "
+            f"omitidos={skipped} procesados={processed} enviados={sent} duplicados={duplicates} "
+            f"pendientes={pending} revision={needs_review} rechazados={rejected}"
+        )
         if pending:
             print("No se pudo conectar con AIVA. El archivo quedo pendiente y se reintentara automaticamente.")
         save_state(

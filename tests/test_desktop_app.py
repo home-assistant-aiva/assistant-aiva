@@ -3,9 +3,11 @@ from pathlib import Path
 
 from aiva_collector.desktop_app import self_check
 from aiva_collector.desktop_service import (
+    DashboardSnapshot,
     activate_installation,
     configure_source_folder,
     load_dashboard_snapshot,
+    synchronize_now,
 )
 
 
@@ -147,7 +149,29 @@ def test_activation_writes_config_and_keeps_token_out_of_json(tmp_path, monkeypa
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert result.ok is True
     assert saved["commerce_id"] == "commerce-1"
-    assert saved["collector_version"] == "0.2.7rc1"
+    assert saved["collector_version"] == "0.2.7rc2"
     assert "collector_token" not in saved
     assert (state_dir / "collector.token").exists()
     assert "secret-value" not in config_path.read_text(encoding="utf-8")
+
+
+def test_synchronize_now_shows_pending_send_cause(monkeypatch):
+    snapshot = DashboardSnapshot(
+        state="attention", title="Pendiente", detail="Pendiente", version="0.2.7rc2",
+        config_path=None, commerce_id=None, collector_id=None, input_dir=None,
+        source_exists=True, source_files=1, token_configured=True,
+        scheduled_task_installed=True, last_run_at=None, last_result="error",
+        files_found=1, files_eligible=1, files_skipped=0, files_processed=1,
+        summaries_sent=0, duplicates=0, rejected=0, needs_review=0,
+        queue_pending=1, last_error=None,
+    )
+    runtime = type("Runtime", (), {"selected_path": Path("config.windows.json")})()
+    monkeypatch.setattr("aiva_collector.desktop_service.resolve_runtime_config", lambda: runtime)
+    monkeypatch.setattr("aiva_collector.desktop_service.cmd_run_auto", lambda args: 2)
+    monkeypatch.setattr("aiva_collector.desktop_service.load_dashboard_snapshot", lambda: snapshot)
+
+    result = synchronize_now()
+
+    assert result.ok is False
+    assert result.title == "Archivo pendiente de envío"
+    assert "volverá a intentar" in result.message
