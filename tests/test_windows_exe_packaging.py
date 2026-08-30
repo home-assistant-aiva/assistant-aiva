@@ -31,6 +31,7 @@ def test_inno_script_is_safe_and_preserves_existing_config():
     assert 'Name: "{group}\\AIVA Collector"; Filename: "{app}\\{#AppExeName}"' in content
     assert 'Filename: "{app}\\activate.bat"' not in content
     assert 'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated' in content
+    assert 'Filename: "{app}\\uninstall_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated skipifdoesntexist' in content
     assert "run_discovery_dry.bat" not in content.split("[Run]", maxsplit=1)[1]
 
 
@@ -43,6 +44,20 @@ def test_installer_runtime_wrappers_are_safe():
     assert "<arguments>run-auto --config \"%aiva_root%\\config.windows.json\"</arguments>" in xml_content
     assert "run_auto.bat" not in xml_content
     assert "powershell" not in xml_content
+    uninstall = Path("packaging/windows_runtime/uninstall_scheduled_task.bat").read_text(encoding="utf-8").lower()
+    assert 'if /i "%~1"=="/quiet"' in uninstall
+
+
+def test_windows_workflow_runs_real_installer_verification_without_publishing():
+    workflow = Path(".github/workflows/build-collector-windows-release.yml").read_text(encoding="utf-8")
+    script = Path("scripts/verify_windows_installer.ps1").read_text(encoding="utf-8")
+    assert "verify_windows_installer.ps1" in workflow
+    assert "publish_release" in workflow
+    assert "AIVA-Collector-Setup-v0.2.7-desktop-rc2.exe" in script
+    assert "/VERYSILENT" in script
+    assert "SIMULATED-RC1-TOKEN" in script
+    assert "Get-AuthenticodeSignature" in script
+    assert "unins000.exe" in script
 
 
 def test_verify_without_artifacts_writes_manifest(tmp_path, monkeypatch):

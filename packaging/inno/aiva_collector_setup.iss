@@ -59,3 +59,6 @@ Name: "desktopicon"; Description: "Crear acceso directo de AIVA Collector en el 
 [Run]
 Filename: "{app}\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#AppExeName}"; Description: "Abrir AIVA Collector"; Flags: postinstall skipifsilent nowait runasoriginaluser
+
+[UninstallRun]
+Filename: "{app}\uninstall_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated skipifdoesntexist

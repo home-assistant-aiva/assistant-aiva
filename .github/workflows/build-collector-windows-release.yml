@@ -38,7 +38,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -140,6 +140,13 @@ jobs:
         run: |
           python scripts/verify_windows_exe_package.py --require-artifacts
 
+      - name: Verify clean install, RC1 update, task and uninstall
+        shell: pwsh
+        run: |
+          .\scripts\verify_windows_installer.ps1 `
+            -InstallerPath ".\dist\AIVA-Collector-Setup-v0.2.7-desktop-rc2.exe" `
+            -ExpectedVersion "0.2.7rc2"
+
       - name: Rename release assets
         shell: pwsh
         run: |
@@ -193,9 +200,10 @@ jobs:
             dist/${{ env.AIVA_MANUAL_ZIP_ASSET }}
             dist/SHA256SUMS.txt
             dist/README-INSTALACION-COLLECTOR.txt
+            dist/windows-installer-verification.json
 
       - name: Publish GitHub pre-release
-        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/release/collector-desktop-rc2' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_type == 'tag' && github.ref_name || env.AIVA_RELEASE_TAG }}

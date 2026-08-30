@@ -159,6 +159,7 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
         "{commonappdata}\\AIVA\\Collector\\estado\\queue",
         "{commonappdata}\\AIVA\\Collector\\diagnostico",
         'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated',
+        'Filename: "{app}\\uninstall_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated skipifdoesntexist',
         'Filename: "{app}\\{#AppExeName}"; Description: "Abrir AIVA Collector"',
         "Permissions: users-modify",
         'Source: "..\\windows_runtime\\*.bat"',
@@ -202,6 +203,9 @@ def assert_runtime_wrappers_safe(root: Path = ROOT) -> None:
             for forbidden in ("curl", "invoke-webrequest", "invoke-restmethod", "--send"):
                 if forbidden in lowered:
                     raise VerifyError(f"Diagnostico contiene accion prohibida: {forbidden}")
+        if path.name == "uninstall_scheduled_task.bat":
+            if 'if /i "%~1"=="/quiet"' not in lowered:
+                raise VerifyError("uninstall_scheduled_task.bat debe soportar /quiet")
     run_send = (root / "packaging" / "windows_runtime" / "run_send.bat").read_text(encoding="utf-8")
     prompt = run_send.find("Escribi ENVIAR")
     confirm = run_send.find('if /I not "%CONFIRM%"=="ENVIAR"')

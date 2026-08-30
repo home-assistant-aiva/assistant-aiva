@@ -1400,6 +1400,7 @@ def cmd_diagnose_config(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aiva-collector")
+    parser.add_argument("--version", action="version", version=DEFAULT_COLLECTOR_VERSION)
     sub = parser.add_subparsers(dest="command", required=True)
     config_default = default_config_path()
 
