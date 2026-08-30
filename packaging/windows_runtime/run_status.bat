@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "AIVA_EXE=%~dp0aiva-collector.exe"
+set "AIVA_EXE=%~dp0aiva-collector-cli.exe"
 
 "%AIVA_EXE%" status
 if errorlevel 1 (

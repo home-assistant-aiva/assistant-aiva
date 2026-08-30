@@ -54,7 +54,7 @@ for %%T in ("AIVA Collector" "AIVA Collector Scheduled" "AIVA Collector Auto") d
   echo   ^<Actions Context="Author"^>
   echo     ^<Exec^>
   echo       ^<Command^>%AIVA_EXE%^</Command^>
-  echo       ^<Arguments^>run-auto --config "%AIVA_ROOT%\config.local.json"^</Arguments^>
+  echo       ^<Arguments^>run-auto --config "%AIVA_ROOT%\config.windows.json"^</Arguments^>
   echo       ^<WorkingDirectory^>%~dp0^</WorkingDirectory^>
   echo     ^</Exec^>
   echo   ^</Actions^>

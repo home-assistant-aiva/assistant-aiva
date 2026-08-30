@@ -1,4 +1,4 @@
-name: Build Collector Windows Discovery Release
+name: Build Collector Windows Desktop Release
 
 on:
   workflow_dispatch:
@@ -6,15 +6,16 @@ on:
       release_tag:
         description: "Release tag to publish"
         required: true
-        default: "v0.2.6-collector-discovery-rc6"
+        default: "v0.2.7-collector-desktop-rc1"
       publish_release:
         description: "Publish GitHub pre-release"
         required: true
         type: boolean
         default: false
   push:
+    branches:
+      - "release/collector-desktop-rc1"
     tags:
-      - "v0.2.6-collector-discovery-rc6"
       - "v0.2.*collector*"
       - "collector-v*"
 
@@ -22,11 +23,12 @@ permissions:
   contents: write
 
 env:
-  AIVA_RELEASE_VERSION: "0.2.6-discovery-rc6"
-  AIVA_RELEASE_TITLE: "AIVA Collector Discovery RC6"
-  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.6-discovery-rc6.exe"
-  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.6rc6.manifest.json"
-  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.6-discovery-rc6.zip"
+  AIVA_RELEASE_TAG: "v0.2.7-collector-desktop-rc1"
+  AIVA_RELEASE_VERSION: "0.2.7-desktop-rc1"
+  AIVA_RELEASE_TITLE: "AIVA Collector Desktop RC1"
+  AIVA_INSTALLER_ASSET: "AIVA-Collector-Setup-v0.2.7-desktop-rc1.exe"
+  AIVA_MANIFEST_ASSET: "AIVA-Collector-Installer-v0.2.7rc1.manifest.json"
+  AIVA_MANUAL_ZIP_ASSET: "aiva-collector-windows-manual-v0.2.7-desktop-rc1.zip"
 
 jobs:
   build-release:
@@ -65,12 +67,16 @@ jobs:
           python scripts/build_windows_exe.py
 
       - name: Verify executable commands
+        shell: pwsh
         run: |
-          .\dist\aiva-collector.exe --help
-          .\dist\aiva-collector-background.exe --help
-          .\dist\aiva-collector.exe activate --help
-          .\dist\aiva-collector.exe run-auto --help
-          .\dist\aiva-collector.exe discover --help
+          $desktop = Start-Process -FilePath ".\dist\aiva-collector.exe" -ArgumentList "--self-check" -Wait -PassThru
+          if ($desktop.ExitCode -ne 0) { throw "Desktop self-check failed: $($desktop.ExitCode)" }
+          .\dist\aiva-collector-cli.exe --help
+          $background = Start-Process -FilePath ".\dist\aiva-collector-background.exe" -ArgumentList "--help" -Wait -PassThru
+          if ($background.ExitCode -ne 0) { throw "Background self-check failed: $($background.ExitCode)" }
+          .\dist\aiva-collector-cli.exe activate --help
+          .\dist\aiva-collector-cli.exe run-auto --help
+          .\dist\aiva-collector-cli.exe discover --help
 
       - name: Create demo config for executable validation
         shell: pwsh
@@ -107,8 +113,8 @@ jobs:
       - name: Verify executable validate and discovery dry-run
         shell: pwsh
         run: |
-          .\dist\aiva-collector.exe validate --config "$env:AIVA_DEMO_CONFIG"
-          .\dist\aiva-collector.exe discover --config "$env:AIVA_DEMO_CONFIG" --dry-run --json --include-path "$env:AIVA_DISCOVERY_ROOT" | Tee-Object -Variable discoveryJson
+          .\dist\aiva-collector-cli.exe validate --config "$env:AIVA_DEMO_CONFIG"
+          .\dist\aiva-collector-cli.exe discover --config "$env:AIVA_DEMO_CONFIG" --dry-run --json --include-path "$env:AIVA_DISCOVERY_ROOT" | Tee-Object -Variable discoveryJson
           $parsed = $discoveryJson | ConvertFrom-Json
           if (-not ($parsed.items | Where-Object { $_.source_type -eq "watched_folder" })) { throw "watched_folder discovery not found" }
           if (-not ($parsed.items | Where-Object { $_.source_type -eq "database" -and $_.detected_engine -eq "sqlite" })) { throw "sqlite discovery not found" }
@@ -189,27 +195,33 @@ jobs:
             dist/README-INSTALACION-COLLECTOR.txt
 
       - name: Publish GitHub pre-release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/release/collector-desktop-rc1' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          name: AIVA Collector Discovery RC6
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_type == 'tag' && github.ref_name || env.AIVA_RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: AIVA Collector Desktop RC1
           prerelease: true
           draft: false
           fail_on_unmatched_files: true
           body: |
-            # AIVA Collector Discovery RC6
+            # AIVA Collector Desktop RC1
 
-            Pre-release para validar RC6 end-to-end de deteccion de fuentes del Collector.
+            Pre-release para validar la aplicación visible y la conexión automática del Collector en Windows.
 
             Incluye:
 
+            * aplicación gráfica que permanece abierta y muestra el estado real;
+            * activación guiada mediante código de AIVA Comercial;
+            * selección de la carpeta de datos desde Windows;
+            * prueba de conexión y sincronización manual desde la aplicación;
             * reporte de discoveries por `POST /commerce/collector/data-source-discoveries`;
             * autenticacion con `Authorization: Bearer <collector_token>` y `X-AIVA-Collector-Id`;
             * sin dependencia de `X-AIVA-Secret` en PCs cliente;
             * reporte de fuente seleccionada en config como `selected_explicit`;
             * errores HTTP concretos para 401, 403, 404 y 422;
-            * ejecucion automatica silenciosa con `aiva-collector-background.exe`;
+            * CLI de soporte separado en `aiva-collector-cli.exe`;
+            * ejecución automática silenciosa con `aiva-collector-background.exe`;
             * runner background sin consola y salida dirigida a logs con rotacion;
             * datos, logs, estado, cola y configuracion en ProgramData;
             * preservacion de configuracion, token, cola y estado en actualizaciones;
@@ -222,7 +234,7 @@ jobs:
             No incluye todavia:
 
             * FASE 6.4C;
-            * sync automatico desde fuente confirmada;
+            * conexión directa a bases propietarias del sistema de caja;
             * prueba fisica final en la PC de Federico.
 
             Seguridad:
@@ -233,7 +245,7 @@ jobs:
 
             Estado:
 
-            * RC6 / pre-release.
+            * Desktop RC1 / pre-release.
             * Pendiente de prueba Windows fisica final por Federico.
 
             Validacion esperada:

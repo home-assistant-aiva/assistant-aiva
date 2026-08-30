@@ -1,74 +1,79 @@
-# AIVA Collector Windows Installer
+# AIVA Collector para Windows
 
-`AIVA-Collector-Setup-v0.1.0.exe` instala AIVA Collector en Windows sin requerir Python.
+El instalador Desktop RC1 separa las tres responsabilidades del Collector:
 
-## Rutas instaladas
+- `aiva-collector.exe`: aplicación gráfica para el cliente;
+- `aiva-collector-cli.exe`: comandos técnicos y soporte;
+- `aiva-collector-background.exe`: sincronización automática sin consola.
+
+## Experiencia del cliente
+
+El acceso directo `AIVA Collector` abre un panel que muestra:
+
+- activación del equipo;
+- carpeta de datos seleccionada;
+- cantidad de CSV/XLSX disponibles;
+- última ejecución, archivos procesados, resúmenes enviados y cola pendiente;
+- estado de la tarea automática;
+- acciones para probar conexión y sincronizar ahora.
+
+La primera configuración requiere solamente un código de AIVA Comercial y elegir la carpeta de exportación del sistema de ventas. La URL del servicio queda dentro de configuración avanzada.
+
+## Rutas
 
 Programa:
 
 ```text
-{pf}\AIVA Collector
+C:\Program Files\AIVA Collector
 ```
 
-Datos del comercio:
+Datos persistentes:
 
 ```text
-C:\AIVA_Comercio
+C:\ProgramData\AIVA\Collector
 ```
 
-El instalador crea:
-
-- `C:\AIVA_Comercio\entrada`
-- `C:\AIVA_Comercio\procesados`
-- `C:\AIVA_Comercio\errores`
-- `C:\AIVA_Comercio\output`
-- `C:\AIVA_Comercio\logs`
-- `C:\AIVA_Comercio\state`
-- `C:\AIVA_Comercio\diagnostico`
-
-## Configuracion
-
-Si no existe, crea:
+La configuración canónica es:
 
 ```text
-C:\AIVA_Comercio\config.local.json
+C:\ProgramData\AIVA\Collector\config.windows.json
 ```
 
-La base sale de `windows/config.windows.example.json`. Si el archivo ya existe, no lo pisa.
+El instalador conserva ProgramData durante actualizaciones. La activación guarda el token fuera del JSON y lo protege con Windows DPAPI.
 
-El instalador RC3 conserva `C:\ProgramData\AIVA\Collector`, instala la tarea automatica silenciosa con `aiva-collector-background.exe` y migra automaticamente una configuracion previa valida si corresponde. Los comandos del EXE resuelven el token desde entorno, config instalada heredada o token protegido por activacion, sin imprimirlo.
+Para producción, `backend_url` debe usar HTTPS con un certificado válido. La aplicación marca una conexión HTTP como modo de prueba para evitar presentarla como una instalación final segura.
 
-La tarea programada creada por RC3 usa el comando `run-auto`, no recibe token por argumentos, no ejecuta discovery automatico repetido y reemplaza solamente tareas conocidas anteriores: `AIVA Collector`, `AIVA Collector Scheduled` y `AIVA Collector Auto`.
+## Sincronización automática
 
-## Accesos directos
-
-El menu inicio incluye:
-
-- AIVA Collector - Validar configuracion
-- AIVA Collector - Prueba sin enviar
-- AIVA Collector - Detectar fuentes sin enviar
-- AIVA Collector - Reportar fuentes detectadas
-- AIVA Collector - Estado conexion
-- AIVA Collector - Enviar al servidor
-- AIVA Collector - Diagnostico
-- AIVA Collector - Abrir carpeta de entrada
-- AIVA Collector - Abrir resultados
-
-`Enviar al servidor` exige token y confirmacion exacta `ENVIAR`.
-
-`Diagnostico` no llama al backend, no ejecuta envio, no usa curl y no copia archivos originales del comercio por defecto. Si copia config, la sanitiza.
-
-## Build
-
-El build real se ejecuta en GitHub Actions con runner `windows-latest`:
+La tarea `AIVA Collector Auto` ejecuta:
 
 ```text
-.github/workflows/build-windows-installer.yml
+aiva-collector-background.exe run-auto --config "%ProgramData%\AIVA\Collector\config.windows.json"
 ```
 
-Artifacts esperados:
+Se inicia 60 segundos después del inicio de sesión, se repite cada 15 minutos, evita instancias superpuestas y reintenta fallas temporales.
 
-- `aiva-collector.exe`
-- `AIVA-Collector-Setup-v0.1.0.exe`
-- `AIVA-Collector-Installer-v0.1.0.manifest.json`
-- `aiva-collector-windows-exe-v0.1.0.zip`
+## Seguridad de la fuente
+
+Cuando el usuario elige una carpeta desde la aplicación, se configura como fuente observada de solo lectura:
+
+- `move_processed_files=false`;
+- `move_error_files=false`;
+- `keep_original_files=true`.
+
+AIVA calcula una huella local para evitar reenvíos. No mueve ni borra los archivos originales del sistema de ventas.
+
+## Empaquetado
+
+El build se ejecuta con el workflow:
+
+```text
+.github/workflows/build-collector-windows-release.yml
+```
+
+Artefactos esperados:
+
+- `AIVA-Collector-Setup-v0.2.7-desktop-rc1.exe`;
+- `AIVA-Collector-Installer-v0.2.7rc1.manifest.json`;
+- `aiva-collector-windows-manual-v0.2.7-desktop-rc1.zip`;
+- `SHA256SUMS.txt`.

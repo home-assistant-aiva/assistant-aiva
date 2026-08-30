@@ -3,7 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from aiva_collector.cli import DEFAULT_BACKEND_URL, DEFAULT_COLLECTOR_VERSION, _single_run_lock, build_parser, main, safe_display_path
+from aiva_collector.cli import (
+    DEFAULT_BACKEND_URL,
+    DEFAULT_COLLECTOR_VERSION,
+    _filter_unchanged_read_only_files,
+    _single_run_lock,
+    build_parser,
+    main,
+    safe_display_path,
+)
 from aiva_collector.config import CollectorConfig
 
 
@@ -109,6 +117,35 @@ def test_run_auto_lock_prevents_overlapping_execution(tmp_path):
 
     with _single_run_lock(config) as third:
         assert third is True
+
+
+def test_read_only_source_skips_unchanged_sent_file_but_detects_change(tmp_path):
+    from aiva_collector.local_state import connect, update_file_state, upsert_detected_file
+
+    source = tmp_path / "ventas.csv"
+    source.write_text("producto,cantidad\nA,1\n", encoding="utf-8")
+    config = CollectorConfig(
+        raw={"state_dir": str(tmp_path / "state"), "source_read_only": True},
+        config_path=tmp_path / "config.json",
+    )
+    conn = connect(tmp_path / "state" / "collector.db")
+    try:
+        upsert_detected_file(
+            conn,
+            file_id="file-1",
+            commerce_id="commerce-1",
+            collector_id="collector-1",
+            path=source,
+            file_sha256="sha-1",
+        )
+        update_file_state(conn, "file-1", status="sent")
+
+        assert _filter_unchanged_read_only_files(config, conn, [source]) == []
+
+        source.write_text("producto,cantidad\nA,222\n", encoding="utf-8")
+        assert _filter_unchanged_read_only_files(config, conn, [source]) == [source]
+    finally:
+        conn.close()
 
 
 def test_queue_status_outputs_counts_without_token(tmp_path, monkeypatch, capsys):

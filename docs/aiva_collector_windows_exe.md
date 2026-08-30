@@ -1,47 +1,35 @@
-# AIVA Collector Windows EXE
+# Ejecutables de AIVA Collector para Windows
 
-`aiva-collector.exe` es el ejecutable tecnico de consola para Windows. No requiere Python instalado en la PC del comercio.
+El paquete no requiere Python instalado y contiene tres ejecutables:
 
-## Configuracion por defecto
+- `aiva-collector.exe`: aplicación gráfica para el cliente;
+- `aiva-collector-cli.exe`: consola técnica;
+- `aiva-collector-background.exe`: runner silencioso para la tarea automática.
 
-En Windows, si no se pasa `--config`, el collector usa:
+## Configuración canónica
 
 ```text
-C:\AIVA_Comercio\config.local.json
+C:\ProgramData\AIVA\Collector\config.windows.json
 ```
 
-En Linux se mantiene el comportamiento historico: se debe pasar `--config`.
+El CLI también puede descubrir configuraciones heredadas. Cuando se pasa `--config`, la ruta debe existir.
 
-## Comandos
+## Comandos de soporte
 
 ```bat
-aiva-collector.exe validate --config C:\AIVA_Comercio\config.local.json
-aiva-collector.exe run-once --config C:\AIVA_Comercio\config.local.json
-aiva-collector.exe status --config C:\AIVA_Comercio\config.local.json
-aiva-collector.exe send --config C:\AIVA_Comercio\config.local.json
+aiva-collector-cli.exe validate
+aiva-collector-cli.exe run-once
+aiva-collector-cli.exe status
+aiva-collector-cli.exe queue-status
+aiva-collector-cli.exe diagnose-config
 ```
 
-Tambien existe `service-status` como alias de `status`.
-
-`run-once` sin `--send` es dry-run: genera `last_summary.json` y no envia nada al backend.
+`run-once` sin `--send` no envía al backend. El envío normal se hace mediante la aplicación o el runner automático.
 
 ## Token
 
-El token nunca se guarda en `config.local.json`. Para enviar o consultar estado contra el backend, debe existir la variable de entorno:
+La activación gráfica guarda el token fuera del JSON y lo protege con Windows DPAPI. No se debe pedir, copiar ni compartir el token por chat, tickets o capturas.
 
-```bat
-set AIVA_COLLECTOR_TOKEN=PEGAR_TOKEN_SOLO_EN_LA_PC_DEL_COMERCIO
-```
+## ZIP técnico
 
-No compartir tokens por chat, tickets ni capturas.
-
-## ZIP tecnico
-
-El artifact opcional `aiva-collector-windows-exe-v0.1.0.zip` contiene:
-
-- `dist/aiva-collector.exe`
-- documentacion minima
-- `windows/config.windows.example.json`
-- wrappers `.bat` para ejecutar acciones comunes
-
-No contiene `.env`, `config.local.json`, logs, state ni outputs reales.
+El ZIP técnico incluye los tres ejecutables, documentación y wrappers de soporte. No contiene `.env`, configuraciones reales, logs, estado, archivos comerciales ni tokens.

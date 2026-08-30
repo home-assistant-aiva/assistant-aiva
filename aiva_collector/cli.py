@@ -21,7 +21,7 @@ from .column_mapping import (
     validate_explicit_mapping,
 )
 from .client import CollectorClient, activate_collector
-from .config import PROJECT_ROOT, CollectorConfig, init_config, load_config
+from .config import PROJECT_ROOT, CollectorConfig, collector_data_dir, init_config, load_config
 from .config_discovery import (
     RuntimeConfigResult,
     find_installed_config_candidates,
@@ -54,9 +54,9 @@ from .token_store import save_token
 from .validation import validate_normalized_data
 
 
-WINDOWS_DEFAULT_CONFIG = r"C:\AIVA_Comercio\config.local.json"
+WINDOWS_DEFAULT_CONFIG = r"C:\ProgramData\AIVA\Collector\config.windows.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.6rc6"
+DEFAULT_COLLECTOR_VERSION = "0.2.7rc1"
 
 
 def default_config_path() -> str | None:
@@ -304,6 +304,43 @@ def _write_auto_run_state(config: CollectorConfig, payload: dict) -> Path:
     return path
 
 
+def _filter_unchanged_read_only_files(config: CollectorConfig, conn, files: list[Path]) -> list[Path]:
+    if not _config_bool(config, "source_read_only", False):
+        return files
+    selected: list[Path] = []
+    skipped = 0
+    terminal_or_queued = {"sent", "duplicate", "pending_send", "retrying", "processing"}
+    for path in files:
+        try:
+            stat = path.stat()
+        except OSError:
+            selected.append(path)
+            continue
+        row = conn.execute(
+            """
+            SELECT file_size, file_mtime, status
+            FROM processed_files
+            WHERE file_path = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (str(path),),
+        ).fetchone()
+        current_mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+        if (
+            row
+            and str(row["status"]) in terminal_or_queued
+            and int(row["file_size"] or -1) == int(stat.st_size)
+            and str(row["file_mtime"] or "") == current_mtime
+        ):
+            skipped += 1
+            continue
+        selected.append(path)
+    if skipped:
+        logging.info("run-auto read-only source skipped_unchanged=%s selected=%s", skipped, len(selected))
+    return selected
+
+
 def _archive_file(config: CollectorConfig, path: Path, target_dir: Path, *, suffix: str | None = None) -> list[str]:
     if not path.exists():
         return []
@@ -364,12 +401,20 @@ def _attach_reliability_metadata(
 
 def _machine_id_path() -> Path:
     if sys.platform.startswith("win"):
-        return Path(r"C:\AIVA_Comercio\state\machine.id")
+        return collector_data_dir() / "estado" / "machine.id"
     return PROJECT_ROOT / "state" / "machine.id"
 
 
 def stable_machine_id() -> str:
     path = _machine_id_path()
+    if sys.platform.startswith("win") and not path.exists():
+        legacy = Path(r"C:\AIVA_Comercio\state\machine.id")
+        if legacy.exists():
+            value = legacy.read_text(encoding="utf-8").strip()
+            if value:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(value, encoding="utf-8")
+                return value
     if path.exists():
         value = path.read_text(encoding="utf-8").strip()
         if value:
@@ -404,12 +449,12 @@ def _normalize_backend_url(value: str) -> str:
 def _write_activation_config(path: Path, *, backend_url: str, response: dict) -> None:
     defaults = dict(response.get("config_defaults") or {})
     config = {
+        **defaults,
         "backend_url": backend_url.rstrip("/"),
         "commerce_id": response["commerce_id"],
         "collector_id": response["collector_id"],
-        "collector_version": response.get("collector_version") or DEFAULT_COLLECTOR_VERSION,
+        "collector_version": DEFAULT_COLLECTOR_VERSION,
         "collector_token_env": "AIVA_COLLECTOR_TOKEN",
-        **defaults,
     }
     config.pop("collector_token", None)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -755,7 +800,7 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         client = CollectorClient(config)
         conn = connect_local_state(local_db_path(config))
         initial_queue = process_queue(conn, config, client=client)
-        files = discover_input_files(config)
+        files = _filter_unchanged_read_only_files(config, conn, discover_input_files(config))
         if not files:
             logging.info("run-auto: no hay archivos CSV/XLSX en input_dir")
             pending_count = queue_counts(conn).get("pending", 0)

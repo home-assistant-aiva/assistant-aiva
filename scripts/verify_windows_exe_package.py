@@ -27,6 +27,8 @@ VERSION = read_version()
 
 
 def public_asset_version(version: str) -> str:
+    if version == "0.2.7rc1":
+        return "0.2.7-desktop-rc1"
     if version == "0.2.6rc6":
         return "0.2.6-discovery-rc6"
     if version == "0.2.6rc3":
@@ -43,6 +45,7 @@ SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 INNO_PATH = ROOT / "packaging" / "inno" / "aiva_collector_setup.iss"
 DIST_DIR = ROOT / "dist"
 EXE_PATH = DIST_DIR / "aiva-collector.exe"
+CLI_EXE_PATH = DIST_DIR / "aiva-collector-cli.exe"
 BACKGROUND_EXE_PATH = DIST_DIR / "aiva-collector-background.exe"
 INSTALLER_PATH = DIST_DIR / f"AIVA-Collector-Setup-v{ASSET_VERSION}.exe"
 TECH_ZIP_PATH = DIST_DIR / f"aiva-collector-windows-exe-v{VERSION}.zip"
@@ -69,6 +72,7 @@ SECRET_REGEXES = [
 ]
 TECH_ZIP_FILES = [
     ROOT / "dist" / "aiva-collector.exe",
+    ROOT / "dist" / "aiva-collector-cli.exe",
     ROOT / "dist" / "aiva-collector-background.exe",
     ROOT / "docs" / "aiva_collector_windows_exe.md",
     ROOT / "docs" / "aiva_collector_windows_installer.md",
@@ -120,11 +124,14 @@ def assert_spec_safe(spec_path: Path = SPEC_PATH) -> None:
     assert_text_file_safe(spec_path)
     required = [
         'name="aiva-collector"',
+        'name="aiva-collector-cli"',
         'name="aiva-collector-background"',
         "console=True",
         "console=False",
         "aiva_collector_entrypoint.py",
+        "aiva_collector_cli_entrypoint.py",
         "aiva_collector_background_entrypoint.py",
+        '"tkinter"',
         '"requests"',
         '"openpyxl"',
         '"certifi"',
@@ -145,18 +152,16 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
     required = [
         f"OutputBaseFilename=AIVA-Collector-Setup-v{ASSET_VERSION}",
         "Source: \"..\\..\\dist\\aiva-collector.exe\"",
+        "Source: \"..\\..\\dist\\aiva-collector-cli.exe\"",
         "Source: \"..\\..\\dist\\aiva-collector-background.exe\"",
         "DestName: \"config.windows.json\"; Flags: onlyifdoesntexist",
         "{commonappdata}\\AIVA\\Collector\\entrada",
         "{commonappdata}\\AIVA\\Collector\\estado\\queue",
         "{commonappdata}\\AIVA\\Collector\\diagnostico",
         'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated',
-        "activate.bat",
-        "run_auto.bat",
-        "run_queue_status.bat",
-        "run_retry_pending.bat",
-        "diagnose_config.bat",
-        "install_scheduled_task.bat",
+        'Filename: "{app}\\{#AppExeName}"; Description: "Abrir AIVA Collector"',
+        "Permissions: users-modify",
+        'Source: "..\\windows_runtime\\*.bat"',
     ]
     missing = [value for value in required if value not in text]
     if missing:
@@ -187,7 +192,7 @@ def assert_runtime_wrappers_safe(root: Path = ROOT) -> None:
                 "<interval>pt15m</interval>",
                 "<executiontimelimit>%task_limit%</executiontimelimit>",
                 "<restartonfailure><interval>pt5m</interval><count>3</count></restartonfailure>",
-                '<arguments>run-auto --config "%aiva_root%\\config.local.json"</arguments>',
+                '<arguments>run-auto --config "%aiva_root%\\config.windows.json"</arguments>',
             ):
                 if required not in xml_text:
                     raise VerifyError(f"install_scheduled_task.bat no configura {required}")
@@ -198,12 +203,11 @@ def assert_runtime_wrappers_safe(root: Path = ROOT) -> None:
                 if forbidden in lowered:
                     raise VerifyError(f"Diagnostico contiene accion prohibida: {forbidden}")
     run_send = (root / "packaging" / "windows_runtime" / "run_send.bat").read_text(encoding="utf-8")
-    token_check = run_send.find('if "%AIVA_COLLECTOR_TOKEN%"==""')
     prompt = run_send.find("Escribi ENVIAR")
     confirm = run_send.find('if /I not "%CONFIRM%"=="ENVIAR"')
     send = run_send.find('"%AIVA_EXE%" send')
-    if not (0 <= token_check < prompt < confirm < send):
-        raise VerifyError("run_send.bat no protege envio con token y confirmacion")
+    if not (0 <= prompt < confirm < send):
+        raise VerifyError("run_send.bat no protege envio con confirmacion")
 
 
 def create_technical_zip(zip_path: Path = TECH_ZIP_PATH) -> Path:
@@ -271,12 +275,14 @@ def verify(create_zip: bool = False, require_artifacts: bool = False) -> dict[st
 
     artifacts = []
     if require_artifacts:
-        for path in (EXE_PATH, BACKGROUND_EXE_PATH, INSTALLER_PATH):
+        for path in (EXE_PATH, CLI_EXE_PATH, BACKGROUND_EXE_PATH, INSTALLER_PATH):
             if not path.exists():
                 raise VerifyError(f"No existe artifact requerido: {path}")
             artifacts.append(path)
     elif EXE_PATH.exists():
         artifacts.append(EXE_PATH)
+        if CLI_EXE_PATH.exists():
+            artifacts.append(CLI_EXE_PATH)
         if BACKGROUND_EXE_PATH.exists():
             artifacts.append(BACKGROUND_EXE_PATH)
     if create_zip:

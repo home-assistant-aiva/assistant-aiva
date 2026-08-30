@@ -26,8 +26,9 @@ def build_exe(spec_path: Path = SPEC_PATH, dist_dir: Path = DIST_DIR) -> Path:
     ]
     subprocess.run(cmd, cwd=ROOT, check=True)
     exe_path = dist_dir / "aiva-collector.exe"
+    cli_path = dist_dir / "aiva-collector-cli.exe"
     background_path = dist_dir / "aiva-collector-background.exe"
-    missing = [path for path in (exe_path, background_path) if not path.exists()]
+    missing = [path for path in (exe_path, cli_path, background_path) if not path.exists()]
     if missing:
         raise FileNotFoundError("No se generaron ejecutables: " + ", ".join(str(path) for path in missing))
     return exe_path

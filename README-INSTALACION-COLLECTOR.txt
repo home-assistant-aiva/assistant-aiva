@@ -1,73 +1,68 @@
-AIVA Collector Discovery RC6
-===================================
+AIVA Collector Desktop RC1
+==========================
 
-Esta version es candidata / pre-release. Usar primero en ambiente controlado.
+Versión candidata para validar primero en una PC controlada del comercio.
 
-Instalacion
+Qué corrige
 -----------
 
-1. Instalar AIVA Collector con AIVA-Collector-Setup-v0.2.6-discovery-rc6.exe.
+- "AIVA Collector" ahora abre una aplicación visible; ya no abre una consola que se cierra.
+- La aplicación muestra si el equipo está conectado, la carpeta observada, la última sincronización y la cola pendiente.
+- La configuración automática usa la ruta real: %ProgramData%\AIVA\Collector\config.windows.json.
+- La tarea automática continúa en segundo plano cada 15 minutos sin mostrar una consola.
+- La aplicación técnica de consola queda separada como aiva-collector-cli.exe.
+- La carpeta elegida se trata como solo lectura: AIVA no mueve ni borra archivos del sistema de ventas.
 
-Actualizacion desde instalador 2.5/RC anteriores:
-- El instalador conserva %PROGRAMDATA%\AIVA\Collector.
-- Conserva config.local.json, token seguro, estado, cola offline, mapeos y logs.
-- La tarea nueva usa aiva-collector-background.exe sin consola.
-- La tarea se registra al iniciar sesion, con 60 segundos de demora, repeticion cada 15 minutos, Hidden=true, IgnoreNew, timeout de 30 minutos y reintento cada 5 minutos hasta 3 veces.
-- Al instalar la tarea nueva se eliminan solo tareas conocidas anteriores: AIVA Collector, AIVA Collector Scheduled, AIVA Collector Auto.
-- No vuelve a activar el Collector si ya existe config.local.json y token guardado.
-- No ejecuta discovery automatico repetido desde la tarea; la tarea solo corre run-auto.
+Instalación
+-----------
 
-Rollback:
-- Desinstalar AIVA Collector desde Windows. Por defecto no borrar %PROGRAMDATA%\AIVA\Collector.
-- Reinstalar el instalador anterior aprobado.
-- Ejecutar "AIVA Collector - Instalar tarea automatica" si se requiere restaurar la tarea manualmente.
-- Si se desea un rollback limpio completo, copiar primero %PROGRAMDATA%\AIVA\Collector como backup operativo.
-2. El instalador detecta y migra automaticamente configuraciones previas a C:\ProgramData\AIVA Collector\config.windows.json.
-3. Si no hay configuracion valida, ejecutar "AIVA Collector - Activar".
-4. Ejecutar "AIVA Collector - Diagnosticar configuracion" si se quiere revisar la migracion sin mostrar secretos.
-5. Ejecutar "AIVA Collector - Detectar fuentes sin enviar".
-6. Revisar el resultado local.
-7. Ejecutar "AIVA Collector - Reportar fuentes detectadas" solo cuando corresponda.
-8. Verificar en Admin: AIVA Comercial > Fuentes de datos > Fuentes detectadas.
-9. Convertir la discovery en fuente desde Admin antes de activarla.
+1. Ejecutar AIVA-Collector-Setup-v0.2.7-desktop-rc1.exe.
+2. Dejar marcada la opción de acceso directo en el escritorio.
+3. Al terminar, abrir "AIVA Collector".
+4. Presionar "Conectar con AIVA".
+5. Pegar el código de activación generado desde AIVA Comercial.
+6. Presionar "Elegir carpeta de datos" y seleccionar la carpeta donde el sistema de ventas exporta CSV o Excel.
+7. Presionar "Probar conexión".
+8. Presionar "Sincronizar ahora" para la primera prueba controlada.
 
-Seguridad y privacidad
-----------------------
+Uso normal
+----------
 
-- AIVA solo detecta posibles fuentes.
-- AIVA no modifica archivos, bases, ventas, stock ni precios.
-- AIVA no sube archivos del comercio.
-- AIVA no lee contenido comercial completo en esta fase.
-- AIVA no se conecta a bases reales en esta fase.
-- AIVA no envia Telegram real desde Discovery.
-- AIVA no usa GPT ni LLM desde Discovery.
+- No hace falta dejar abierta la ventana.
+- Windows ejecuta aiva-collector-background.exe al iniciar sesión y luego cada 15 minutos.
+- Si no hay Internet, los envíos quedan en cola y se reintentan.
+- La ventana puede abrirse en cualquier momento para revisar el estado o sincronizar manualmente.
 
-Incluye
--------
+Actualización desde RC6 o versiones anteriores
+-----------------------------------------------
 
-- Deteccion segura de carpetas candidatas.
-- Deteccion de CSV, XLSX y XLS.
-- Deteccion por extension de SQLite, Access y Firebird.
-- Deteccion basica de servicios DB en Windows sin conectarse.
-- Migracion automatica de configuracion previa con backup local.
-- Filtro estricto para evitar Program Files, Desktop/Downloads genericos y software no comercial.
-- Comando local dry-run.
-- Reporte de metadata segura al backend de Fuentes de datos.
+- Conserva %ProgramData%\AIVA\Collector.
+- Conserva activación, token protegido, estado, cola, mapeos y registros.
+- Reinstala únicamente las tareas conocidas de AIVA Collector.
+- Migra una configuración previa válida a config.windows.json cuando corresponde.
+- No publica tokens ni los muestra en pantalla.
 
-Notas RC6
----------
+Archivos y seguridad
+--------------------
 
-- Reporta fuentes detectadas al endpoint seguro del Collector sin X-AIVA-Secret.
-- Usa Authorization Bearer del Collector y X-AIVA-Collector-Id.
-- Reporta la fuente elegida en config como selected_explicit para dejarla activa.
-- Muestra errores HTTP concretos ante 401, 403, 404 y 422.
-- Ejecucion automatica silenciosa mediante aiva-collector-background.exe.
-- Salida del runner background dirigida a logs en ProgramData con rotacion.
-- Costo faltante tratado como null, sin margen inventado.
-- Pendiente de prueba fisica final por Federico.
-- FASE 6.4C todavia no incluida.
+- Configuración: %ProgramData%\AIVA\Collector\config.windows.json
+- Estado y token protegido: %ProgramData%\AIVA\Collector\estado
+- Registros: %ProgramData%\AIVA\Collector\logs
+- Backups de configuración: %ProgramData%\AIVA\Collector\backups
+- El token se protege con Windows DPAPI para el usuario que activa el equipo.
+- El Collector admite CSV y XLSX.
+- Al seleccionar una carpeta externa, los archivos originales permanecen en su lugar.
+- Para producción y demostraciones con datos reales, el servicio AIVA debe usar una URL HTTPS válida. La IP HTTP heredada queda únicamente para pruebas controladas.
 
-Proximo paso
-------------
+Límite actual
+-------------
 
-Convertir la discovery en fuente desde Admin. La sincronizacion automatica desde fuente confirmada corresponde a la siguiente fase.
+Esta versión conecta de forma automática una carpeta de exportación CSV/XLSX. La conexión directa a bases propietarias del sistema de caja requiere un conector específico y no debe declararse disponible sin validarlo con ese proveedor.
+
+Rollback
+--------
+
+1. Copiar %ProgramData%\AIVA\Collector como backup operativo.
+2. Desinstalar AIVA Collector desde Windows sin borrar ProgramData.
+3. Reinstalar el instalador anterior aprobado.
+4. Restaurar la tarea automática de la versión anterior si fuera necesario.
