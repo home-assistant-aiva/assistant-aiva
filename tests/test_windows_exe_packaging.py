@@ -58,6 +58,9 @@ def test_windows_workflow_runs_real_installer_verification_without_publishing():
     assert "SIMULATED-RC1-TOKEN" in script
     assert "Get-AuthenticodeSignature" in script
     assert "unins000.exe" in script
+    assert "function Stop-InstalledCollectorProcesses" in script
+    assert "taskkill.exe /PID $process.Id /T /F" in script
+    assert script.count("Stop-InstalledCollectorProcesses") >= 4
 
 
 def test_verify_without_artifacts_writes_manifest(tmp_path, monkeypatch):

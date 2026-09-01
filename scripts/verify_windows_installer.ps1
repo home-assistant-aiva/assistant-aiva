@@ -19,8 +19,31 @@ function Remove-ScheduledTask {
   & schtasks.exe /Delete /TN $TaskName /F *> $null
 }
 
+function Stop-InstalledCollectorProcesses {
+  $processNames = @("aiva-collector", "aiva-collector-cli", "aiva-collector-background")
+  foreach ($name in $processNames) {
+    foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+      & taskkill.exe /PID $process.Id /T /F *> $null
+    }
+  }
+
+  $deadline = [DateTime]::UtcNow.AddSeconds(10)
+  do {
+    $remaining = @(
+      foreach ($name in $processNames) {
+        Get-Process -Name $name -ErrorAction SilentlyContinue
+      }
+    )
+    if ($remaining.Count -eq 0) { return }
+    Start-Sleep -Milliseconds 250
+  } while ([DateTime]::UtcNow -lt $deadline)
+
+  throw "Quedaron procesos Collector activos: $($remaining.Id -join ', ')."
+}
+
 function Reset-TestInstallation {
   Remove-ScheduledTask
+  Stop-InstalledCollectorProcesses
   if (Test-Path $InstallDir) { Remove-Item -LiteralPath $InstallDir -Recurse -Force }
   if (Test-Path $DataRoot) { Remove-Item -LiteralPath $DataRoot -Recurse -Force }
 }
@@ -68,8 +91,7 @@ function Assert-CollectorRuntime {
   Start-Sleep -Seconds 4
   $gui.Refresh()
   Assert-True (-not $gui.HasExited) "La interfaz Desktop/Tkinter no permanecio abierta."
-  Stop-Process -Id $gui.Id -Force
-  $gui.WaitForExit()
+  Stop-InstalledCollectorProcesses
 }
 
 function Invoke-Uninstaller {
@@ -169,6 +191,7 @@ try {
   Get-Content -Raw -LiteralPath $EvidencePath
 } finally {
   Remove-ScheduledTask
+  Stop-InstalledCollectorProcesses
   if (Test-Path $InstallDir) { Remove-Item -LiteralPath $InstallDir -Recurse -Force }
   if (Test-Path $DataRoot) { Remove-Item -LiteralPath $DataRoot -Recurse -Force }
 }
