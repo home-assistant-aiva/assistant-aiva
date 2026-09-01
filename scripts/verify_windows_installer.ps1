@@ -17,6 +17,7 @@ function Assert-True([bool]$Condition, [string]$Message) {
 
 function Remove-ScheduledTask {
   & schtasks.exe /Delete /TN $TaskName /F *> $null
+  $global:LASTEXITCODE = 0
 }
 
 function Stop-InstalledCollectorProcesses {

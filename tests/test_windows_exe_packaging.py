@@ -61,6 +61,8 @@ def test_windows_workflow_runs_real_installer_verification_without_publishing():
     assert "function Stop-InstalledCollectorProcesses" in script
     assert "taskkill.exe /PID $process.Id /T /F" in script
     assert script.count("Stop-InstalledCollectorProcesses") >= 4
+    remove_task = script.split("function Remove-ScheduledTask", maxsplit=1)[1].split("}", maxsplit=1)[0]
+    assert "$global:LASTEXITCODE = 0" in remove_task
 
 
 def test_verify_without_artifacts_writes_manifest(tmp_path, monkeypatch):
