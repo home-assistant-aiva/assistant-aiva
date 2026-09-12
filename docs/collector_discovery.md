@@ -24,6 +24,11 @@ Discovery detecta posibles fuentes de datos en la PC Windows del comercio para q
 - No envia Telegram.
 - No usa GPT ni LLM.
 
+Discovery puede informar la presencia de `.xls` para que un operador identifique una
+fuente potencial, pero el Collector no lo ingiere ni lo anuncia como capacidad XLSX.
+Los únicos formatos de archivo ingeribles son CSV y XLSX; si encuentra `.xls`, lo
+incluye en `sample_metadata.unsupported_extensions`.
+
 ## Seguridad y privacidad
 
 Discovery trabaja en modo seguro por defecto. Para archivos usa metadata: nombre, extension, tamano y fecha de modificacion. Los ejemplos enviados son solo nombres de archivo, sin rutas completas. `detected_path` se envia porque el instalador lo necesita para confirmar la fuente.

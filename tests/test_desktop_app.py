@@ -51,6 +51,7 @@ def test_dashboard_reads_source_and_last_sync_without_network(tmp_path, monkeypa
     input_dir = tmp_path / "ventas"
     input_dir.mkdir()
     (input_dir / "ventas.csv").write_text("producto,cantidad\nA,1\n", encoding="utf-8")
+    (input_dir / "ventas.xls").write_bytes(b"formato no soportado")
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     (state_dir / "last_auto_run.json").write_text(
@@ -76,6 +77,19 @@ def test_dashboard_reads_source_and_last_sync_without_network(tmp_path, monkeypa
     assert snapshot.files_processed == 1
     assert snapshot.summaries_sent == 1
     assert snapshot.commerce_id == "…34567890"
+
+
+def test_dashboard_names_only_supported_source_formats(tmp_path, monkeypatch):
+    missing_input = tmp_path / "sin-configurar"
+    config_path = tmp_path / "config.windows.json"
+    config_path.write_text(json.dumps(_config_payload(tmp_path, input_dir=missing_input)), encoding="utf-8")
+    monkeypatch.setenv("AIVA_COLLECTOR_STANDARD_CONFIG", str(config_path))
+
+    snapshot = load_dashboard_snapshot()
+
+    assert snapshot.source_files == 0
+    assert "CSV o XLSX" in snapshot.detail
+    assert ".xls" not in snapshot.detail
 
 
 def test_dashboard_marks_plain_http_as_test_mode(tmp_path, monkeypatch):

@@ -19,7 +19,8 @@ from .local_state import connect as connect_local_state, local_db_path
 from .offline_queue import enqueue_payload, is_temporary_backend_error
 
 
-DATA_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+SUPPORTED_DATA_EXTENSIONS = {".csv", ".xlsx"}
+DISCOVERABLE_DATA_EXTENSIONS = SUPPORTED_DATA_EXTENSIONS | {".xls"}
 TEXT_REPORT_EXTENSIONS = {".txt"}
 DATABASE_EXTENSIONS = {".db": "sqlite", ".sqlite": "sqlite", ".sqlite3": "sqlite", ".mdb": "access", ".accdb": "access", ".fdb": "firebird", ".gdb": "firebird"}
 POSITIVE_SIGNALS = {
@@ -404,7 +405,7 @@ class DiscoveryScanner:
             suffix = path.suffix.lower()
             if self._negative_file(path):
                 continue
-            if suffix in DATA_EXTENSIONS or (suffix in TEXT_REPORT_EXTENSIONS and _has_signal(path.name, POSITIVE_SIGNALS)):
+            if suffix in DISCOVERABLE_DATA_EXTENSIONS or (suffix in TEXT_REPORT_EXTENSIONS and _has_signal(path.name, POSITIVE_SIGNALS)):
                 metadata = self._file_metadata(path)
                 if metadata:
                     data_files.append(metadata)
@@ -481,11 +482,14 @@ class DiscoveryScanner:
         capabilities = {
             "files": True,
             "csv": ".csv" in extensions,
-            "xlsx": bool({".xlsx", ".xls"} & extensions),
+            "xlsx": ".xlsx" in extensions,
             "databases": any(ext in DATABASE_EXTENSIONS for ext in extensions),
             "recent_files": recent_count,
         }
         sample_metadata = {"files_found": len(files), "examples": examples}
+        unsupported_extensions = sorted(extensions - SUPPORTED_DATA_EXTENSIONS)
+        if unsupported_extensions:
+            sample_metadata["unsupported_extensions"] = unsupported_extensions
         confidence = self.score_candidate(folder=folder, files=files)
         if confidence < self.config.min_confidence:
             return None

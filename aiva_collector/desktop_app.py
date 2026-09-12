@@ -283,7 +283,7 @@ class CollectorApp:
             source_detail.set(snapshot.input_dir or "Carpeta configurada")
         else:
             source_value.set("Sin carpeta")
-            source_detail.set(snapshot.input_dir or "Elegí dónde se generan CSV o Excel")
+            source_detail.set(snapshot.input_dir or "Elegí dónde se generan CSV o XLSX")
 
         sync_value, sync_detail = self.sync_card
         sync_value.set(_friendly_time(snapshot.last_run_at))

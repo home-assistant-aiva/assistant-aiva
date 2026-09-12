@@ -313,6 +313,10 @@ def test_diagnostic_zip_excludes_source_content_and_redacts_secret(tmp_path, mon
     config_path.write_text(json.dumps(config_data), encoding="utf-8")
     source = tmp_path / "entrada" / "ventas.csv"
     _write_exact_csv(source)
+    unsupported_source = tmp_path / "entrada" / "ventas.xls"
+    unsupported_source.write_bytes(b"contenido xls que no debe ingerirse")
+    unsupported_content = unsupported_source.read_bytes()
+    unsupported_mtime_ns = unsupported_source.stat().st_mtime_ns
     (tmp_path / "logs").mkdir()
     commercial_secret = "YERBA-COMERCIAL-NO-DEBE-SALIR"
     (tmp_path / "logs" / "collector.log").write_text(
@@ -331,9 +335,13 @@ def test_diagnostic_zip_excludes_source_content_and_redacts_secret(tmp_path, mon
     with zipfile.ZipFile(zip_path) as archive:
         assert "ventas.csv" not in archive.namelist()
         combined = b"".join(archive.read(name) for name in archive.namelist())
+    assert b"ventas.csv" in combined
+    assert b"ventas.xls" not in combined
     assert secret.encode() not in combined
     assert commercial_secret.encode() not in combined
     assert hashlib.sha256(source.read_bytes()).hexdigest().encode() in combined
+    assert unsupported_source.read_bytes() == unsupported_content
+    assert unsupported_source.stat().st_mtime_ns == unsupported_mtime_ns
 
 
 def test_diagnostic_export_reads_pre_rc2_database_without_migrating_it(tmp_path, monkeypatch):

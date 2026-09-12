@@ -93,6 +93,61 @@ def test_scanner_detects_candidate_folder_with_stock_xlsx(tmp_path):
     assert any(item.capabilities.get("xlsx") for item in candidates if item.detected_path == str(folder))
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected_csv", "expected_xlsx", "expected_unsupported"),
+    [
+        ("ventas.xls", False, False, [".xls"]),
+        ("ventas.xlsx", False, True, []),
+        ("ventas.csv", True, False, []),
+    ],
+)
+def test_scanner_reports_only_ingestible_file_capabilities(
+    tmp_path,
+    filename,
+    expected_csv,
+    expected_xlsx,
+    expected_unsupported,
+):
+    folder = tmp_path / "Reportes"
+    folder.mkdir()
+    source = folder / filename
+    source.write_bytes(b"contenido que Discovery no debe modificar")
+    original_content = source.read_bytes()
+    original_mtime_ns = source.stat().st_mtime_ns
+
+    candidate = next(item for item in _scanner(tmp_path).scan() if item.detected_path == str(folder))
+
+    assert candidate.capabilities["csv"] is expected_csv
+    assert candidate.capabilities["xlsx"] is expected_xlsx
+    assert candidate.sample_metadata.get("unsupported_extensions", []) == expected_unsupported
+    assert filename in candidate.sample_metadata["examples"]
+    assert source.read_bytes() == original_content
+    assert source.stat().st_mtime_ns == original_mtime_ns
+
+
+def test_scanner_reports_mixed_supported_and_unsupported_formats_without_changing_sources(tmp_path):
+    folder = tmp_path / "Reportes"
+    folder.mkdir()
+    sources = {
+        folder / "ventas.xls": b"xls heredado",
+        folder / "ventas.xlsx": b"xlsx soportado",
+        folder / "ventas.csv": b"csv soportado",
+    }
+    for path, content in sources.items():
+        path.write_bytes(content)
+    original_mtimes = {path: path.stat().st_mtime_ns for path in sources}
+
+    candidate = next(item for item in _scanner(tmp_path).scan() if item.detected_path == str(folder))
+
+    assert candidate.capabilities["csv"] is True
+    assert candidate.capabilities["xlsx"] is True
+    assert candidate.sample_metadata["unsupported_extensions"] == [".xls"]
+    assert set(candidate.sample_metadata["examples"]) == {path.name for path in sources}
+    for path, content in sources.items():
+        assert path.read_bytes() == content
+        assert path.stat().st_mtime_ns == original_mtimes[path]
+
+
 def test_scanner_ignores_excluded_directories(tmp_path):
     folder = tmp_path / ".git" / "Reportes"
     folder.mkdir(parents=True)

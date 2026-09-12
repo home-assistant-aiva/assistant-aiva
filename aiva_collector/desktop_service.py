@@ -190,7 +190,7 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
     elif not source_exists:
         state = "attention"
         title = "Conectado, falta elegir la carpeta de datos"
-        detail = "Seleccioná la carpeta donde el sistema de ventas genera archivos CSV o Excel."
+        detail = "Seleccioná la carpeta donde el sistema de ventas genera archivos CSV o XLSX."
     elif not _uses_secure_transport(config.backend_url):
         state = "attention"
         title = "Conectado en modo de prueba"
