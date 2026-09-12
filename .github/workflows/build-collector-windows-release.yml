@@ -30,12 +30,26 @@ env:
 jobs:
   build-release:
     runs-on: windows-latest
+    outputs:
+      source_commit: ${{ steps.source-revision.outputs.commit }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.sha }}
+
+      - name: Verify immutable source revision
+        id: source-revision
+        shell: pwsh
+        env:
+          AIVA_EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $expected = $env:AIVA_EXPECTED_SHA.Trim().ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Checked out commit $actual does not match workflow commit $expected" }
+          "AIVA_BUILD_COMMIT=$actual" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "commit=$actual" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -214,6 +228,23 @@ jobs:
           name: aiva-collector-windows-v${{ env.AIVA_RELEASE_VERSION }}
           path: dist
 
+      - name: Verify artifact source revision
+        shell: pwsh
+        env:
+          AIVA_EXPECTED_SHA: ${{ needs.build-release.outputs.source_commit }}
+        run: |
+          $expected = $env:AIVA_EXPECTED_SHA.Trim().ToLowerInvariant()
+          if ($expected -ne "${{ github.sha }}".ToLowerInvariant()) { throw "Build output commit does not match workflow commit" }
+          $evidenceFiles = @(
+            "dist/$env:AIVA_MANIFEST_ASSET",
+            "dist/windows-installer-verification.json"
+          )
+          foreach ($path in $evidenceFiles) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing build evidence: $path" }
+            $recorded = [string]((Get-Content -Raw -LiteralPath $path | ConvertFrom-Json).build_commit)
+            if ($recorded.Trim().ToLowerInvariant() -ne $expected) { throw "Build evidence commit mismatch: $path" }
+          }
+
       - name: Reject existing release or tag
         shell: pwsh
         env:
@@ -235,7 +266,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.build-release.outputs.source_commit }}
           name: AIVA Collector Desktop RC2
           prerelease: true
           draft: false

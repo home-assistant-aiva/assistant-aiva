@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -116,6 +117,15 @@ SAFE_COLLECTOR_TOKEN_CONTEXTS = [
 
 class PackageError(RuntimeError):
     pass
+
+
+def build_commit() -> str | None:
+    value = os.getenv("AIVA_BUILD_COMMIT", "").strip().lower()
+    if not value:
+        return None
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise PackageError("AIVA_BUILD_COMMIT no es un SHA Git completo")
+    return value
 
 
 def read_version(root: Path = ROOT) -> str:
@@ -291,6 +301,7 @@ def build_package(root: Path = ROOT, dist_dir: Path = DIST_DIR) -> tuple[Path, P
     manifest = {
         "package_name": PACKAGE_NAME,
         "version": version,
+        "build_commit": build_commit(),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files_count": files_count,
         "zip_path": str(zip_path),

@@ -1,5 +1,8 @@
 import importlib.util
+import json
 from pathlib import Path
+
+import pytest
 
 
 VERIFY_SPEC = importlib.util.spec_from_file_location(
@@ -8,6 +11,29 @@ VERIFY_SPEC = importlib.util.spec_from_file_location(
 verify_windows_exe_package = importlib.util.module_from_spec(VERIFY_SPEC)
 assert VERIFY_SPEC.loader is not None
 VERIFY_SPEC.loader.exec_module(verify_windows_exe_package)
+
+
+WORKFLOW_PATHS = {
+    "release": Path(".github/workflows/build-collector-windows-release.yml"),
+    "installer": Path(".github/workflows/build-windows-installer.yml"),
+}
+
+
+def _job(workflow: str, name: str) -> str:
+    lines = workflow.splitlines()
+    start = lines.index(f"  {name}:")
+    end = next(
+        (index for index in range(start + 1, len(lines)) if lines[index].startswith("  ") and not lines[index].startswith("    ")),
+        len(lines),
+    )
+    return "\n".join(lines[start:end])
+
+
+def _step(job: str, name: str) -> str:
+    marker = f"      - name: {name}\n"
+    start = job.index(marker)
+    following = job.find("\n      - name:", start + len(marker))
+    return job[start:] if following == -1 else job[start:following]
 
 
 def test_pyinstaller_spec_is_safe_and_complete():
@@ -110,8 +136,65 @@ def test_windows_workflows_reject_release_name_collisions_without_clobber():
         assert "--clobber" not in workflow
 
     release_workflow, installer_workflow = workflows
-    assert "target_commitish: ${{ github.sha }}" in release_workflow
+    assert "target_commitish: ${{ needs.build-release.outputs.source_commit }}" in release_workflow
     assert '--target "$env:AIVA_TARGET_SHA"' in installer_workflow
+
+
+def test_windows_workflows_build_and_publish_the_verified_source_commit():
+    workflows = {name: path.read_text(encoding="utf-8") for name, path in WORKFLOW_PATHS.items()}
+    build_jobs = {
+        "release": _job(workflows["release"], "build-release"),
+        "installer": _job(workflows["installer"], "build"),
+    }
+    publish_jobs = {name: _job(workflow, "publish") for name, workflow in workflows.items()}
+
+    for build_job in build_jobs.values():
+        checkout = _step(build_job, "Checkout")
+        revision = _step(build_job, "Verify immutable source revision")
+        assert "ref: ${{ github.sha }}" in checkout
+        assert build_job.index("- name: Checkout") < build_job.index("- name: Verify immutable source revision")
+        assert "git rev-parse HEAD" in revision
+        assert "$actual -ne $expected" in revision
+        assert "AIVA_BUILD_COMMIT=$actual" in revision
+        assert "commit=$actual" in revision
+        assert "source_commit: ${{ steps.source-revision.outputs.commit }}" in build_job
+
+    expected_outputs = {
+        "release": "${{ needs.build-release.outputs.source_commit }}",
+        "installer": "${{ needs.build.outputs.source_commit }}",
+    }
+    for name, publish_job in publish_jobs.items():
+        provenance = _step(publish_job, "Verify artifact source revision")
+        assert "uses: actions/download-artifact@v4" in publish_job
+        assert f"AIVA_EXPECTED_SHA: {expected_outputs[name]}" in provenance
+        assert 'if ($expected -ne "${{ github.sha }}".ToLowerInvariant())' in provenance
+        assert "ConvertFrom-Json).build_commit" in provenance
+        assert "Build evidence commit mismatch" in provenance
+
+    assert "target_commitish: ${{ needs.build-release.outputs.source_commit }}" in publish_jobs["release"]
+    assert "AIVA_TARGET_SHA: ${{ needs.build.outputs.source_commit }}" in publish_jobs["installer"]
+
+
+def test_installer_manifest_and_windows_evidence_record_build_commit(tmp_path, monkeypatch):
+    build_sha = "a" * 40
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setenv("AIVA_BUILD_COMMIT", build_sha)
+    monkeypatch.setattr(verify_windows_exe_package, "MANIFEST_PATH", manifest)
+
+    verify_windows_exe_package.verify(create_zip=False, require_artifacts=False)
+
+    assert json.loads(manifest.read_text(encoding="utf-8"))["build_commit"] == build_sha
+    installer_verifier = Path("scripts/verify_windows_installer.ps1").read_text(encoding="utf-8")
+    assert "build_commit = $BuildCommit.Trim().ToLowerInvariant()" in installer_verifier
+    assert "AIVA_BUILD_COMMIT no identifica el commit compilado" in installer_verifier
+
+
+def test_installer_manifest_rejects_invalid_build_commit(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIVA_BUILD_COMMIT", "branch-name")
+    monkeypatch.setattr(verify_windows_exe_package, "MANIFEST_PATH", tmp_path / "manifest.json")
+
+    with pytest.raises(verify_windows_exe_package.VerifyError, match="SHA Git completo"):
+        verify_windows_exe_package.verify(create_zip=False, require_artifacts=False)
 
 
 def test_verify_without_artifacts_writes_manifest(tmp_path, monkeypatch):

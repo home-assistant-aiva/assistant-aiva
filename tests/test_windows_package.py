@@ -64,7 +64,9 @@ def _zip_text(path, name):
         return archive.read(name).decode("utf-8")
 
 
-def test_build_creates_zip_manifest_and_required_files(tmp_path):
+def test_build_creates_zip_manifest_and_required_files(tmp_path, monkeypatch):
+    build_sha = "b" * 40
+    monkeypatch.setenv("AIVA_BUILD_COMMIT", build_sha)
     zip_path, manifest_path, manifest = build_windows_package.build_package(Path.cwd(), tmp_path)
     names = _zip_names(zip_path)
 
@@ -72,12 +74,14 @@ def test_build_creates_zip_manifest_and_required_files(tmp_path):
     assert manifest_path.exists()
     assert manifest["package_name"] == "aiva-collector-windows-manual"
     assert manifest["version"] == "0.2.7rc2"
+    assert manifest["build_commit"] == build_sha
     assert manifest["safety_checks_passed"] is True
     assert manifest["files_count"] == len(names)
     assert REQUIRED_IN_ZIP <= names
 
     stored = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert stored["sha256"] == verify_windows_package.sha256(zip_path)
+    assert stored["build_commit"] == build_sha
 
 
 def test_zip_excludes_runtime_dev_and_local_files(tmp_path):

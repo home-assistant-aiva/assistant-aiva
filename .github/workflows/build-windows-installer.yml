@@ -32,10 +32,25 @@ jobs:
     runs-on: windows-latest
     outputs:
       package_version: ${{ steps.package-version.outputs.version }}
+      source_commit: ${{ steps.source-revision.outputs.commit }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify immutable source revision
+        id: source-revision
+        shell: pwsh
+        env:
+          AIVA_EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $expected = $env:AIVA_EXPECTED_SHA.Trim().ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Checked out commit $actual does not match workflow commit $expected" }
+          "AIVA_BUILD_COMMIT=$actual" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "commit=$actual" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -147,6 +162,24 @@ jobs:
           name: aiva-collector-windows-v${{ needs.build.outputs.package_version }}
           path: dist
 
+      - name: Verify artifact source revision
+        shell: pwsh
+        env:
+          AIVA_EXPECTED_SHA: ${{ needs.build.outputs.source_commit }}
+          AIVA_VERSION: ${{ needs.build.outputs.package_version }}
+        run: |
+          $expected = $env:AIVA_EXPECTED_SHA.Trim().ToLowerInvariant()
+          if ($expected -ne "${{ github.sha }}".ToLowerInvariant()) { throw "Build output commit does not match workflow commit" }
+          $evidenceFiles = @(
+            "dist/AIVA-Collector-Installer-v$env:AIVA_VERSION.manifest.json",
+            "dist/aiva-collector-windows-manual-v$env:AIVA_VERSION.manifest.json"
+          )
+          foreach ($path in $evidenceFiles) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing build evidence: $path" }
+            $recorded = [string]((Get-Content -Raw -LiteralPath $path | ConvertFrom-Json).build_commit)
+            if ($recorded.Trim().ToLowerInvariant() -ne $expected) { throw "Build evidence commit mismatch: $path" }
+          }
+
       - name: Reject existing release or tag
         shell: pwsh
         env:
@@ -171,7 +204,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           AIVA_RELEASE_TAG: v${{ needs.build.outputs.package_version }}-collector-installer
           AIVA_VERSION: ${{ needs.build.outputs.package_version }}
-          AIVA_TARGET_SHA: ${{ github.sha }}
+          AIVA_TARGET_SHA: ${{ needs.build.outputs.source_commit }}
         run: |
           gh release create "$env:AIVA_RELEASE_TAG" `
             --title "$env:AIVA_RELEASE_TAG" `

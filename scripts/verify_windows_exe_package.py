@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import zipfile
@@ -102,6 +103,15 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def build_commit() -> str | None:
+    value = os.getenv("AIVA_BUILD_COMMIT", "").strip().lower()
+    if not value:
+        return None
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise VerifyError("AIVA_BUILD_COMMIT no es un SHA Git completo")
+    return value
 
 
 def assert_text_file_safe(path: Path) -> None:
@@ -263,6 +273,7 @@ def write_manifest(paths: list[Path], manifest_path: Path | None = None) -> Path
     manifest = {
         "name": "AIVA Collector Windows Installer",
         "version": VERSION,
+        "build_commit": build_commit(),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "artifacts": artifacts,
         "safety_checks_passed": True,

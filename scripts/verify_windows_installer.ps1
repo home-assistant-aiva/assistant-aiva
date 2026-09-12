@@ -10,6 +10,7 @@ $DataRoot = Join-Path $env:ProgramData "AIVA\Collector"
 $EvidencePath = Join-Path (Resolve-Path ".\dist") "windows-installer-verification.json"
 $Installer = (Resolve-Path $InstallerPath).Path
 $ExpectedInstallerName = "AIVA-Collector-Setup-v0.2.7-desktop-rc2.exe"
+$BuildCommit = [string]$env:AIVA_BUILD_COMMIT
 
 function Assert-True([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw $Message }
@@ -116,6 +117,7 @@ if ($signature.Status -eq [System.Management.Automation.SignatureStatus]::NotSig
 $evidence = [ordered]@{
   installer = $ExpectedInstallerName
   expected_version = $ExpectedVersion
+  build_commit = $BuildCommit.Trim().ToLowerInvariant()
   clean_install = $false
   rc1_update = $false
   config_preserved = $false
@@ -128,6 +130,8 @@ $evidence = [ordered]@{
   uninstall = $false
   signature_status = $signatureStatus
 }
+
+Assert-True ($evidence.build_commit -match '^[0-9a-f]{40}$') "AIVA_BUILD_COMMIT no identifica el commit compilado."
 
 try {
   Reset-TestInstallation
