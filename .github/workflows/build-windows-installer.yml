@@ -152,6 +152,9 @@ jobs:
     needs: build
     if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
     runs-on: ubuntu-latest
+    concurrency:
+      group: aiva-collector-release-publication
+      cancel-in-progress: false
     permissions:
       contents: write
 
@@ -171,8 +174,7 @@ jobs:
           $expected = $env:AIVA_EXPECTED_SHA.Trim().ToLowerInvariant()
           if ($expected -ne "${{ github.sha }}".ToLowerInvariant()) { throw "Build output commit does not match workflow commit" }
           $evidenceFiles = @(
-            "dist/AIVA-Collector-Installer-v$env:AIVA_VERSION.manifest.json",
-            "dist/aiva-collector-windows-manual-v$env:AIVA_VERSION.manifest.json"
+            "dist/AIVA-Collector-Installer-v$env:AIVA_VERSION.manifest.json"
           )
           foreach ($path in $evidenceFiles) {
             if (-not (Test-Path -LiteralPath $path)) { throw "Missing build evidence: $path" }
@@ -197,6 +199,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing tags" }
           if ($releaseTags -contains $tag -or $tagRefs -contains "refs/tags/$tag") { throw "Release or tag already exists: $tag" }
 
+      - name: Reserve immutable release tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AIVA_RELEASE_TAG: v${{ needs.build.outputs.package_version }}-collector-installer
+          AIVA_TARGET_SHA: ${{ needs.build.outputs.source_commit }}
+        run: |
+          $tag = $env:AIVA_RELEASE_TAG
+          $target = $env:AIVA_TARGET_SHA.Trim().ToLowerInvariant()
+          $PSNativeCommandUseErrorActionPreference = $false
+          gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$target" --silent
+          if ($LASTEXITCODE -ne 0) { throw "Could not reserve release tag without overwriting: $tag" }
+          $reserved = [string](gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')
+          if ($LASTEXITCODE -ne 0) { throw "Could not verify reserved release tag: $tag" }
+          if ($reserved.Trim().ToLowerInvariant() -ne $target) { throw "Reserved release tag target mismatch: $tag" }
+
       - name: Publish assets to new release
         shell: pwsh
         env:
@@ -207,6 +226,7 @@ jobs:
           AIVA_TARGET_SHA: ${{ needs.build.outputs.source_commit }}
         run: |
           gh release create "$env:AIVA_RELEASE_TAG" `
+            --verify-tag `
             --title "$env:AIVA_RELEASE_TAG" `
             --notes "AIVA Collector Windows installer v$env:AIVA_VERSION" `
             --target "$env:AIVA_TARGET_SHA" `
@@ -216,3 +236,4 @@ jobs:
             "dist/aiva-collector-windows-exe-v$env:AIVA_VERSION.zip" `
             "dist/aiva-collector-windows-manual-v$env:AIVA_VERSION.zip" `
             "dist/aiva-collector-windows-manual-v$env:AIVA_VERSION.manifest.json"
+          if ($LASTEXITCODE -ne 0) { throw "Release creation failed without overwriting existing resources" }

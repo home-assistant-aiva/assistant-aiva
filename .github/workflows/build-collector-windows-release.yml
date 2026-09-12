@@ -218,6 +218,9 @@ jobs:
     needs: build-release
     if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
     runs-on: ubuntu-latest
+    concurrency:
+      group: aiva-collector-release-publication
+      cancel-in-progress: false
     permissions:
       contents: write
 
@@ -262,16 +265,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing tags" }
           if ($releaseTags -contains $tag -or $tagRefs -contains "refs/tags/$tag") { throw "Release or tag already exists: $tag" }
 
+      - name: Reserve immutable release tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AIVA_RELEASE_TAG: ${{ inputs.release_tag }}
+          AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}
+        run: |
+          $tag = $env:AIVA_RELEASE_TAG
+          $target = $env:AIVA_TARGET_SHA.Trim().ToLowerInvariant()
+          $PSNativeCommandUseErrorActionPreference = $false
+          gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$target" --silent
+          if ($LASTEXITCODE -ne 0) { throw "Could not reserve release tag without overwriting: $tag" }
+          $reserved = [string](gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')
+          if ($LASTEXITCODE -ne 0) { throw "Could not verify reserved release tag: $tag" }
+          if ($reserved.Trim().ToLowerInvariant() -ne $target) { throw "Reserved release tag target mismatch: $tag" }
+
       - name: Publish GitHub pre-release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.release_tag }}
-          target_commitish: ${{ needs.build-release.outputs.source_commit }}
-          name: AIVA Collector Desktop RC2
-          prerelease: true
-          draft: false
-          fail_on_unmatched_files: true
-          body: |
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AIVA_RELEASE_TAG: ${{ inputs.release_tag }}
+          AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}
+          AIVA_RELEASE_NOTES: |
             # AIVA Collector Desktop RC2
 
             Pre-release para validar la aplicación visible y la conexión automática del Collector en Windows.
@@ -321,9 +339,16 @@ jobs:
             * confirmar que se conserva activacion y ProgramData;
             * confirmar que la tarea usa `aiva-collector-background.exe`;
             * revisar logs y estado luego del inicio de sesion.
-          files: |
-            dist/${{ env.AIVA_INSTALLER_ASSET }}
-            dist/${{ env.AIVA_MANIFEST_ASSET }}
-            dist/${{ env.AIVA_MANUAL_ZIP_ASSET }}
-            dist/SHA256SUMS.txt
-            dist/README-INSTALACION-COLLECTOR.txt
+        run: |
+          gh release create "$env:AIVA_RELEASE_TAG" `
+            --verify-tag `
+            --title "AIVA Collector Desktop RC2" `
+            --notes "$env:AIVA_RELEASE_NOTES" `
+            --prerelease `
+            --target "$env:AIVA_TARGET_SHA" `
+            "dist/$env:AIVA_INSTALLER_ASSET" `
+            "dist/$env:AIVA_MANIFEST_ASSET" `
+            "dist/$env:AIVA_MANUAL_ZIP_ASSET" `
+            "dist/SHA256SUMS.txt" `
+            "dist/README-INSTALACION-COLLECTOR.txt"
+          if ($LASTEXITCODE -ne 0) { throw "Release creation failed without overwriting existing resources" }

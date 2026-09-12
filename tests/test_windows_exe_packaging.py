@@ -119,12 +119,9 @@ def test_windows_workflows_separate_build_and_publish_permissions():
 
 
 def test_windows_workflows_reject_release_name_collisions_without_clobber():
-    workflows = [
-        Path(".github/workflows/build-collector-windows-release.yml").read_text(encoding="utf-8"),
-        Path(".github/workflows/build-windows-installer.yml").read_text(encoding="utf-8"),
-    ]
+    workflows = {name: path.read_text(encoding="utf-8") for name, path in WORKFLOW_PATHS.items()}
 
-    for workflow in workflows:
+    for workflow in workflows.values():
         assert "Reject existing release or tag" in workflow
         assert "git check-ref-format" in workflow
         assert "gh release list" in workflow
@@ -135,9 +132,40 @@ def test_windows_workflows_reject_release_name_collisions_without_clobber():
         assert "Release or tag already exists" in workflow
         assert "--clobber" not in workflow
 
-    release_workflow, installer_workflow = workflows
-    assert "target_commitish: ${{ needs.build-release.outputs.source_commit }}" in release_workflow
-    assert '--target "$env:AIVA_TARGET_SHA"' in installer_workflow
+    assert "AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}" in workflows["release"]
+    assert "AIVA_TARGET_SHA: ${{ needs.build.outputs.source_commit }}" in workflows["installer"]
+
+
+def test_windows_publication_is_serialized_and_reserves_tags_atomically():
+    workflows = {name: path.read_text(encoding="utf-8") for name, path in WORKFLOW_PATHS.items()}
+    publish_jobs = {name: _job(workflow, "publish") for name, workflow in workflows.items()}
+
+    for publish_job in publish_jobs.values():
+        precheck = _step(publish_job, "Reject existing release or tag")
+        reservation = _step(publish_job, "Reserve immutable release tag")
+        publication_name = (
+            "Publish GitHub pre-release"
+            if "Publish GitHub pre-release" in publish_job
+            else "Publish assets to new release"
+        )
+        publication = _step(publish_job, publication_name)
+
+        assert "group: aiva-collector-release-publication" in publish_job
+        assert "cancel-in-progress: false" in publish_job
+        assert publish_job.index("- name: Reject existing release or tag") < publish_job.index(
+            "- name: Reserve immutable release tag"
+        ) < publish_job.index(f"- name: {publication_name}")
+        assert "gh release list" in precheck
+        assert 'gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs"' in reservation
+        assert '-f ref="refs/tags/$tag" -f sha="$target"' in reservation
+        assert "if ($LASTEXITCODE -ne 0)" in reservation
+        assert "Reserved release tag target mismatch" in reservation
+        assert 'gh release create "$env:AIVA_RELEASE_TAG"' in publication
+        assert "--verify-tag" in publication
+        assert "Release creation failed without overwriting existing resources" in publication
+        assert "softprops/action-gh-release" not in publish_job
+        assert "--clobber" not in publish_job
+        assert "--method DELETE" not in publish_job
 
 
 def test_windows_workflows_build_and_publish_the_verified_source_commit():
@@ -171,7 +199,7 @@ def test_windows_workflows_build_and_publish_the_verified_source_commit():
         assert "ConvertFrom-Json).build_commit" in provenance
         assert "Build evidence commit mismatch" in provenance
 
-    assert "target_commitish: ${{ needs.build-release.outputs.source_commit }}" in publish_jobs["release"]
+    assert "AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}" in publish_jobs["release"]
     assert "AIVA_TARGET_SHA: ${{ needs.build.outputs.source_commit }}" in publish_jobs["installer"]
 
 
