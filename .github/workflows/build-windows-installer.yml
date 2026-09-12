@@ -2,6 +2,12 @@ name: Build Windows Installer
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish verified artifacts to a GitHub release"
+        required: true
+        type: boolean
+        default: false
   push:
     branches:
       - collector-main
@@ -19,11 +25,13 @@ on:
       - ".github/workflows/build-windows-installer.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      package_version: ${{ steps.package-version.outputs.version }}
 
     steps:
       - name: Checkout
@@ -35,10 +43,12 @@ jobs:
           python-version: "3.11"
 
       - name: Read package version
+        id: package-version
         shell: pwsh
         run: |
           $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
           "AIVA_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Install Python dependencies
         run: |
@@ -122,25 +132,54 @@ jobs:
             dist/aiva-collector-windows-manual-v${{ env.AIVA_VERSION }}.zip
             dist/aiva-collector-windows-manual-v${{ env.AIVA_VERSION }}.manifest.json
 
-      - name: Publish assets to release
-        if: github.event_name == 'workflow_dispatch'
+  publish:
+    name: Publish verified Windows installer
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: aiva-collector-windows-v${{ needs.build.outputs.package_version }}
+          path: dist
+
+      - name: Reject existing release or tag
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AIVA_RELEASE_TAG: v${{ needs.build.outputs.package_version }}-collector-installer
         run: |
-          $tag = "v$env:AIVA_VERSION-collector-installer"
-          $ErrorActionPreference = "Continue"
-          gh release view $tag *> $null
-          $releaseViewCode = $LASTEXITCODE
-          $ErrorActionPreference = "Stop"
-          if ($releaseViewCode -ne 0) {
-            gh release create $tag --title $tag --notes "AIVA Collector Windows installer v$env:AIVA_VERSION"
-          }
-          gh release upload $tag `
-            "dist\aiva-collector.exe" `
-            "dist\AIVA-Collector-Setup-v$env:AIVA_VERSION.exe" `
-            "dist\AIVA-Collector-Installer-v$env:AIVA_VERSION.manifest.json" `
-            "dist\aiva-collector-windows-exe-v$env:AIVA_VERSION.zip" `
-            "dist\aiva-collector-windows-manual-v$env:AIVA_VERSION.zip" `
-            "dist\aiva-collector-windows-manual-v$env:AIVA_VERSION.manifest.json" `
-            --clobber
+          $tag = $env:AIVA_RELEASE_TAG
+          git check-ref-format "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw "Invalid release tag: $tag" }
+          $PSNativeCommandUseErrorActionPreference = $false
+          $releaseTags = @(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing releases" }
+          $tagRefs = @(gh api --paginate "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags" --jq '.[].ref')
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing tags" }
+          if ($releaseTags -contains $tag -or $tagRefs -contains "refs/tags/$tag") { throw "Release or tag already exists: $tag" }
+
+      - name: Publish assets to new release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AIVA_RELEASE_TAG: v${{ needs.build.outputs.package_version }}-collector-installer
+          AIVA_VERSION: ${{ needs.build.outputs.package_version }}
+          AIVA_TARGET_SHA: ${{ github.sha }}
+        run: |
+          gh release create "$env:AIVA_RELEASE_TAG" `
+            --title "$env:AIVA_RELEASE_TAG" `
+            --notes "AIVA Collector Windows installer v$env:AIVA_VERSION" `
+            --target "$env:AIVA_TARGET_SHA" `
+            "dist/aiva-collector.exe" `
+            "dist/AIVA-Collector-Setup-v$env:AIVA_VERSION.exe" `
+            "dist/AIVA-Collector-Installer-v$env:AIVA_VERSION.manifest.json" `
+            "dist/aiva-collector-windows-exe-v$env:AIVA_VERSION.zip" `
+            "dist/aiva-collector-windows-manual-v$env:AIVA_VERSION.zip" `
+            "dist/aiva-collector-windows-manual-v$env:AIVA_VERSION.manifest.json"

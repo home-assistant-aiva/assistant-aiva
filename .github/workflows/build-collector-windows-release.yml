@@ -15,12 +15,9 @@ on:
   push:
     branches:
       - "release/collector-desktop-rc2"
-    tags:
-      - "v0.2.*collector*"
-      - "collector-v*"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   AIVA_RELEASE_TAG: "v0.2.7-collector-desktop-rc2"
@@ -202,11 +199,42 @@ jobs:
             dist/README-INSTALACION-COLLECTOR.txt
             dist/windows-installer-verification.json
 
+  publish:
+    name: Publish verified Windows pre-release
+    needs: build-release
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: aiva-collector-windows-v${{ env.AIVA_RELEASE_VERSION }}
+          path: dist
+
+      - name: Reject existing release or tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AIVA_REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $tag = $env:AIVA_REQUESTED_RELEASE_TAG
+          git check-ref-format "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw "Invalid release tag: $tag" }
+          $PSNativeCommandUseErrorActionPreference = $false
+          $releaseTags = @(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing releases" }
+          $tagRefs = @(gh api --paginate "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags" --jq '.[].ref')
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing tags" }
+          if ($releaseTags -contains $tag -or $tagRefs -contains "refs/tags/$tag") { throw "Release or tag already exists: $tag" }
+
       - name: Publish GitHub pre-release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_type == 'tag' && github.ref_name || env.AIVA_RELEASE_TAG }}
+          tag_name: ${{ inputs.release_tag }}
           target_commitish: ${{ github.sha }}
           name: AIVA Collector Desktop RC2
           prerelease: true

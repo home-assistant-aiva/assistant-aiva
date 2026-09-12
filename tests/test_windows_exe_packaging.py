@@ -65,6 +65,55 @@ def test_windows_workflow_runs_real_installer_verification_without_publishing():
     assert "$global:LASTEXITCODE = 0" in remove_task
 
 
+def test_windows_workflows_require_explicit_manual_publication_opt_in():
+    workflows = [
+        Path(".github/workflows/build-collector-windows-release.yml").read_text(encoding="utf-8"),
+        Path(".github/workflows/build-windows-installer.yml").read_text(encoding="utf-8"),
+    ]
+
+    for workflow in workflows:
+        assert "publish_release:" in workflow
+        assert "default: false" in workflow
+        assert "if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true" in workflow
+        assert "startsWith(github.ref, 'refs/tags/')" not in workflow
+        assert "\n    tags:" not in workflow
+
+
+def test_windows_workflows_separate_build_and_publish_permissions():
+    workflows = [
+        Path(".github/workflows/build-collector-windows-release.yml").read_text(encoding="utf-8"),
+        Path(".github/workflows/build-windows-installer.yml").read_text(encoding="utf-8"),
+    ]
+
+    for workflow in workflows:
+        assert "permissions:\n  contents: read" in workflow
+        assert workflow.count("contents: write") == 1
+        assert "\n  publish:\n" in workflow
+        assert "uses: actions/download-artifact@v4" in workflow
+
+
+def test_windows_workflows_reject_release_name_collisions_without_clobber():
+    workflows = [
+        Path(".github/workflows/build-collector-windows-release.yml").read_text(encoding="utf-8"),
+        Path(".github/workflows/build-windows-installer.yml").read_text(encoding="utf-8"),
+    ]
+
+    for workflow in workflows:
+        assert "Reject existing release or tag" in workflow
+        assert "git check-ref-format" in workflow
+        assert "gh release list" in workflow
+        assert "gh api" in workflow
+        assert "GH_REPO: ${{ github.repository }}" in workflow
+        assert "Could not inspect existing releases" in workflow
+        assert "Could not inspect existing tags" in workflow
+        assert "Release or tag already exists" in workflow
+        assert "--clobber" not in workflow
+
+    release_workflow, installer_workflow = workflows
+    assert "target_commitish: ${{ github.sha }}" in release_workflow
+    assert '--target "$env:AIVA_TARGET_SHA"' in installer_workflow
+
+
 def test_verify_without_artifacts_writes_manifest(tmp_path, monkeypatch):
     manifest = tmp_path / "manifest.json"
     monkeypatch.setattr(verify_windows_exe_package, "MANIFEST_PATH", manifest)
