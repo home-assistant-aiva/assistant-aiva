@@ -304,7 +304,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          AIVA_RELEASE_TAG: ${{ inputs.release_tag }}
           AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}
           AIVA_RELEASE_NOTES: |
             # AIVA Collector Desktop

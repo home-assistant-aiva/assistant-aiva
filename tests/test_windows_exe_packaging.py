@@ -129,6 +129,7 @@ def test_official_workflow_requires_explicit_manual_publication_opt_in():
     assert "\n    tags:" not in trigger
     assert "if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true" in workflow
     assert "startsWith(github.ref, 'refs/tags/')" not in workflow
+    assert "inputs.release_tag" not in workflow
 
 
 def test_official_workflow_separates_build_and_publish_permissions():
