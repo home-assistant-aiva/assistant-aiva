@@ -8,9 +8,6 @@ on:
         required: true
         type: boolean
         default: false
-  push:
-    branches:
-      - "release/collector-desktop-rc3"
 
 permissions:
   contents: read

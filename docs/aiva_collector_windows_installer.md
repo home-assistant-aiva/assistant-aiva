@@ -71,6 +71,12 @@ El build se ejecuta con el workflow:
 .github/workflows/build-collector-windows-release.yml
 ```
 
+Es el único recorrido oficial de build y publicación. Requiere ejecución manual,
+genera artifacts incluso con `publish_release=false` y limita los permisos de
+escritura al job de publicación. El workflow alternativo
+`build-windows-installer.yml` fue retirado para evitar convenciones de versión,
+artifacts y permisos de release duplicados.
+
 Artefactos esperados:
 
 - `AIVA-Collector-Setup-v0.2.7-desktop-rc3.exe`;

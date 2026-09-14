@@ -136,8 +136,8 @@ Si `.venv` no existe, crear un entorno aislado e instalar `-e ".[dev]"`; no inst
 
 El build Windows usa PyInstaller, Inno Setup, verificadores de `scripts/` y workflows de GitHub Actions. Antes de ejecutar uno, leer su trigger y condición de publicación:
 
-- `build-collector-windows-release.yml` sube artifacts y sólo debe publicar pre-release bajo la condición autorizada; un push de tag también puede publicar.
-- `build-windows-installer.yml` contiene un paso de publicación para `workflow_dispatch` y upload con `--clobber`; tratarlo como workflow con efecto de release, no como build inocuo.
+- `build-collector-windows-release.yml` es el único workflow autorizado para generar el instalador y publicar una pre-release. Se ejecuta sólo mediante `workflow_dispatch`, siempre sube artifacts y sólo publica con `publish_release=true`.
+- No agregar un segundo workflow de instalador o publicación. Cualquier compatibilidad futura debe reutilizar el workflow oficial sin duplicar packaging, permisos de escritura ni lógica de release.
 
 Build local, push, dispatch de workflow, tag y GitHub Release son acciones distintas. No crear tags, disparar workflows, publicar ni sobrescribir assets sin autorización explícita. Verificar nombre/version contra `pyproject.toml` y packaging, manifests, SHA256 y ciclo limpio/upgrade/uninstall antes de considerar un instalador validado. Conservar artefactos anteriores y documentar cualquier validación física pendiente.
 

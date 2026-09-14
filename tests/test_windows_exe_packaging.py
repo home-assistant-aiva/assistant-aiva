@@ -13,10 +13,8 @@ assert VERIFY_SPEC.loader is not None
 VERIFY_SPEC.loader.exec_module(verify_windows_exe_package)
 
 
-WORKFLOW_PATHS = {
-    "release": Path(".github/workflows/build-collector-windows-release.yml"),
-    "installer": Path(".github/workflows/build-windows-installer.yml"),
-}
+OFFICIAL_WORKFLOW_PATH = Path(".github/workflows/build-collector-windows-release.yml")
+RETIRED_WORKFLOW_PATH = Path(".github/workflows/build-windows-installer.yml")
 
 
 def _job(workflow: str, name: str) -> str:
@@ -90,120 +88,134 @@ def test_windows_workflow_runs_real_installer_verification_without_publishing():
     assert "function Stop-InstalledCollectorProcesses" in script
     assert "taskkill.exe /PID $process.Id /T /F" in script
     assert script.count("Stop-InstalledCollectorProcesses") >= 4
+    assert "function Assert-PreservedFiles" in script
+    for evidence_field in (
+        "config_preserved",
+        "activation_preserved",
+        "token_preserved",
+        "state_preserved",
+        "queue_preserved",
+        "mappings_preserved",
+        "logs_preserved",
+        "source_folder_preserved",
+        "binaries_replaced",
+    ):
+        assert evidence_field in script
     remove_task = script.split("function Remove-ScheduledTask", maxsplit=1)[1].split("}", maxsplit=1)[0]
     assert "$global:LASTEXITCODE = 0" in remove_task
 
 
-def test_windows_workflows_require_explicit_manual_publication_opt_in():
-    workflows = [
-        Path(".github/workflows/build-collector-windows-release.yml").read_text(encoding="utf-8"),
-        Path(".github/workflows/build-windows-installer.yml").read_text(encoding="utf-8"),
+def test_only_one_official_windows_build_and_publication_workflow_exists():
+    assert OFFICIAL_WORKFLOW_PATH.exists()
+    assert not RETIRED_WORKFLOW_PATH.exists()
+    workflow_files = sorted(Path(".github/workflows").glob("*.y*ml"))
+    publishers = [
+        path
+        for path in workflow_files
+        if "gh release create" in path.read_text(encoding="utf-8")
+        or "ISCC.exe" in path.read_text(encoding="utf-8")
     ]
-
-    for workflow in workflows:
-        assert "publish_release:" in workflow
-        assert "default: false" in workflow
-        assert "if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true" in workflow
-        assert "startsWith(github.ref, 'refs/tags/')" not in workflow
-        assert "\n    tags:" not in workflow
+    assert publishers == [OFFICIAL_WORKFLOW_PATH]
 
 
-def test_windows_workflows_separate_build_and_publish_permissions():
-    workflows = [
-        Path(".github/workflows/build-collector-windows-release.yml").read_text(encoding="utf-8"),
-        Path(".github/workflows/build-windows-installer.yml").read_text(encoding="utf-8"),
-    ]
-
-    for workflow in workflows:
-        assert "permissions:\n  contents: read" in workflow
-        assert workflow.count("contents: write") == 1
-        assert "\n  publish:\n" in workflow
-        assert "uses: actions/download-artifact@v4" in workflow
-
-
-def test_windows_workflows_reject_release_name_collisions_without_clobber():
-    workflows = {name: path.read_text(encoding="utf-8") for name, path in WORKFLOW_PATHS.items()}
-
-    for workflow in workflows.values():
-        assert "Reject existing release or tag" in workflow
-        assert "git check-ref-format" in workflow
-        assert "gh release list" in workflow
-        assert "gh api" in workflow
-        assert "GH_REPO: ${{ github.repository }}" in workflow
-        assert "Could not inspect existing releases" in workflow
-        assert "Could not inspect existing tags" in workflow
-        assert "Release or tag already exists" in workflow
-        assert "--clobber" not in workflow
-
-    assert "AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}" in workflows["release"]
-    assert "AIVA_TARGET_SHA: ${{ needs.build.outputs.source_commit }}" in workflows["installer"]
+def test_official_workflow_requires_explicit_manual_publication_opt_in():
+    workflow = OFFICIAL_WORKFLOW_PATH.read_text(encoding="utf-8")
+    trigger = workflow.split("\npermissions:", maxsplit=1)[0]
+    assert "workflow_dispatch:" in trigger
+    assert "publish_release:" in trigger
+    assert "default: false" in trigger
+    assert "\n  push:" not in trigger
+    assert "\n  pull_request:" not in trigger
+    assert "\n    tags:" not in trigger
+    assert "if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true" in workflow
+    assert "startsWith(github.ref, 'refs/tags/')" not in workflow
 
 
-def test_windows_publication_is_serialized_and_reserves_tags_atomically():
-    workflows = {name: path.read_text(encoding="utf-8") for name, path in WORKFLOW_PATHS.items()}
-    publish_jobs = {name: _job(workflow, "publish") for name, workflow in workflows.items()}
-
-    for publish_job in publish_jobs.values():
-        precheck = _step(publish_job, "Reject existing release or tag")
-        reservation = _step(publish_job, "Reserve immutable release tag")
-        publication_name = (
-            "Publish GitHub pre-release"
-            if "Publish GitHub pre-release" in publish_job
-            else "Publish assets to new release"
-        )
-        publication = _step(publish_job, publication_name)
-
-        assert "group: aiva-collector-release-publication" in publish_job
-        assert "cancel-in-progress: false" in publish_job
-        assert publish_job.index("- name: Reject existing release or tag") < publish_job.index(
-            "- name: Reserve immutable release tag"
-        ) < publish_job.index(f"- name: {publication_name}")
-        assert "gh release list" in precheck
-        assert 'gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs"' in reservation
-        assert '-f ref="refs/tags/$tag" -f sha="$target"' in reservation
-        assert "if ($LASTEXITCODE -ne 0)" in reservation
-        assert "Reserved release tag target mismatch" in reservation
-        assert 'gh release create "$env:AIVA_RELEASE_TAG"' in publication
-        assert "--verify-tag" in publication
-        assert "Release creation failed without overwriting existing resources" in publication
-        assert "softprops/action-gh-release" not in publish_job
-        assert "--clobber" not in publish_job
-        assert "--method DELETE" not in publish_job
+def test_official_workflow_separates_build_and_publish_permissions():
+    workflow = OFFICIAL_WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "permissions:\n  contents: read" in workflow
+    assert workflow.count("contents: write") == 1
+    assert "\n  publish:\n" in workflow
+    assert "uses: actions/download-artifact@v4" in workflow
 
 
-def test_windows_workflows_build_and_publish_the_verified_source_commit():
-    workflows = {name: path.read_text(encoding="utf-8") for name, path in WORKFLOW_PATHS.items()}
-    build_jobs = {
-        "release": _job(workflows["release"], "build-release"),
-        "installer": _job(workflows["installer"], "build"),
-    }
-    publish_jobs = {name: _job(workflow, "publish") for name, workflow in workflows.items()}
+def test_official_workflow_rejects_release_name_collisions_without_clobber():
+    workflow = OFFICIAL_WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "Reject existing release or tag" in workflow
+    assert "git check-ref-format" in workflow
+    assert "gh release list" in workflow
+    assert "gh api" in workflow
+    assert "GH_REPO: ${{ github.repository }}" in workflow
+    assert "Could not inspect existing releases" in workflow
+    assert "Could not inspect existing tags" in workflow
+    assert "Release or tag already exists" in workflow
+    assert "AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}" in workflow
+    assert "--clobber" not in workflow
 
-    for build_job in build_jobs.values():
-        checkout = _step(build_job, "Checkout")
-        revision = _step(build_job, "Verify immutable source revision")
-        assert "ref: ${{ github.sha }}" in checkout
-        assert build_job.index("- name: Checkout") < build_job.index("- name: Verify immutable source revision")
-        assert "git rev-parse HEAD" in revision
-        assert "$actual -ne $expected" in revision
-        assert "AIVA_BUILD_COMMIT=$actual" in revision
-        assert "commit=$actual" in revision
-        assert "source_commit: ${{ steps.source-revision.outputs.commit }}" in build_job
 
-    expected_outputs = {
-        "release": "${{ needs.build-release.outputs.source_commit }}",
-        "installer": "${{ needs.build.outputs.source_commit }}",
-    }
-    for name, publish_job in publish_jobs.items():
-        provenance = _step(publish_job, "Verify artifact source revision")
-        assert "uses: actions/download-artifact@v4" in publish_job
-        assert f"AIVA_EXPECTED_SHA: {expected_outputs[name]}" in provenance
-        assert 'if ($expected -ne "${{ github.sha }}".ToLowerInvariant())' in provenance
-        assert "ConvertFrom-Json).build_commit" in provenance
-        assert "Build evidence commit mismatch" in provenance
+def test_official_publication_is_serialized_and_reserves_tags_atomically():
+    workflow = OFFICIAL_WORKFLOW_PATH.read_text(encoding="utf-8")
+    publish_job = _job(workflow, "publish")
+    precheck = _step(publish_job, "Reject existing release or tag")
+    reservation = _step(publish_job, "Reserve immutable release tag")
+    publication = _step(publish_job, "Publish GitHub pre-release")
 
-    assert "AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}" in publish_jobs["release"]
-    assert "AIVA_TARGET_SHA: ${{ needs.build.outputs.source_commit }}" in publish_jobs["installer"]
+    assert "group: aiva-collector-release-publication" in publish_job
+    assert "cancel-in-progress: false" in publish_job
+    assert publish_job.index("- name: Reject existing release or tag") < publish_job.index(
+        "- name: Reserve immutable release tag"
+    ) < publish_job.index("- name: Publish GitHub pre-release")
+    assert "gh release list" in precheck
+    assert 'gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs"' in reservation
+    assert '-f ref="refs/tags/$tag" -f sha="$target"' in reservation
+    assert "if ($LASTEXITCODE -ne 0)" in reservation
+    assert "Reserved release tag target mismatch" in reservation
+    assert 'gh release create "$env:AIVA_RELEASE_TAG"' in publication
+    assert "--verify-tag" in publication
+    assert "Release creation failed without overwriting existing resources" in publication
+    assert "softprops/action-gh-release" not in publish_job
+    assert "--clobber" not in publish_job
+    assert "--method DELETE" not in publish_job
+
+
+def test_official_workflow_builds_and_publishes_the_verified_source_commit():
+    workflow = OFFICIAL_WORKFLOW_PATH.read_text(encoding="utf-8")
+    build_job = _job(workflow, "build-release")
+    publish_job = _job(workflow, "publish")
+    checkout = _step(build_job, "Checkout")
+    revision = _step(build_job, "Verify immutable source revision")
+    provenance = _step(publish_job, "Verify artifact source revision")
+
+    assert "ref: ${{ github.sha }}" in checkout
+    assert build_job.index("- name: Checkout") < build_job.index("- name: Verify immutable source revision")
+    assert "git rev-parse HEAD" in revision
+    assert "$actual -ne $expected" in revision
+    assert "AIVA_BUILD_COMMIT=$actual" in revision
+    assert "commit=$actual" in revision
+    assert "source_commit: ${{ steps.source-revision.outputs.commit }}" in build_job
+    assert "uses: actions/download-artifact@v4" in publish_job
+    assert "AIVA_EXPECTED_SHA: ${{ needs.build-release.outputs.source_commit }}" in provenance
+    assert 'if ($expected -ne "${{ github.sha }}".ToLowerInvariant())' in provenance
+    assert "ConvertFrom-Json).build_commit" in provenance
+    assert "Build evidence commit mismatch" in provenance
+    assert "AIVA_TARGET_SHA: ${{ needs.build-release.outputs.source_commit }}" in publish_job
+
+
+def test_official_workflow_reads_release_names_from_canonical_version_module():
+    workflow = OFFICIAL_WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "from aiva_collector.version import release_metadata" in workflow
+    for output in (
+        "package_version",
+        "public_version",
+        "release_tag",
+        "release_title",
+        "installer_filename",
+        "installer_manifest_filename",
+        "manual_zip_filename",
+    ):
+        assert f"{output}: ${{{{ steps.release-metadata.outputs.{output} }}}}" in workflow
+    assert "0.2.7rc3" not in workflow
+    assert "0.2.7-desktop-rc3" not in workflow
 
 
 def test_installer_manifest_and_windows_evidence_record_build_commit(tmp_path, monkeypatch):
