@@ -16,6 +16,7 @@ from aiva_collector.config import CollectorConfig, load_config
 from aiva_collector.desktop_service import export_diagnostics
 from aiva_collector.local_state import connect, local_db_path, update_file_state, upsert_detected_file
 from aiva_collector.readers import read_file
+from aiva_collector.version import DIAGNOSTIC_FILENAME, VERSION
 
 
 EXPECTED_MAPPING = {
@@ -32,7 +33,7 @@ def _config(tmp_path: Path, *, commerce_id: str = "commerce-one", collector_id: 
     data = json.loads(Path("configs/example_config.json").read_text(encoding="utf-8"))
     data.update(
         {
-            "collector_version": "0.2.7rc2",
+            "collector_version": VERSION,
             "backend_url": "http://backend.test:8080",
             "commerce_id": commerce_id,
             "collector_id": collector_id,
@@ -331,7 +332,7 @@ def test_diagnostic_zip_excludes_source_content_and_redacts_secret(tmp_path, mon
     result = export_diagnostics()
 
     assert result.ok is True
-    zip_path = tmp_path / "diagnostico" / "aiva-collector-diagnostico-rc2.zip"
+    zip_path = tmp_path / "diagnostico" / DIAGNOSTIC_FILENAME
     with zipfile.ZipFile(zip_path) as archive:
         assert "ventas.csv" not in archive.namelist()
         combined = b"".join(archive.read(name) for name in archive.namelist())
@@ -370,8 +371,9 @@ def test_diagnostic_export_reads_pre_rc2_database_without_migrating_it(tmp_path,
     result = export_diagnostics()
 
     assert result.ok is True
-    with zipfile.ZipFile(tmp_path / "diagnostico" / "aiva-collector-diagnostico-rc2.zip") as archive:
+    with zipfile.ZipFile(tmp_path / "diagnostico" / DIAGNOSTIC_FILENAME) as archive:
         diagnostic = json.loads(archive.read("diagnostic.json"))
+    assert diagnostic["version"] == VERSION
     assert diagnostic["local_state"]["quick_check"] == "ok"
     assert diagnostic["local_state"]["processed_files"][0]["file_id"] == "legacy"
     with sqlite3.connect(db_path) as conn:

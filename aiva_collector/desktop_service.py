@@ -32,6 +32,7 @@ from .errors import CollectorError, ConfigError
 from .local_state import local_db_path
 from .file_fingerprint import compute_file_sha256
 from .token_store import save_token
+from .version import DIAGNOSTIC_FILENAME
 
 
 TASK_NAME = "AIVA Collector Auto"
@@ -487,7 +488,7 @@ def export_diagnostics() -> OperationResult:
         config = runtime.config
         diagnostic_dir = collector_data_dir() / "diagnostico"
         diagnostic_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = diagnostic_dir / "aiva-collector-diagnostico-rc2.zip"
+        zip_path = diagnostic_dir / DIAGNOSTIC_FILENAME
         input_dir = config.path("input_dir")
         file_metadata = []
         for path in sorted(input_dir.iterdir()) if input_dir.exists() else []:

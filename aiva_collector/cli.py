@@ -52,11 +52,12 @@ from .state import save_state
 from .summarizer import build_summary, idempotency_key
 from .token_store import save_token
 from .validation import validate_normalized_data
+from .version import VERSION
 
 
 WINDOWS_DEFAULT_CONFIG = r"C:\ProgramData\AIVA\Collector\config.windows.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
-DEFAULT_COLLECTOR_VERSION = "0.2.7rc2"
+DEFAULT_COLLECTOR_VERSION = VERSION
 PROCESSING_LEASE_MINUTES = 15
 RUN_LOCK_LEASE_MINUTES = 30
 

@@ -16,3 +16,4 @@ def setup_logging(config: CollectorConfig) -> None:
     handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     root.addHandler(handler)
+    logging.info("collector runtime version=%s", config.collector_version)

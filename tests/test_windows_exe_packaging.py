@@ -51,7 +51,8 @@ def test_inno_script_is_safe_and_preserves_existing_config():
     verify_windows_exe_package.assert_inno_safe()
     content = Path("packaging/inno/aiva_collector_setup.iss").read_text(encoding="utf-8")
     assert "onlyifdoesntexist" in content
-    assert "AIVA-Collector-Setup-v0.2.7-desktop-rc2" in content
+    assert "OutputBaseFilename=AIVA-Collector-Setup-v{#PublicVersion}" in content
+    assert '#define AppVersion "0.2.7rc3"' not in content
     assert "aiva-collector-cli.exe" in content
     assert "aiva-collector-background.exe" in content
     assert 'Name: "{group}\\AIVA Collector"; Filename: "{app}\\{#AppExeName}"' in content
@@ -79,7 +80,9 @@ def test_windows_workflow_runs_real_installer_verification_without_publishing():
     script = Path("scripts/verify_windows_installer.ps1").read_text(encoding="utf-8")
     assert "verify_windows_installer.ps1" in workflow
     assert "publish_release" in workflow
-    assert "AIVA-Collector-Setup-v0.2.7-desktop-rc2.exe" in script
+    assert 'ExpectedInstallerName = "AIVA-Collector-Setup-v$ExpectedPublicVersion.exe"' in script
+    assert '"/DAppVersion=$env:AIVA_PACKAGE_VERSION"' in workflow
+    assert '"/DPublicVersion=$env:AIVA_RELEASE_VERSION"' in workflow
     assert "/VERYSILENT" in script
     assert "SIMULATED-RC1-TOKEN" in script
     assert "Get-AuthenticodeSignature" in script

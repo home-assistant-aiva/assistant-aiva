@@ -11,6 +11,7 @@ from typing import Any
 
 from .errors import ConfigError
 from .token_store import load_token
+from .version import VERSION
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -48,7 +49,9 @@ class CollectorConfig:
 
     @property
     def collector_version(self) -> str:
-        return str(self.raw.get("collector_version", "0.1.0"))
+        # This describes the running binary, not the version that originally
+        # wrote a persistent config. Upgrades intentionally preserve that file.
+        return VERSION
 
     @property
     def backend_url(self) -> str:

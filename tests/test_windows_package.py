@@ -73,7 +73,7 @@ def test_build_creates_zip_manifest_and_required_files(tmp_path, monkeypatch):
     assert zip_path.exists()
     assert manifest_path.exists()
     assert manifest["package_name"] == "aiva-collector-windows-manual"
-    assert manifest["version"] == "0.2.7rc2"
+    assert manifest["version"] == "0.2.7rc3"
     assert manifest["build_commit"] == build_sha
     assert manifest["safety_checks_passed"] is True
     assert manifest["files_count"] == len(names)

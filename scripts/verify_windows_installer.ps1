@@ -1,19 +1,32 @@
 param(
-  [string]$InstallerPath = ".\dist\AIVA-Collector-Setup-v0.2.7-desktop-rc2.exe",
-  [string]$ExpectedVersion = "0.2.7rc2"
+  [Parameter(Mandatory = $true)]
+  [string]$InstallerPath,
+  [Parameter(Mandatory = $true)]
+  [string]$ExpectedVersion,
+  [Parameter(Mandatory = $true)]
+  [string]$ExpectedPublicVersion
 )
 
 $ErrorActionPreference = "Stop"
 $TaskName = "AIVA Collector Auto"
-$InstallDir = Join-Path $env:RUNNER_TEMP "AIVA Collector RC2 Test"
+$InstallDir = Join-Path $env:RUNNER_TEMP "AIVA Collector Upgrade Test"
 $DataRoot = Join-Path $env:ProgramData "AIVA\Collector"
+$SourceRoot = Join-Path $env:RUNNER_TEMP "AIVA Collector Read Only Source"
 $EvidencePath = Join-Path (Resolve-Path ".\dist") "windows-installer-verification.json"
 $Installer = (Resolve-Path $InstallerPath).Path
-$ExpectedInstallerName = "AIVA-Collector-Setup-v0.2.7-desktop-rc2.exe"
+$ExpectedInstallerName = "AIVA-Collector-Setup-v$ExpectedPublicVersion.exe"
 $BuildCommit = [string]$env:AIVA_BUILD_COMMIT
 
 function Assert-True([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw $Message }
+}
+
+function Assert-PreservedFiles([hashtable]$ExpectedHashes) {
+  foreach ($entry in $ExpectedHashes.GetEnumerator()) {
+    Assert-True (Test-Path -LiteralPath $entry.Key) "La actualizacion elimino un archivo persistente: $($entry.Key)"
+    $actual = (Get-FileHash -LiteralPath $entry.Key -Algorithm SHA256).Hash
+    Assert-True ($actual -eq $entry.Value) "La actualizacion modifico un archivo persistente: $($entry.Key)"
+  }
 }
 
 function Remove-ScheduledTask {
@@ -74,7 +87,7 @@ function Assert-InstalledBinaries {
     $installed = Join-Path $InstallDir $name
     $built = Join-Path (Resolve-Path ".\dist") $name
     Assert-True (Test-Path $installed) "Falta binario instalado: $name"
-    Assert-True ((Get-FileHash $installed -Algorithm SHA256).Hash -eq (Get-FileHash $built -Algorithm SHA256).Hash) "El binario instalado no coincide con RC2: $name"
+    Assert-True ((Get-FileHash $installed -Algorithm SHA256).Hash -eq (Get-FileHash $built -Algorithm SHA256).Hash) "El binario instalado no coincide con el build actual: $name"
   }
   Assert-True (Test-Path (Join-Path $InstallDir "unins000.exe")) "No existe el desinstalador."
 }
@@ -109,7 +122,7 @@ Assert-True ((Split-Path $Installer -Leaf) -eq $ExpectedInstallerName) "Nombre d
 $signature = Get-AuthenticodeSignature -FilePath $Installer
 $signatureStatus = [string]$signature.Status
 if ($signature.Status -eq [System.Management.Automation.SignatureStatus]::NotSigned) {
-  Write-Warning "Instalador sin firma digital; Windows SmartScreen puede mostrar una advertencia durante RC2."
+  Write-Warning "Instalador sin firma digital; Windows SmartScreen puede mostrar una advertencia durante la prueba."
 } elseif ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
   throw "Firma Authenticode invalida: $signatureStatus"
 }
@@ -119,13 +132,19 @@ $evidence = [ordered]@{
   expected_version = $ExpectedVersion
   build_commit = $BuildCommit.Trim().ToLowerInvariant()
   clean_install = $false
-  rc1_update = $false
+  previous_version_update = $false
   config_preserved = $false
+  activation_preserved = $false
   token_preserved = $false
+  state_preserved = $false
+  queue_preserved = $false
+  mappings_preserved = $false
+  logs_preserved = $false
+  source_folder_preserved = $false
   self_check = $false
   tkinter_desktop_started = $false
   scheduled_task = $false
-  rc2_binaries_replaced_rc1 = $false
+  binaries_replaced = $false
   no_database_in_installed_files = $false
   uninstall = $false
   signature_status = $signatureStatus
@@ -141,7 +160,6 @@ try {
   Assert-CollectorRuntime
   Assert-ScheduledTask
   $cleanConfig = Get-Content -Raw -LiteralPath (Join-Path $DataRoot "config.windows.json") | ConvertFrom-Json
-  Assert-True ($cleanConfig.collector_version -eq $ExpectedVersion) "La instalacion limpia no informa RC2."
   Assert-True ($null -eq $cleanConfig.collector_token) "La configuracion del instalador contiene collector_token."
   $evidence.clean_install = $true
   $evidence.self_check = $true
@@ -150,14 +168,22 @@ try {
   Invoke-Uninstaller
 
   if (Test-Path $DataRoot) { Remove-Item -LiteralPath $DataRoot -Recurse -Force }
-  New-Item -ItemType Directory -Force -Path $InstallDir, $DataRoot, (Join-Path $DataRoot "estado"), (Join-Path $DataRoot "entrada") | Out-Null
+  if (Test-Path $SourceRoot) { Remove-Item -LiteralPath $SourceRoot -Recurse -Force }
+  New-Item -ItemType Directory -Force -Path `
+    $InstallDir, `
+    $DataRoot, `
+    $SourceRoot, `
+    (Join-Path $DataRoot "estado"), `
+    (Join-Path $DataRoot "estado\queue"), `
+    (Join-Path $DataRoot "mapeos"), `
+    (Join-Path $DataRoot "logs") | Out-Null
   $legacyConfig = @{
     collector_version = "0.2.7rc1"
     backend_url = "https://backend.invalid"
     commerce_id = "commerce-simulated-rc1"
     collector_id = "collector-simulated-rc1"
     collector_token_env = "AIVA_COLLECTOR_TOKEN"
-    input_dir = (Join-Path $DataRoot "entrada")
+    input_dir = $SourceRoot
     processed_dir = (Join-Path $DataRoot "procesados")
     error_dir = (Join-Path $DataRoot "rechazados")
     output_dir = (Join-Path $DataRoot "ultimo_summary")
@@ -171,26 +197,47 @@ try {
   $fakeDpapi = "DPAPI:" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($tokenMarker))
   $tokenPath = Join-Path $DataRoot "estado\collector.token"
   [System.IO.File]::WriteAllText($tokenPath, $fakeDpapi, [System.Text.UTF8Encoding]::new($false))
-  $configHashBefore = (Get-FileHash $configPath -Algorithm SHA256).Hash
-  $tokenHashBefore = (Get-FileHash $tokenPath -Algorithm SHA256).Hash
+  $statePath = Join-Path $DataRoot "estado\collector-state.json"
+  $queuePath = Join-Path $DataRoot "estado\queue\pending.json"
+  $mappingPath = Join-Path $DataRoot "mapeos\mapping.json"
+  $logPath = Join-Path $DataRoot "logs\collector.log"
+  $sourcePath = Join-Path $SourceRoot "ventas-sinteticas.csv"
+  [System.IO.File]::WriteAllText($statePath, '{"state":"preserve"}', [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($queuePath, '{"queue":"preserve"}', [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($mappingPath, '{"mapping":"preserve"}', [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($logPath, 'PREVIOUS-VERSION-LOG', [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($sourcePath, "producto,cantidad`nPrueba,1", [System.Text.UTF8Encoding]::new($false))
+  $persistentHashes = @{}
+  foreach ($path in @($configPath, $tokenPath, $statePath, $queuePath, $mappingPath, $logPath, $sourcePath)) {
+    $persistentHashes[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+  }
   foreach ($name in @("aiva-collector.exe", "aiva-collector-cli.exe", "aiva-collector-background.exe")) {
     Set-Content -LiteralPath (Join-Path $InstallDir $name) -Value "RC1-OLD-BINARY" -NoNewline
   }
 
   Invoke-Installer
-  Assert-True ((Get-FileHash $configPath -Algorithm SHA256).Hash -eq $configHashBefore) "La actualizacion modifico la configuracion RC1."
-  Assert-True ((Get-FileHash $tokenPath -Algorithm SHA256).Hash -eq $tokenHashBefore) "La actualizacion modifico el token RC1."
+  Assert-PreservedFiles $persistentHashes
+  $preservedConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+  Assert-True ($preservedConfig.commerce_id -eq "commerce-simulated-rc1") "La actualizacion modifico la activacion previa."
+  Assert-True ($preservedConfig.collector_id -eq "collector-simulated-rc1") "La actualizacion modifico el Collector activado."
   Assert-InstalledBinaries
   Assert-CollectorRuntime
   Assert-ScheduledTask
   $databases = @(Get-ChildItem -LiteralPath $InstallDir -Recurse -File | Where-Object { $_.Extension -in @(".db", ".sqlite", ".sqlite3") })
   Assert-True ($databases.Count -eq 0) "El instalador incluyo una base de datos."
-  $evidence.rc1_update = $true
+  $evidence.previous_version_update = $true
   $evidence.config_preserved = $true
+  $evidence.activation_preserved = $true
   $evidence.token_preserved = $true
-  $evidence.rc2_binaries_replaced_rc1 = $true
+  $evidence.state_preserved = $true
+  $evidence.queue_preserved = $true
+  $evidence.mappings_preserved = $true
+  $evidence.logs_preserved = $true
+  $evidence.source_folder_preserved = $true
+  $evidence.binaries_replaced = $true
   $evidence.no_database_in_installed_files = $true
   Invoke-Uninstaller
+  Assert-PreservedFiles $persistentHashes
   $evidence.uninstall = $true
   $evidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $EvidencePath -Encoding utf8
   Get-Content -Raw -LiteralPath $EvidencePath
@@ -199,4 +246,5 @@ try {
   Stop-InstalledCollectorProcesses
   if (Test-Path $InstallDir) { Remove-Item -LiteralPath $InstallDir -Recurse -Force }
   if (Test-Path $DataRoot) { Remove-Item -LiteralPath $DataRoot -Recurse -Force }
+  if (Test-Path $SourceRoot) { Remove-Item -LiteralPath $SourceRoot -Recurse -Force }
 }

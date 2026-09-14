@@ -15,11 +15,11 @@ from aiva_collector.cli import (
 from aiva_collector.config import CollectorConfig
 
 
-def test_cli_reports_rc2_version(capsys):
+def test_cli_reports_rc3_version(capsys):
     with pytest.raises(SystemExit) as exc:
         build_parser().parse_args(["--version"])
     assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == "0.2.7rc2"
+    assert capsys.readouterr().out.strip() == "0.2.7rc3"
 
 
 def test_cli_run_once_dry_generates_last_summary(monkeypatch, tmp_path):

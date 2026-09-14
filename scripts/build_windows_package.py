@@ -12,9 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from aiva_collector.version import MANUAL_MANIFEST_FILENAME, MANUAL_ZIP_FILENAME, VERSION
+
 
 PACKAGE_NAME = "aiva-collector-windows-manual"
-DEFAULT_VERSION = "0.2.7rc2"
 ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
 
@@ -126,32 +127,6 @@ def build_commit() -> str | None:
     if not re.fullmatch(r"[0-9a-f]{40}", value):
         raise PackageError("AIVA_BUILD_COMMIT no es un SHA Git completo")
     return value
-
-
-def read_version(root: Path = ROOT) -> str:
-    pyproject = root / "pyproject.toml"
-    try:
-        import tomllib
-
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        version = data.get("project", {}).get("version")
-        return str(version or DEFAULT_VERSION)
-    except Exception:
-        return DEFAULT_VERSION
-
-
-def public_asset_version(version: str) -> str:
-    if version in {"0.2.7rc1", "0.2.7rc2"}:
-        return f"0.2.7-desktop-{version[-3:]}"
-    if version == "0.2.6rc6":
-        return "0.2.6-discovery-rc6"
-    if version == "0.2.6rc3":
-        return "0.2.6-silent-rc3"
-    if version == "0.2.6rc2":
-        return "0.2.6-discovery-rc2"
-    if version == "0.2.6rc1":
-        return "0.2.6-discovery-rc1"
-    return version
 
 
 def should_skip(path: Path) -> bool:
@@ -268,13 +243,11 @@ def create_zip(staging: Path, zip_path: Path) -> int:
 def build_package(root: Path = ROOT, dist_dir: Path = DIST_DIR) -> tuple[Path, Path, dict[str, object]]:
     root = root.resolve()
     dist_dir.mkdir(parents=True, exist_ok=True)
-    version = read_version(root)
-    asset_version = public_asset_version(version)
-    zip_path = dist_dir / f"{PACKAGE_NAME}-v{asset_version}.zip"
-    manifest_path = dist_dir / f"{PACKAGE_NAME}-v{asset_version}.manifest.json"
+    zip_path = dist_dir / MANUAL_ZIP_FILENAME
+    manifest_path = dist_dir / MANUAL_MANIFEST_FILENAME
 
     with tempfile.TemporaryDirectory(prefix="aiva-collector-winpkg-") as tmp:
-        staging = Path(tmp) / f"{PACKAGE_NAME}-v{asset_version}"
+        staging = Path(tmp) / zip_path.stem
         staging.mkdir(parents=True)
         files = iter_included_files(root)
         copy_files(root, staging, files)
@@ -300,7 +273,7 @@ def build_package(root: Path = ROOT, dist_dir: Path = DIST_DIR) -> tuple[Path, P
 
     manifest = {
         "package_name": PACKAGE_NAME,
-        "version": version,
+        "version": VERSION,
         "build_commit": build_commit(),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files_count": files_count,

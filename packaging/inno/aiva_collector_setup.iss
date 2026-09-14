@@ -1,7 +1,13 @@
 #define AppName "AIVA Collector"
-#define AppVersion "0.2.7rc2"
 #define AppPublisher "AIVA Comercial"
 #define AppExeName "aiva-collector.exe"
+
+#ifndef AppVersion
+  #error AppVersion must be supplied by the official build workflow
+#endif
+#ifndef PublicVersion
+  #error PublicVersion must be supplied by the official build workflow
+#endif
 
 [Setup]
 AppId={{8E61F9E0-4E7F-4CE7-9F4D-A1FA00010051}
@@ -12,7 +18,7 @@ DefaultDirName={autopf}\AIVA Collector
 DefaultGroupName=AIVA Collector
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
-OutputBaseFilename=AIVA-Collector-Setup-v0.2.7-desktop-rc2
+OutputBaseFilename=AIVA-Collector-Setup-v{#PublicVersion}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

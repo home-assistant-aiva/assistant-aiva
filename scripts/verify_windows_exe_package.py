@@ -10,47 +10,24 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from aiva_collector.version import (
+    INSTALLER_FILENAME,
+    INSTALLER_MANIFEST_FILENAME,
+    PUBLIC_VERSION,
+    VERSION,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def read_version(root: Path = ROOT) -> str:
-    try:
-        import tomllib
-
-        data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-        return str(data.get("project", {}).get("version") or "0.0.0")
-    except Exception:
-        return "0.0.0"
-
-
-VERSION = read_version()
-
-
-def public_asset_version(version: str) -> str:
-    if version in {"0.2.7rc1", "0.2.7rc2"}:
-        return f"0.2.7-desktop-{version[-3:]}"
-    if version == "0.2.6rc6":
-        return "0.2.6-discovery-rc6"
-    if version == "0.2.6rc3":
-        return "0.2.6-silent-rc3"
-    if version == "0.2.6rc2":
-        return "0.2.6-discovery-rc2"
-    if version == "0.2.6rc1":
-        return "0.2.6-discovery-rc1"
-    return version
-
-
-ASSET_VERSION = public_asset_version(VERSION)
 SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 INNO_PATH = ROOT / "packaging" / "inno" / "aiva_collector_setup.iss"
 DIST_DIR = ROOT / "dist"
 EXE_PATH = DIST_DIR / "aiva-collector.exe"
 CLI_EXE_PATH = DIST_DIR / "aiva-collector-cli.exe"
 BACKGROUND_EXE_PATH = DIST_DIR / "aiva-collector-background.exe"
-INSTALLER_PATH = DIST_DIR / f"AIVA-Collector-Setup-v{ASSET_VERSION}.exe"
-TECH_ZIP_PATH = DIST_DIR / f"aiva-collector-windows-exe-v{VERSION}.zip"
-MANIFEST_PATH = DIST_DIR / f"AIVA-Collector-Installer-v{VERSION}.manifest.json"
+INSTALLER_PATH = DIST_DIR / INSTALLER_FILENAME
+TECH_ZIP_PATH = DIST_DIR / f"aiva-collector-windows-exe-v{PUBLIC_VERSION}.zip"
+MANIFEST_PATH = DIST_DIR / INSTALLER_MANIFEST_FILENAME
 
 FORBIDDEN_TEXT = [
     "/opt/aiva-collector",
@@ -160,7 +137,10 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
     text = inno_path.read_text(encoding="utf-8")
     assert_text_file_safe(inno_path)
     required = [
-        f"OutputBaseFilename=AIVA-Collector-Setup-v{ASSET_VERSION}",
+        "#ifndef AppVersion",
+        "#ifndef PublicVersion",
+        "AppVersion={#AppVersion}",
+        "OutputBaseFilename=AIVA-Collector-Setup-v{#PublicVersion}",
         "Source: \"..\\..\\dist\\aiva-collector.exe\"",
         "Source: \"..\\..\\dist\\aiva-collector-cli.exe\"",
         "Source: \"..\\..\\dist\\aiva-collector-background.exe\"",
