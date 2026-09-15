@@ -1,6 +1,6 @@
 # AIVA Collector para Windows
 
-El instalador Desktop RC3 separa las tres responsabilidades del Collector:
+El instalador Desktop RC4 separa las tres responsabilidades del Collector:
 
 - `aiva-collector.exe`: aplicación gráfica para el cliente;
 - `aiva-collector-cli.exe`: comandos técnicos y soporte;
@@ -77,9 +77,26 @@ escritura al job de publicación. El workflow alternativo
 `build-windows-installer.yml` fue retirado para evitar convenciones de versión,
 artifacts y permisos de release duplicados.
 
+Desde RC4, PyInstaller genera un único directorio `onedir` para Desktop, CLI y
+Background. Los tres ejecutables permanecen en la raíz de instalación, pero
+comparten las dependencias de `_internal` en vez de incorporar cada uno un
+archivo autocontenido. Esta opción reduce la estructura típica de un ejecutable
+autoextraíble y evita triplicar dependencias, sin cambiar accesos directos,
+comandos ni la tarea programada.
+
+Inno usa `Compression=zip` y `SolidCompression=no`. El instalador puede ser más
+grande que el candidato anterior, pero evita la compresión LZMA sólida sobre
+binarios ya empaquetados y prioriza inspección, trazabilidad y compatibilidad antivirus.
+
+El build rechaza UPX en la configuración y en las secciones PE producidas,
+valida los recursos de versión de cada ejecutable y conserva evidencia de
+Defender y Authenticode. Al no existir certificado de firma configurado, RC4 es
+un candidato de prueba `NotSigned`, no un instalador aprobado para distribución
+general.
+
 Artefactos esperados:
 
-- `AIVA-Collector-Setup-v0.2.7-desktop-rc3.exe`;
-- `AIVA-Collector-Installer-v0.2.7rc3.manifest.json`;
-- `aiva-collector-windows-manual-v0.2.7-desktop-rc3.zip`;
+- `AIVA-Collector-Setup-v0.2.7-desktop-rc4.exe`;
+- `AIVA-Collector-Installer-v0.2.7rc4.manifest.json`;
+- `aiva-collector-windows-manual-v0.2.7-desktop-rc4.zip`;
 - `SHA256SUMS.txt`.

@@ -1,4 +1,4 @@
-AIVA Collector Desktop RC3
+AIVA Collector Desktop RC4
 ==========================
 
 Versión candidata para validar primero en una PC controlada del comercio.
@@ -16,7 +16,7 @@ Qué corrige
 Instalación
 -----------
 
-1. Ejecutar AIVA-Collector-Setup-v0.2.7-desktop-rc3.exe.
+1. Ejecutar AIVA-Collector-Setup-v0.2.7-desktop-rc4.exe.
 2. Dejar marcada la opción de acceso directo en el escritorio.
 3. Al terminar, abrir "AIVA Collector".
 4. Presionar "Conectar con AIVA".

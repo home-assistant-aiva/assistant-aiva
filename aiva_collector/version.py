@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 
-VERSION = "0.2.7rc3"
+VERSION = "0.2.7rc4"
 PRODUCT_CHANNEL = "desktop"
 
 
