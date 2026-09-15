@@ -166,7 +166,9 @@ def test_defender_check_validates_detection_evidence_and_authenticode():
 def test_installer_upgrade_and_uninstall_guards_cover_persistent_data():
     installer = INSTALLER_VERIFIER.read_text(encoding="utf-8")
 
-    assert '$taskXml -notmatch "token"' in installer
+    assert '"<Arguments>(?<value>.*?)</Arguments>"' in installer
+    assert '$taskArguments -notmatch "(?i)token|bearer"' in installer
+    assert '$taskXml -notmatch "token"' not in installer
     assert "Assert-PreservedFiles $persistentHashes" in installer
     assert installer.count("Assert-PreservedFiles $persistentHashes") >= 2
     for field in (

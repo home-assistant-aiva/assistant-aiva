@@ -78,7 +78,10 @@ function Assert-ScheduledTask {
   Assert-True ($taskXml -match "aiva-collector-background\.exe") "La tarea no usa el runner background."
   Assert-True ($taskXml -match "run-auto") "La tarea no ejecuta run-auto."
   Assert-True ($taskXml -match "config\.windows\.json") "La tarea no referencia la configuracion persistente."
-  Assert-True ($taskXml -notmatch "token") "La tarea expone un token en sus argumentos."
+  $argumentsMatch = [regex]::Match($taskXml, "<Arguments>(?<value>.*?)</Arguments>", [Text.RegularExpressions.RegexOptions]::Singleline)
+  Assert-True $argumentsMatch.Success "La tarea no declara argumentos verificables."
+  $taskArguments = $argumentsMatch.Groups["value"].Value
+  Assert-True ($taskArguments -notmatch "(?i)token|bearer") "La tarea expone un token en sus argumentos."
 }
 
 function Assert-TaskRemoved {
