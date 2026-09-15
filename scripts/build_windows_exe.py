@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 DIST_DIR = ROOT / "dist"
+APP_DIR_NAME = "aiva-collector"
 
 
 def build_exe(spec_path: Path = SPEC_PATH, dist_dir: Path = DIST_DIR) -> Path:
@@ -25,12 +26,16 @@ def build_exe(spec_path: Path = SPEC_PATH, dist_dir: Path = DIST_DIR) -> Path:
         str(spec_path),
     ]
     subprocess.run(cmd, cwd=ROOT, check=True)
-    exe_path = dist_dir / "aiva-collector.exe"
-    cli_path = dist_dir / "aiva-collector-cli.exe"
-    background_path = dist_dir / "aiva-collector-background.exe"
+    app_dir = dist_dir / APP_DIR_NAME
+    exe_path = app_dir / "aiva-collector.exe"
+    cli_path = app_dir / "aiva-collector-cli.exe"
+    background_path = app_dir / "aiva-collector-background.exe"
     missing = [path for path in (exe_path, cli_path, background_path) if not path.exists()]
     if missing:
         raise FileNotFoundError("No se generaron ejecutables: " + ", ".join(str(path) for path in missing))
+    support_dir = app_dir / "_internal"
+    if not support_dir.is_dir() or not any(path.is_file() for path in support_dir.rglob("*")):
+        raise FileNotFoundError(f"No se generaron dependencias onedir: {support_dir}")
     return exe_path
 
 

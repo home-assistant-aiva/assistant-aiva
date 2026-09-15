@@ -22,9 +22,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC_PATH = ROOT / "packaging" / "pyinstaller" / "aiva_collector.spec"
 INNO_PATH = ROOT / "packaging" / "inno" / "aiva_collector_setup.iss"
 DIST_DIR = ROOT / "dist"
-EXE_PATH = DIST_DIR / "aiva-collector.exe"
-CLI_EXE_PATH = DIST_DIR / "aiva-collector-cli.exe"
-BACKGROUND_EXE_PATH = DIST_DIR / "aiva-collector-background.exe"
+APP_DIR = DIST_DIR / "aiva-collector"
+EXE_PATH = APP_DIR / "aiva-collector.exe"
+CLI_EXE_PATH = APP_DIR / "aiva-collector-cli.exe"
+BACKGROUND_EXE_PATH = APP_DIR / "aiva-collector-background.exe"
 INSTALLER_PATH = DIST_DIR / INSTALLER_FILENAME
 TECH_ZIP_PATH = DIST_DIR / f"aiva-collector-windows-exe-v{PUBLIC_VERSION}.zip"
 MANIFEST_PATH = DIST_DIR / INSTALLER_MANIFEST_FILENAME
@@ -49,9 +50,9 @@ SECRET_REGEXES = [
     ("sk-", re.compile(r"\bsk-[A-Za-z0-9]{12,}")),
 ]
 TECH_ZIP_FILES = [
-    ROOT / "dist" / "aiva-collector.exe",
-    ROOT / "dist" / "aiva-collector-cli.exe",
-    ROOT / "dist" / "aiva-collector-background.exe",
+    EXE_PATH,
+    CLI_EXE_PATH,
+    BACKGROUND_EXE_PATH,
     ROOT / "docs" / "aiva_collector_windows_exe.md",
     ROOT / "docs" / "aiva_collector_windows_installer.md",
     ROOT / "windows" / "config.windows.example.json",
@@ -80,6 +81,20 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def directory_sha256(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    files = sorted(
+        (item for item in path.rglob("*") if item.is_file()),
+        key=lambda item: item.relative_to(path).as_posix(),
+    )
+    for item in files:
+        relative = item.relative_to(path).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        digest.update(bytes.fromhex(sha256(item)))
+    return digest.hexdigest(), len(files)
 
 
 def build_commit() -> str | None:
@@ -123,12 +138,17 @@ def assert_spec_safe(spec_path: Path = SPEC_PATH) -> None:
         '"openpyxl"',
         '"certifi"',
         'excludes=["tests", "pytest"]',
+        "COLLECT(",
+        "exclude_binaries=True",
+        "generate_windows_version_info.py",
     ]
     missing = [value for value in required if value not in text]
     if missing:
         raise VerifyError("Spec incompleto: " + ", ".join(missing))
     if str(ROOT) in text:
         raise VerifyError("Spec contiene ruta absoluta del workspace")
+    if "upx=True" in text or text.count("upx=False") != 4:
+        raise VerifyError("UPX debe estar deshabilitado en los tres EXE y en COLLECT")
 
 
 def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
@@ -141,9 +161,10 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
         "#ifndef PublicVersion",
         "AppVersion={#AppVersion}",
         "OutputBaseFilename=AIVA-Collector-Setup-v{#PublicVersion}",
-        "Source: \"..\\..\\dist\\aiva-collector.exe\"",
-        "Source: \"..\\..\\dist\\aiva-collector-cli.exe\"",
-        "Source: \"..\\..\\dist\\aiva-collector-background.exe\"",
+        "Source: \"..\\..\\dist\\aiva-collector\\*\"",
+        "recursesubdirs createallsubdirs",
+        "Compression=zip",
+        "SolidCompression=no",
         "DestName: \"config.windows.json\"; Flags: onlyifdoesntexist",
         "{commonappdata}\\AIVA\\Collector\\entrada",
         "{commonappdata}\\AIVA\\Collector\\estado\\queue",
@@ -157,6 +178,8 @@ def assert_inno_safe(inno_path: Path = INNO_PATH) -> None:
     missing = [value for value in required if value not in text]
     if missing:
         raise VerifyError("Inno script incompleto: " + ", ".join(missing))
+    if "Compression=lzma" in text or "SolidCompression=yes" in text:
+        raise VerifyError("Inno usa compresion anidada agresiva")
 
 
 def assert_runtime_wrappers_safe(root: Path = ROOT) -> None:
@@ -205,14 +228,18 @@ def assert_runtime_wrappers_safe(root: Path = ROOT) -> None:
 
 
 def create_technical_zip(zip_path: Path = TECH_ZIP_PATH) -> Path:
-    missing = [path for path in TECH_ZIP_FILES if not path.exists()]
+    package_files = list(TECH_ZIP_FILES)
+    if APP_DIR.is_dir():
+        package_files.extend(path for path in APP_DIR.rglob("*") if path.is_file())
+    package_files = sorted(set(package_files), key=lambda path: path.relative_to(ROOT).as_posix())
+    missing = [path for path in package_files if not path.exists()]
     if missing:
         raise VerifyError("Faltan archivos para ZIP tecnico: " + ", ".join(str(path) for path in missing))
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = zip_path.with_suffix(".zip.tmp")
     tmp_path.unlink(missing_ok=True)
     with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in TECH_ZIP_FILES:
+        for path in package_files:
             if path.name in FORBIDDEN_PACKAGE_NAMES:
                 raise VerifyError(f"Archivo prohibido para ZIP tecnico: {path}")
             archive.write(path, path.relative_to(ROOT).as_posix())
@@ -250,11 +277,19 @@ def write_manifest(paths: list[Path], manifest_path: Path | None = None) -> Path
                     "bytes": path.stat().st_size,
                 }
             )
+    bundle_hash = None
+    bundle_files = 0
+    if APP_DIR.is_dir():
+        bundle_hash, bundle_files = directory_sha256(APP_DIR)
     manifest = {
         "name": "AIVA Collector Windows Installer",
         "version": VERSION,
         "build_commit": build_commit(),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "pyinstaller_mode": "onedir",
+        "upx_enabled": False,
+        "bundle_sha256": bundle_hash,
+        "bundle_files": bundle_files,
         "artifacts": artifacts,
         "safety_checks_passed": True,
     }
@@ -270,6 +305,9 @@ def verify(create_zip: bool = False, require_artifacts: bool = False) -> dict[st
 
     artifacts = []
     if require_artifacts:
+        support_dir = APP_DIR / "_internal"
+        if not support_dir.is_dir() or not any(path.is_file() for path in support_dir.rglob("*")):
+            raise VerifyError(f"No existe contenido de soporte onedir: {support_dir}")
         for path in (EXE_PATH, CLI_EXE_PATH, BACKGROUND_EXE_PATH, INSTALLER_PATH):
             if not path.exists():
                 raise VerifyError(f"No existe artifact requerido: {path}")

@@ -4,7 +4,9 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExpectedVersion,
   [Parameter(Mandatory = $true)]
-  [string]$ExpectedPublicVersion
+  [string]$ExpectedPublicVersion,
+  [Parameter(Mandatory = $true)]
+  [string]$DefenderEvidencePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +18,7 @@ $EvidencePath = Join-Path (Resolve-Path ".\dist") "windows-installer-verificatio
 $Installer = (Resolve-Path $InstallerPath).Path
 $ExpectedInstallerName = "AIVA-Collector-Setup-v$ExpectedPublicVersion.exe"
 $BuildCommit = [string]$env:AIVA_BUILD_COMMIT
+$BuiltAppDir = Join-Path (Resolve-Path ".\dist") "aiva-collector"
 
 function Assert-True([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw $Message }
@@ -75,6 +78,7 @@ function Assert-ScheduledTask {
   Assert-True ($taskXml -match "aiva-collector-background\.exe") "La tarea no usa el runner background."
   Assert-True ($taskXml -match "run-auto") "La tarea no ejecuta run-auto."
   Assert-True ($taskXml -match "config\.windows\.json") "La tarea no referencia la configuracion persistente."
+  Assert-True ($taskXml -notmatch "token") "La tarea expone un token en sus argumentos."
 }
 
 function Assert-TaskRemoved {
@@ -85,9 +89,17 @@ function Assert-TaskRemoved {
 function Assert-InstalledBinaries {
   foreach ($name in @("aiva-collector.exe", "aiva-collector-cli.exe", "aiva-collector-background.exe")) {
     $installed = Join-Path $InstallDir $name
-    $built = Join-Path (Resolve-Path ".\dist") $name
+    $built = Join-Path $BuiltAppDir $name
     Assert-True (Test-Path $installed) "Falta binario instalado: $name"
     Assert-True ((Get-FileHash $installed -Algorithm SHA256).Hash -eq (Get-FileHash $built -Algorithm SHA256).Hash) "El binario instalado no coincide con el build actual: $name"
+  }
+  $builtFiles = @(Get-ChildItem -LiteralPath $BuiltAppDir -Recurse -File)
+  Assert-True ($builtFiles.Count -gt 3) "El bundle onedir no contiene dependencias compartidas."
+  foreach ($built in $builtFiles) {
+    $relative = $built.FullName.Substring($BuiltAppDir.Length).TrimStart('\')
+    $installed = Join-Path $InstallDir $relative
+    Assert-True (Test-Path -LiteralPath $installed) "Falta archivo onedir instalado: $relative"
+    Assert-True ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $built.FullName -Algorithm SHA256).Hash) "El archivo onedir instalado no coincide con el build: $relative"
   }
   Assert-True (Test-Path (Join-Path $InstallDir "unins000.exe")) "No existe el desinstalador."
 }
@@ -148,6 +160,8 @@ $evidence = [ordered]@{
   no_database_in_installed_files = $false
   uninstall = $false
   signature_status = $signatureStatus
+  defender_status = "pending"
+  defender_available = $false
 }
 
 Assert-True ($evidence.build_commit -match '^[0-9a-f]{40}$') "AIVA_BUILD_COMMIT no identifica el commit compilado."
@@ -236,6 +250,10 @@ try {
   $evidence.source_folder_preserved = $true
   $evidence.binaries_replaced = $true
   $evidence.no_database_in_installed_files = $true
+  & (Join-Path $PSScriptRoot "verify_windows_defender.ps1") -ScanPath @($BuiltAppDir, $Installer, $InstallDir) -EvidencePath $DefenderEvidencePath -BuildCommit $BuildCommit
+  $defenderEvidence = Get-Content -Raw -LiteralPath $DefenderEvidencePath | ConvertFrom-Json
+  $evidence.defender_status = [string]$defenderEvidence.status
+  $evidence.defender_available = [bool]$defenderEvidence.available
   Invoke-Uninstaller
   Assert-PreservedFiles $persistentHashes
   $evidence.uninstall = $true

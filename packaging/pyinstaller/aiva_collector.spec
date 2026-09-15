@@ -1,10 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import runpy
 from pathlib import Path
 
 
 block_cipher = None
 project_root = Path(SPECPATH).parents[1]
+version_helpers = runpy.run_path(str(project_root / "scripts" / "generate_windows_version_info.py"))
+version_files = version_helpers["write_version_info_files"](
+    Path(workpath) / "windows-version-info"
+)
 
 
 manual = Analysis(
@@ -39,15 +44,13 @@ manual_pyz = PYZ(manual.pure, manual.zipped_data, cipher=block_cipher)
 manual_exe = EXE(
     manual_pyz,
     manual.scripts,
-    manual.binaries,
-    manual.zipfiles,
-    manual.datas,
     [],
+    exclude_binaries=True,
     name="aiva-collector",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -56,6 +59,7 @@ manual_exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=str(version_files["aiva-collector.exe"]),
 )
 
 cli = Analysis(
@@ -86,15 +90,13 @@ cli_pyz = PYZ(cli.pure, cli.zipped_data, cipher=block_cipher)
 cli_exe = EXE(
     cli_pyz,
     cli.scripts,
-    cli.binaries,
-    cli.zipfiles,
-    cli.datas,
     [],
+    exclude_binaries=True,
     name="aiva-collector-cli",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
@@ -103,6 +105,7 @@ cli_exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=str(version_files["aiva-collector-cli.exe"]),
 )
 
 background = Analysis(
@@ -133,15 +136,13 @@ background_pyz = PYZ(background.pure, background.zipped_data, cipher=block_ciphe
 background_exe = EXE(
     background_pyz,
     background.scripts,
-    background.binaries,
-    background.zipfiles,
-    background.datas,
     [],
+    exclude_binaries=True,
     name="aiva-collector-background",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -150,4 +151,21 @@ background_exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=str(version_files["aiva-collector-background.exe"]),
+)
+
+aiva_collector_bundle = COLLECT(
+    manual_exe,
+    cli_exe,
+    background_exe,
+    manual.binaries,
+    manual.datas,
+    cli.binaries,
+    cli.datas,
+    background.binaries,
+    background.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="aiva-collector",
 )

@@ -50,9 +50,10 @@ def test_inno_script_is_safe_and_preserves_existing_config():
     content = Path("packaging/inno/aiva_collector_setup.iss").read_text(encoding="utf-8")
     assert "onlyifdoesntexist" in content
     assert "OutputBaseFilename=AIVA-Collector-Setup-v{#PublicVersion}" in content
-    assert '#define AppVersion "0.2.7rc3"' not in content
-    assert "aiva-collector-cli.exe" in content
-    assert "aiva-collector-background.exe" in content
+    assert "#define AppVersion" not in content
+    assert 'Source: "..\\..\\dist\\aiva-collector\\*"' in content
+    assert "recursesubdirs createallsubdirs" in content
+    assert 'Source: "..\\..\\dist\\aiva-collector-cli.exe"' not in content
     assert 'Name: "{group}\\AIVA Collector"; Filename: "{app}\\{#AppExeName}"' in content
     assert 'Filename: "{app}\\activate.bat"' not in content
     assert 'Filename: "{app}\\install_scheduled_task.bat"; Parameters: "/quiet"; Flags: runhidden waituntilterminated' in content
@@ -215,8 +216,8 @@ def test_official_workflow_reads_release_names_from_canonical_version_module():
         "manual_zip_filename",
     ):
         assert f"{output}: ${{{{ steps.release-metadata.outputs.{output} }}}}" in workflow
-    assert "0.2.7rc3" not in workflow
-    assert "0.2.7-desktop-rc3" not in workflow
+    assert "0.2.7rc4" not in workflow
+    assert "0.2.7-desktop-rc4" not in workflow
 
 
 def test_installer_manifest_and_windows_evidence_record_build_commit(tmp_path, monkeypatch):

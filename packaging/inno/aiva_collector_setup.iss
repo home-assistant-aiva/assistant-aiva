@@ -19,8 +19,8 @@ DefaultGroupName=AIVA Collector
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist
 OutputBaseFilename=AIVA-Collector-Setup-v{#PublicVersion}
-Compression=lzma
-SolidCompression=yes
+Compression=zip
+SolidCompression=no
 WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64
@@ -44,9 +44,7 @@ Name: "{commonappdata}\AIVA\Collector\diagnostico"; Permissions: users-modify
 Name: "{commonappdata}\AIVA\Collector\backups"; Permissions: users-modify
 
 [Files]
-Source: "..\..\dist\aiva-collector.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\dist\aiva-collector-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\dist\aiva-collector-background.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\aiva-collector\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\windows_runtime\*.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\windows\config.windows.example.json"; DestDir: "{commonappdata}\AIVA\Collector"; DestName: "config.windows.json"; Flags: onlyifdoesntexist ignoreversion
 Source: "..\..\windows\config.windows.example.json"; DestDir: "{app}"; Flags: ignoreversion
