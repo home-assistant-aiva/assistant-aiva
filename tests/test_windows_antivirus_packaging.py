@@ -1,6 +1,8 @@
 import importlib.util
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 from aiva_collector.version import PUBLIC_VERSION
@@ -25,6 +27,18 @@ SPEC = Path("packaging/pyinstaller/aiva_collector.spec")
 INNO = Path("packaging/inno/aiva_collector_setup.iss")
 INSTALLER_VERIFIER = Path("scripts/verify_windows_installer.ps1")
 DEFENDER_VERIFIER = Path("scripts/verify_windows_defender.ps1")
+
+
+def test_binary_inspector_direct_entrypoint_is_importable():
+    result = subprocess.run(
+        [sys.executable, "scripts/verify_windows_binary_security.py", "--help"],
+        cwd=Path.cwd(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--extra-pe" in result.stdout
 
 
 def test_pyinstaller_uses_shared_onedir_and_disables_upx_everywhere():

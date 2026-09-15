@@ -10,6 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from aiva_collector.version import PUBLIC_VERSION, VERSION
 from scripts.generate_windows_version_info import (
     COMPANY_NAME,
@@ -20,7 +24,6 @@ from scripts.generate_windows_version_info import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_APP_DIR = ROOT / "dist" / "aiva-collector"
 DEFAULT_EVIDENCE_PATH = ROOT / "dist" / "windows-binary-inspection.json"
 PE_SUFFIXES = {".exe", ".dll", ".pyd"}
