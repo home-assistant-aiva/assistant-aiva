@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_data_files
 import runpy
 from pathlib import Path
 
@@ -16,8 +17,9 @@ manual = Analysis(
     [str(project_root / "packaging" / "pyinstaller" / "aiva_collector_entrypoint.py")],
     pathex=[str(project_root)],
     binaries=[],
-    datas=[],
+    datas=collect_data_files("tzdata"),
     hiddenimports=[
+        "tzdata",
         "tkinter",
         "tkinter.ttk",
         "tkinter.filedialog",
@@ -66,8 +68,9 @@ cli = Analysis(
     [str(project_root / "packaging" / "pyinstaller" / "aiva_collector_cli_entrypoint.py")],
     pathex=[str(project_root)],
     binaries=[],
-    datas=[],
+    datas=collect_data_files("tzdata"),
     hiddenimports=[
+        "tzdata",
         "requests",
         "openpyxl",
         "et_xmlfile",
@@ -112,8 +115,9 @@ background = Analysis(
     [str(project_root / "packaging" / "pyinstaller" / "aiva_collector_background_entrypoint.py")],
     pathex=[str(project_root)],
     binaries=[],
-    datas=[],
+    datas=collect_data_files("tzdata"),
     hiddenimports=[
+        "tzdata",
         "requests",
         "openpyxl",
         "et_xmlfile",
