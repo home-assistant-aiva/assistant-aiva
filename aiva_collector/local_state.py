@@ -30,6 +30,9 @@ def connect(path: str | Path) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
+        CREATE TABLE IF NOT EXISTS daily_capture_sequence (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS processed_files (
             file_id TEXT PRIMARY KEY,
             commerce_id TEXT NULL,
@@ -94,6 +97,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(processed_files)").fetchall()}
     for name, definition in (
         ("backend_url", "TEXT NULL"),
+        ("source_schema_version", "TEXT NULL"),
         ("processing_started_at", "TEXT NULL"),
         ("lease_expires_at", "TEXT NULL"),
     ):
@@ -342,3 +346,11 @@ def status_counts(conn: sqlite3.Connection) -> dict[str, int]:
 def queue_counts(conn: sqlite3.Connection) -> dict[str, int]:
     rows = conn.execute("SELECT status, COUNT(*) AS count FROM upload_queue GROUP BY status").fetchall()
     return {str(row["status"]): int(row["count"]) for row in rows}
+
+
+def next_daily_revision(conn):
+    """Monotonic capture order survives restarts and a backward wall-clock jump."""
+    import time
+    with conn:
+        conn.execute("INSERT INTO daily_capture_sequence VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET revision=MAX(revision+1,excluded.revision)",(time.time_ns(),))
+        return int(conn.execute("SELECT revision FROM daily_capture_sequence WHERE singleton=1").fetchone()[0])

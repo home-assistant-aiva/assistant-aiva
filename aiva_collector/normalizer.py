@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .config import CollectorConfig
 
@@ -24,7 +26,7 @@ def parse_number(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        return float(value) if math.isfinite(value) else None
     text = str(value).strip()
     if not text:
         return None
@@ -37,7 +39,8 @@ def parse_number(value: Any) -> float | None:
     elif "," in text:
         text = text.replace(",", ".")
     try:
-        return float(text)
+        number = float(text)
+        return number if math.isfinite(number) else None
     except ValueError:
         return None
 
@@ -70,16 +73,25 @@ def parse_date(value: Any, date_format: str) -> date | None:
     return None
 
 
-def normalize_rows(raw_rows: list[dict[str, Any]], config: CollectorConfig) -> NormalizedResult:
+def normalize_rows(
+    raw_rows: list[dict[str, Any]], config: CollectorConfig
+) -> NormalizedResult:
     mapping = config.column_mapping
     valid: list[dict[str, Any]] = []
     discarded: list[dict[str, Any]] = []
     date_format = str(config.raw.get("date_format", "%Y-%m-%d"))
 
     for index, raw in enumerate(raw_rows, start=1):
+
         def mapped(name: str) -> Any:
             source = mapping.get(name)
-            return raw.get(source) if source else None
+            if source:
+                return raw.get(source)
+            if name == "descuento":
+                for key, value in raw.items():
+                    if str(key).strip().casefold() in {"descuento", "discount"}:
+                        return value
+            return None
 
         producto_nombre = clean_string(mapped("producto_nombre"))
         cantidad_vendida = parse_number(mapped("cantidad_vendida"))
@@ -102,15 +114,49 @@ def normalize_rows(raw_rows: list[dict[str, Any]], config: CollectorConfig) -> N
             discarded.append({"row_number": index, "reasons": reasons})
             continue
 
+        from .daily import decimal_number
+
+        exact = {
+            name: str(value) if value is not None else None
+            for name in (
+                "cantidad_vendida",
+                "precio_venta",
+                "costo_unitario",
+                "stock_actual",
+                "descuento",
+            )
+            for value in [decimal_number(mapped(name))]
+        }
+        if costo_estado not in {"valid", "zero"}:
+            exact["costo_unitario"] = None
+        raw_date = mapped("fecha")
+        if isinstance(raw_date, str) and "T" in raw_date:
+            try:
+                raw_date = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        if isinstance(raw_date, datetime) and raw_date.tzinfo is not None:
+            raw_date = raw_date.astimezone(
+                ZoneInfo(
+                    str(
+                        config.raw.get(
+                            "business_timezone", "America/Argentina/Buenos_Aires"
+                        )
+                    )
+                )
+            )
         valid.append(
             {
-                "fecha": parse_date(mapped("fecha"), date_format),
+                "_daily_decimal": exact,
+                "fecha": parse_date(raw_date, date_format),
                 "producto_codigo": clean_string(mapped("producto_codigo")),
                 "producto_nombre": producto_nombre,
                 "categoria": clean_string(mapped("categoria")) or "Sin categoria",
                 "cantidad_vendida": cantidad_vendida,
                 "precio_venta": precio_venta,
-                "costo_unitario": costo_unitario if costo_estado in {"valid", "zero"} else None,
+                "costo_unitario": costo_unitario
+                if costo_estado in {"valid", "zero"}
+                else None,
                 "costo_estado": costo_estado,
                 "stock_actual": parse_number(mapped("stock_actual")),
             }

@@ -844,6 +844,9 @@ def _process_reliable_file(
         rows_read=len(raw_rows),
         rows_discarded=len(result.discarded),
     )
+    if summary.get("daily_snapshot"):
+        from .local_state import next_daily_revision
+        summary["daily_snapshot"]["revision"] = next_daily_revision(conn)
     _attach_reliability_metadata(
         summary,
         file_id=file_id,
@@ -856,7 +859,7 @@ def _process_reliable_file(
     )
     output_path = _write_summary(config, summary)
     idem = idempotency_key(summary)
-    update_file_state(conn, file_id, idempotency_key=idem)
+    update_file_state(conn, file_id, idempotency_key=idem, source_schema_version=summary.get("source_schema_version", "1.0.0"))
 
     try:
         client.post_status("running")

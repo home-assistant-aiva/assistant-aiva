@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any
 
 from .config import CollectorConfig
+from .errors import ValidationError
 
 
 def _money(value: float | None) -> float | None:
@@ -103,7 +104,7 @@ def build_summary(
     productos_costo_invalido = sum(1 for p in productos if p.get("costo_estado") == "invalid")
     productos_costo_negativo = sum(1 for p in productos if p.get("costo_estado") == "negative")
 
-    return {
+    summary = {
         "commerce_id": config.commerce_id,
         "collector_id": config.collector_id,
         "periodo": str(config.raw.get("periodo", "weekly")),
@@ -132,6 +133,25 @@ def build_summary(
         "collector_version": config.collector_version,
     }
 
+    # Undated legacy sources keep their existing contract. Eligible dated sources
+    # preserve daily observations even when source completeness is unknown.
+    daily_rows = [row for row in rows if row.get("fecha") and row.get("producto_codigo")]
+    if not daily_rows and config.raw.get("source_schema_version") == "2.0.0":
+        raise ValidationError("Daily contract requires business dates and stable product codes")
+    if files_processed > 1 and config.raw.get("source_schema_version") != "2.0.0":
+        summary["metadata"]["daily_granularity_unavailable"] = "legacy_multi_file_summary"
+        return summary
+    if daily_rows and config.raw.get("source_schema_version") != "1.0.0":
+        if files_processed > 1:
+            raise ValidationError("Daily snapshots require one file per payload; use run-auto to avoid overlapping file aggregation")
+        from .daily import build_daily
+        summary["source_schema_version"] = "2.0.0"
+        try:
+            summary["daily_snapshot"] = build_daily(daily_rows, config, rows_discarded + len(rows) - len(daily_rows))
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+    return summary
+
 
 def _dominant_missing_cost_status(counts: dict[str, int]) -> str:
     for status in ("negative", "invalid", "missing", "zero"):
@@ -146,6 +166,9 @@ def stable_summary_hash(summary: dict[str, Any]) -> str:
 
 
 def idempotency_key(summary: dict[str, Any]) -> str:
+    if summary.get("source_schema_version") == "2.0.0":
+        from .daily import daily_idempotency
+        return daily_idempotency(summary)
     source_file = summary.get("metadata", {}).get("source_file", {})
     normalized_hash = source_file.get("normalized_data_hash") if isinstance(source_file, dict) else None
     if normalized_hash:
