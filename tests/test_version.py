@@ -14,14 +14,14 @@ from aiva_collector.version import (
 )
 
 
-def test_rc5_version_and_release_names_have_one_canonical_source():
-    assert VERSION == "0.2.7rc5"
+def test_rc6_version_and_release_names_have_one_canonical_source():
+    assert VERSION == "0.2.7rc6"
     assert aiva_collector.__version__ == VERSION
-    assert PUBLIC_VERSION == "0.2.7-desktop-rc5"
-    assert INSTALLER_FILENAME == "AIVA-Collector-Setup-v0.2.7-desktop-rc5.exe"
-    assert INSTALLER_MANIFEST_FILENAME == "AIVA-Collector-Installer-v0.2.7rc5.manifest.json"
-    assert MANUAL_ZIP_FILENAME == "aiva-collector-windows-manual-v0.2.7-desktop-rc5.zip"
-    assert RELEASE_TAG == "v0.2.7-collector-desktop-rc5"
+    assert PUBLIC_VERSION == "0.2.7-desktop-rc6"
+    assert INSTALLER_FILENAME == "AIVA-Collector-Setup-v0.2.7-desktop-rc6.exe"
+    assert INSTALLER_MANIFEST_FILENAME == "AIVA-Collector-Installer-v0.2.7rc6.manifest.json"
+    assert MANUAL_ZIP_FILENAME == "aiva-collector-windows-manual-v0.2.7-desktop-rc6.zip"
+    assert RELEASE_TAG == "v0.2.7-collector-desktop-rc6"
     assert release_metadata()["package_version"] == VERSION
 
 
