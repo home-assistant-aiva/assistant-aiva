@@ -837,29 +837,58 @@ def _process_reliable_file(
                 _write_error_note(Path(moved[0]), path, message)
         return "error", message
 
-    summary = build_summary(
-        result.rows,
-        config,
-        files_processed=1,
-        rows_read=len(raw_rows),
-        rows_discarded=len(result.discarded),
-    )
-    if summary.get("daily_snapshot"):
-        from .local_state import next_daily_revision
-        summary["daily_snapshot"]["revision"] = next_daily_revision(conn)
-    _attach_reliability_metadata(
-        summary,
-        file_id=file_id,
-        path=path,
-        file_sha256=file_sha256,
-        normalized_data_hash=normalized_hash,
-        detected_at=get_file_detected_at(conn, file_id),
-        processed_at=processed_at,
-        validation=validation_dict,
-    )
-    output_path = _write_summary(config, summary)
-    idem = idempotency_key(summary)
-    update_file_state(conn, file_id, idempotency_key=idem, source_schema_version=summary.get("source_schema_version", "1.0.0"))
+    try:
+        summary = build_summary(
+            result.rows,
+            config,
+            files_processed=1,
+            rows_read=len(raw_rows),
+            rows_discarded=len(result.discarded),
+        )
+        if summary.get("daily_snapshot"):
+            from .local_state import next_daily_revision
+
+            summary["daily_snapshot"]["revision"] = next_daily_revision(conn)
+        _attach_reliability_metadata(
+            summary,
+            file_id=file_id,
+            path=path,
+            file_sha256=file_sha256,
+            normalized_data_hash=normalized_hash,
+            detected_at=get_file_detected_at(conn, file_id),
+            processed_at=processed_at,
+            validation=validation_dict,
+        )
+        output_path = _write_summary(config, summary)
+        idem = idempotency_key(summary)
+        update_file_state(
+            conn,
+            file_id,
+            idempotency_key=idem,
+            source_schema_version=summary.get("source_schema_version", "1.0.0"),
+        )
+    except Exception as exc:
+        message = str(exc)
+        update_file_state(
+            conn,
+            file_id,
+            status="error",
+            error_message=message,
+            processed_at=utc_now(),
+            lease_expires_at=None,
+        )
+        add_event(
+            conn,
+            file_id=file_id,
+            event_type="processing_error",
+            level="error",
+            message=message,
+        )
+        if _config_bool(config, "move_error_files", True):
+            moved = _archive_file(config, path, config.path("error_dir"), suffix="error")
+            if moved:
+                _write_error_note(Path(moved[0]), path, message)
+        return "error", message
 
     try:
         client.post_status("running")

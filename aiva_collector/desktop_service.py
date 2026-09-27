@@ -427,6 +427,16 @@ def _sanitize_config(value: Any) -> Any:
     return value
 
 
+def _sanitize_diagnostic_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _sanitize_diagnostic_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_diagnostic_value(item) for item in value]
+    if isinstance(value, str):
+        return _sanitize_diagnostic_text(value)
+    return value
+
+
 def _scheduled_task_diagnostics() -> dict[str, Any]:
     if not sys.platform.startswith("win"):
         return {"platform": sys.platform, "installed": None, "detail": "Disponible durante la validacion en Windows."}
@@ -522,7 +532,10 @@ def export_diagnostics() -> OperationResult:
         with tempfile.TemporaryDirectory(prefix="aiva-diagnostic-", dir=diagnostic_dir) as temporary:
             root = Path(temporary)
             (root / "config.sanitized.json").write_text(json.dumps(config_payload, indent=2, ensure_ascii=True), encoding="utf-8")
-            (root / "diagnostic.json").write_text(_sanitize_diagnostic_text(json.dumps(manifest, indent=2, ensure_ascii=True)), encoding="utf-8")
+            (root / "diagnostic.json").write_text(
+                json.dumps(_sanitize_diagnostic_value(manifest), indent=2, ensure_ascii=True),
+                encoding="utf-8",
+            )
             (root / "collector.sanitized.log").write_text(log_text, encoding="utf-8")
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for path in root.iterdir():

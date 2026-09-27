@@ -294,6 +294,72 @@ def test_header_only_file_is_rejected_with_explanation(tmp_path, monkeypatch):
     assert "no contiene registros" in state["error_summary"]
 
 
+def test_daily_summary_error_does_not_block_later_file(tmp_path, monkeypatch):
+    config_path = _config(tmp_path)
+    config = load_config(config_path)
+    header = (
+        "fecha,producto_codigo,producto_nombre,categoria,cantidad_vendida,"
+        "precio_venta,costo_unitario,stock_actual,descuento\n"
+    )
+    old_source = tmp_path / "entrada" / "a-legacy-discount.csv"
+    old_source.write_text(
+        header + "2026-09-26,OLD,Legacy,Cat,1,10,4,8,1\n",
+        encoding="utf-8",
+    )
+    new_source = tmp_path / "entrada" / "b-daily-zero-discount.csv"
+    new_source.write_text(
+        header + "2026-09-26,NEW,Daily,Cat,2,12.5,5,10,0\n",
+        encoding="utf-8",
+    )
+    old_digest = hashlib.sha256(old_source.read_bytes()).hexdigest()
+    conn = connect(local_db_path(config))
+    try:
+        upsert_detected_file(
+            conn,
+            file_id="validated-before-upgrade",
+            commerce_id=config.commerce_id,
+            collector_id=config.collector_id,
+            backend_url=config.backend_url,
+            path=old_source,
+            file_sha256=old_digest,
+            status="validated",
+        )
+    finally:
+        conn.close()
+    sent: list[dict] = []
+    _mock_backend(monkeypatch, sent, [])
+
+    assert main(["run-auto", "--config", str(config_path)]) == 2
+
+    state = json.loads((tmp_path / "estado" / "last_auto_run.json").read_text(encoding="utf-8"))
+    assert state["files_found"] == state["files_eligible"] == state["files_processed"] == 2
+    assert state["rejected"] == state["summaries_sent"] == 1
+    assert len(sent) == 1
+    assert sent[0]["source_schema_version"] == "2.0.0"
+    assert len(sent[0]["daily_snapshot"]["coverage"]) == 1
+    assert len(sent[0]["daily_snapshot"]["metrics"]) == 1
+    conn = connect(local_db_path(config))
+    try:
+        statuses = {
+            row["file_name"]: row["status"]
+            for row in conn.execute("SELECT file_name, status FROM processed_files")
+        }
+        assert statuses == {
+            old_source.name: "error",
+            new_source.name: "sent",
+        }
+        assert conn.execute("SELECT COUNT(*) FROM upload_queue").fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM processed_file_events WHERE file_id = ? AND event_type = 'processing_error'",
+            ("validated-before-upgrade",),
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+    assert main(["run-auto", "--config", str(config_path)]) == 2
+    assert len(sent) == 1
+
+
 def test_stale_lock_is_recovered(tmp_path):
     config = CollectorConfig(raw={"state_dir": str(tmp_path / "estado")}, config_path=tmp_path / "config.json")
     lock = tmp_path / "estado" / "aiva_collector.lock"
@@ -335,7 +401,10 @@ def test_diagnostic_zip_excludes_source_content_and_redacts_secret(tmp_path, mon
     zip_path = tmp_path / "diagnostico" / DIAGNOSTIC_FILENAME
     with zipfile.ZipFile(zip_path) as archive:
         assert "ventas.csv" not in archive.namelist()
+        diagnostic = json.loads(archive.read("diagnostic.json"))
         combined = b"".join(archive.read(name) for name in archive.namelist())
+    assert diagnostic["local_state"]["quick_check"] == "ok"
+    assert any("upload_queue" in item for item in diagnostic["local_state"]["schema"])
     assert b"ventas.csv" in combined
     assert b"ventas.xls" not in combined
     assert secret.encode() not in combined
