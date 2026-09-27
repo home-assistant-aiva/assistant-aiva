@@ -13,7 +13,7 @@ from openpyxl import Workbook
 
 from aiva_collector.cli import _filter_unchanged_read_only_files, _single_run_lock, main
 from aiva_collector.config import CollectorConfig, load_config
-from aiva_collector.desktop_service import export_diagnostics
+from aiva_collector.desktop_service import _sanitize_diagnostic_text, export_diagnostics
 from aiva_collector.local_state import connect, local_db_path, update_file_state, upsert_detected_file
 from aiva_collector.readers import read_file
 from aiva_collector.version import DIAGNOSTIC_FILENAME, VERSION
@@ -370,6 +370,23 @@ def test_stale_lock_is_recovered(tmp_path):
         assert acquired is True
 
     assert not lock.exists()
+
+
+def test_diagnostic_text_redacts_windows_host_and_user():
+    source = (
+        "Nombre de host: HOST-REDACT-ME\n"
+        "Ejecutar como usuario: USER-REDACT-ME\n"
+        "Autor: Personal\n"
+        "Estado: Listo"
+    )
+
+    sanitized = _sanitize_diagnostic_text(source)
+
+    assert "HOST-REDACT-ME" not in sanitized
+    assert "USER-REDACT-ME" not in sanitized
+    assert "Personal" not in sanitized
+    assert sanitized.count("[REDACTED]") == 3
+    assert "Estado: Listo" in sanitized
 
 
 def test_diagnostic_zip_excludes_source_content_and_redacts_secret(tmp_path, monkeypatch):

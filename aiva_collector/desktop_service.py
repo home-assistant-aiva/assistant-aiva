@@ -395,6 +395,11 @@ def logs_folder() -> Path:
 
 
 def _sanitize_diagnostic_text(value: str) -> str:
+    value = re.sub(
+        r"(?im)^(\s*(?:nombre de host|host name|ejecutar como usuario|run as user|autor|author)\s*:\s*).+$",
+        r"\1[REDACTED]",
+        value,
+    )
     value = re.sub(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+", r"\1[REDACTED]", value)
     value = re.sub(
         r'(?i)("?(?:collector_' r'token|token|password|secret|api_key)"?\s*[:=]\s*"?)[^"\s,}]+',
