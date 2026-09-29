@@ -110,6 +110,8 @@ En Windows RC4, el instalador `AIVA-Collector-Setup-v0.2.7-desktop-rc4.exe` inst
 
 `queue-status` muestra pendientes, reintentando, enviados, errores, proximo reintento y DB local. `retry-pending` intenta enviar ahora los pendientes sin imprimir token.
 
+RC7 agrega `configure-daily-source` para una fuente sintética completa limitada por SHA y `reprocess-sent-v2` para un envío v1 exacto ya marcado `sent`. Ver [docs/aiva_collector_daily_reprocess.md](docs/aiva_collector_daily_reprocess.md).
+
 El summary generado queda en `samples/output/last_summary.json` o en el `output_dir` configurado.
 
 ## Enviar al backend

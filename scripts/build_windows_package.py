@@ -37,6 +37,7 @@ INCLUDE_PATHS = [
     Path("docs/aiva_collector_mapping_test_cases.md"),
     Path("docs/aiva_collector_offline_queue.md"),
     Path("docs/aiva_collector_reliability.md"),
+    Path("docs/aiva_collector_daily_reprocess.md"),
     Path("docs/aiva_collector_windows_manual.md"),
     Path("docs/aiva_collector_windows_package.md"),
     Path("docs/aiva_collector_windows_pilot_checklist.md"),

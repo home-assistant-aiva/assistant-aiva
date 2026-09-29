@@ -106,12 +106,14 @@ def init_db(conn: sqlite3.Connection) -> None:
     # RC1 deduplicated globally by SHA. Keep all rows and scope uniqueness to the
     # activated collector and destination from RC2 onward.
     conn.execute("DROP INDEX IF EXISTS idx_processed_files_sha256")
+    conn.execute("DROP INDEX IF EXISTS idx_processed_files_context_sha256")
     conn.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_processed_files_context_sha256
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_processed_files_context_sha256_schema
         ON processed_files(
             COALESCE(commerce_id, ''), COALESCE(collector_id, ''),
-            COALESCE(backend_url, ''), file_sha256
+            COALESCE(backend_url, ''), file_sha256,
+            COALESCE(source_schema_version, '1.0.0')
         )
         """
     )
@@ -172,6 +174,7 @@ def upsert_detected_file(
     path: Path,
     file_sha256: str,
     status: str = "detected",
+    source_schema_version: str | None = None,
 ) -> None:
     now = utc_now()
     stat = path.stat()
@@ -179,9 +182,9 @@ def upsert_detected_file(
         """
         INSERT INTO processed_files (
             file_id, commerce_id, collector_id, backend_url, file_path, file_name, file_size, file_mtime,
-            file_sha256, detected_at, status, created_at, updated_at
+            file_sha256, detected_at, status, source_schema_version, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(file_id) DO UPDATE SET
             file_path=excluded.file_path,
             file_name=excluded.file_name,
@@ -191,6 +194,7 @@ def upsert_detected_file(
             collector_id=excluded.collector_id,
             backend_url=excluded.backend_url,
             status=excluded.status,
+            source_schema_version=COALESCE(excluded.source_schema_version, processed_files.source_schema_version),
             updated_at=excluded.updated_at
         """,
         (
@@ -205,6 +209,7 @@ def upsert_detected_file(
             file_sha256,
             now,
             status,
+            source_schema_version,
             now,
             now,
         ),

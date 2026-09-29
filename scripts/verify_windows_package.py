@@ -33,6 +33,7 @@ REQUIRED_FILES = {
     "docs/aiva_collector_first_client_data_request.md",
     "docs/aiva_collector_offline_queue.md",
     "docs/aiva_collector_windows_manual.md",
+    "docs/aiva_collector_daily_reprocess.md",
     "docs/aiva_collector_windows_package.md",
     "docs/aiva_collector_windows_pilot_checklist.md",
     "docs/aiva_collector_windows_pilot_results_template.md",

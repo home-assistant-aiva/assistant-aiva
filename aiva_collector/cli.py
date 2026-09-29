@@ -135,16 +135,24 @@ def _resolve_mapping_for_rows(
 ) -> tuple[CollectorConfig, ColumnMappingResult]:
     headers = _headers_from_rows(rows)
     warnings: list[str] = []
+    daily_candidate = None
+    if config.raw.get("source_schema_version") != "1.0.0":
+        detected = detect_column_mapping(headers)
+        if detected.status == "auto_approved" and {"fecha", "producto_codigo"} <= set(detected.mapping):
+            daily_candidate = detected
     for source, mapping in (("backend", backend_mapping), ("explicit", config.column_mapping)):
         if not mapping:
             continue
         result = validate_explicit_mapping(mapping, headers)
         if result.status == "auto_approved":
+            if daily_candidate and not {"fecha", "producto_codigo"} <= set(result.mapping):
+                warnings.append(f"Mapping {source} omite fecha o código presentes; se usa autodetección diaria.")
+                continue
             if warnings:
                 result.warnings[:0] = warnings
             return _config_with_mapping(config, result.mapping), result
         warnings.append(f"Mapping {source} no coincide con las columnas detectadas; se intentó autodetección.")
-    result = detect_column_mapping(headers)
+    result = daily_candidate or detect_column_mapping(headers)
     result.warnings[:0] = warnings
     return _config_with_mapping(config, result.mapping), result
 
@@ -650,6 +658,8 @@ def _process_reliable_file(
     conn,
     path: Path,
     backend_mapping: dict[str, str] | None,
+    reprocess_v1_file_id: str | None = None,
+    expected_sha256: str | None = None,
 ) -> tuple[str, str | None]:
     if not wait_for_stable_file(
         path,
@@ -661,6 +671,8 @@ def _process_reliable_file(
         return "skipped", message
 
     file_sha256 = compute_file_sha256(path)
+    if expected_sha256 and file_sha256 != expected_sha256:
+        raise ValidationError("El archivo cambió después de verificar el digest; no se envió.")
     backend_target = _backend_target(config)
     existing_path = conn.execute(
         """
@@ -700,7 +712,7 @@ def _process_reliable_file(
         collector_id=config.collector_id,
         backend_url=backend_target,
     )
-    if existing and existing.get("status") == "sent":
+    if existing and existing.get("status") == "sent" and not reprocess_v1_file_id:
         duplicate_dir = config.path("processed_dir") / "duplicados"
         moved = _archive_file(config, path, duplicate_dir, suffix="duplicate") if _config_bool(config, "move_processed_files", True) else []
         add_event(
@@ -726,7 +738,7 @@ def _process_reliable_file(
     if existing and existing.get("status") == "processing" and _lease_is_active(existing.get("lease_expires_at")):
         return "skipped", "El archivo tiene un procesamiento activo en otra ejecucion."
 
-    file_id = existing["file_id"] if existing else build_file_id(
+    file_id = hashlib.sha256(f"{reprocess_v1_file_id}|2.0.0".encode()).hexdigest() if reprocess_v1_file_id else existing["file_id"] if existing else build_file_id(
         file_sha256,
         path.name,
         commerce_id=config.commerce_id,
@@ -742,7 +754,10 @@ def _process_reliable_file(
         path=path,
         file_sha256=file_sha256,
         status="processing",
+        source_schema_version="2.0.0" if reprocess_v1_file_id else None,
     )
+    if reprocess_v1_file_id:
+        add_event(conn, file_id=file_id, event_type="v1_to_v2_reprocess_started", level="info", message="Reproceso selectivo v1 a v2 iniciado.", context={"previous_file_id": reprocess_v1_file_id})
     update_file_state(
         conn,
         file_id,
@@ -838,13 +853,18 @@ def _process_reliable_file(
         return "error", message
 
     try:
+        file_config = CollectorConfig(raw={**config.raw, "_active_file_sha256": file_sha256}, config_path=config.config_path)
         summary = build_summary(
             result.rows,
-            config,
+            file_config,
             files_processed=1,
             rows_read=len(raw_rows),
             rows_discarded=len(result.discarded),
         )
+        if reprocess_v1_file_id and summary.get("source_schema_version") != "2.0.0":
+            raise ValidationError("El reproceso exige un payload diario v2; no se envió.")
+        if compute_file_sha256(path) != file_sha256:
+            raise ValidationError("El archivo cambió durante la lectura; no se envió.")
         if summary.get("daily_snapshot"):
             from .local_state import next_daily_revision
 
@@ -947,6 +967,163 @@ def get_file_detected_at(conn, file_id: str) -> str:
     row = get_file(conn, file_id)
     return str(row.get("detected_at")) if row else utc_now()
 
+
+def _verified_source_file(value: str, expected_sha256: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute() or path.is_symlink() or path.suffix.lower() not in {".csv", ".xlsx"}:
+        raise ConfigError("La fuente debe ser un archivo CSV/XLSX absoluto y no un enlace.")
+    try:
+        path = path.resolve(strict=True)
+    except OSError as exc:
+        raise ConfigError("El archivo de fuente no está disponible.") from exc
+    if len(expected_sha256) != 64 or any(ch not in "0123456789abcdef" for ch in expected_sha256.lower()):
+        raise ConfigError("SHA-256 esperado inválido.")
+    if compute_file_sha256(path) != expected_sha256.lower():
+        raise ConfigError("El digest del archivo no coincide con el esperado.")
+    return path
+
+
+def cmd_configure_daily_source(args: argparse.Namespace) -> int:
+    runtime = resolve_runtime_config(args.config, migrate=False)
+    config = runtime.config
+    if (config.commerce_id, config.collector_id) != (args.expected_commerce_id, args.expected_collector_id):
+        raise ConfigError("La identidad del comercio o Collector no coincide.")
+    path = _verified_source_file(args.file, args.expected_sha256)
+    folder = path.parent
+    supported = [item for item in folder.iterdir() if item.is_file() and item.suffix.lower() in {".csv", ".xlsx"}]
+    if supported != [path]:
+        raise ConfigError("La carpeta diaria debe contener únicamente el archivo sintético verificado.")
+    try:
+        manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ConfigError("El manifiesto sintético no se puede leer.") from exc
+    if not isinstance(manifest, dict) or manifest.get("synthetic") is not True or manifest.get("complete_by_construction") is not True:
+        raise ConfigError("Falta un manifiesto de completitud sintética verificable.")
+    if manifest.get("sha256") != args.expected_sha256.lower() or manifest.get("source_id") != args.source_id:
+        raise ConfigError("El manifiesto no coincide con la fuente y el digest.")
+    if manifest.get("timezone") != args.timezone or manifest.get("price_semantics") != "final_net":
+        raise ConfigError("Zona horaria o semántica de precio incompatibles.")
+    generator_name = manifest.get("generator")
+    if not isinstance(generator_name, str) or Path(generator_name).name != generator_name:
+        raise ConfigError("El generador sintético no está identificado.")
+    generator_path = folder / generator_name
+    if not generator_path.is_file() or compute_file_sha256(generator_path) != manifest.get("generator_sha256"):
+        raise ConfigError("El generador no coincide con el manifiesto.")
+    if not args.source_id.strip() or len(args.source_id) > 200:
+        raise ConfigError("source_id debe tener entre 1 y 200 caracteres.")
+    from zoneinfo import ZoneInfo
+    try:
+        ZoneInfo(args.timezone)
+    except (KeyError, ValueError) as exc:
+        raise ConfigError("Zona horaria inválida.") from exc
+    from datetime import date
+    try:
+        start = date.fromisoformat(manifest["period_start"])
+        end = date.fromisoformat(manifest["period_end"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ConfigError("Fechas del manifiesto inválidas.") from exc
+    codes = manifest.get("product_codes")
+    days = (end - start).days + 1
+    if (
+        not isinstance(codes, list)
+        or not codes
+        or any(not isinstance(code, str) or not code.strip() or len(code) > 200 for code in codes)
+        or len(codes) != len(set(codes))
+        or not 1 <= days <= 3660
+        or days * len(codes) > 200000
+    ):
+        raise ConfigError("Universo sintético inválido.")
+    candidate = CollectorConfig(raw={**config.raw, "input_dir": str(folder), "source_schema_version": "2.0.0", "business_timezone": args.timezone}, config_path=config.config_path)
+    raw_rows = read_file(path, candidate)
+    mapped_config, mapping = _resolve_mapping_for_rows(candidate, raw_rows)
+    if mapping.status != "auto_approved" or not {"fecha", "producto_codigo"} <= set(mapping.mapping):
+        raise ConfigError("El mapping diario debe identificar fecha y código.")
+    normalized = normalize_rows(raw_rows, mapped_config)
+    if normalized.discarded or len(normalized.rows) != len(raw_rows):
+        raise ConfigError("La fuente sintética contiene filas descartadas.")
+    expected = {(start + timedelta(days=i), code) for i in range((end - start).days + 1) for code in codes}
+    actual = [(row["fecha"], row["producto_codigo"]) for row in normalized.rows]
+    if len(actual) != len(expected) or set(actual) != expected:
+        raise ConfigError("La fuente no cubre exactamente el universo día/producto declarado.")
+    if not any(str(header).strip().casefold() in {"descuento", "discount"} for header in raw_rows[0]):
+        raise ConfigError("La fuente sintética debe declarar explícitamente descuento cero.")
+    if any(row["_daily_decimal"].get("descuento") != "0" for row in normalized.rows):
+        raise ConfigError("La semántica final_net exige descuento cero explícito en cada fila.")
+    if compute_file_sha256(path) != args.expected_sha256.lower():
+        raise ConfigError("El archivo cambió durante la validación.")
+    payload = dict(config.raw)
+    payload.update({
+        "input_dir": str(folder),
+        "source_mode": "watched_folder",
+        "source_read_only": True,
+        "move_processed_files": False,
+        "move_error_files": False,
+        "keep_original_files": True,
+        "source_schema_version": "2.0.0",
+        "daily_source_id": args.source_id,
+        "business_timezone": args.timezone,
+        "price_semantics": "final_net",
+        "daily_snapshot_complete": True,
+        "daily_complete_file_sha256": args.expected_sha256.lower(),
+        "column_mapping": mapping.mapping,
+    })
+    backup_dir = runtime.selected_path.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    shutil.copy2(runtime.selected_path, backup_dir / f"config-before-daily-{stamp}.json")
+    temporary = runtime.selected_path.with_suffix(runtime.selected_path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    shutil.copymode(runtime.selected_path, temporary)
+    temporary.replace(runtime.selected_path)
+    print("Fuente diaria sintética configurada y respaldada. Ningún archivo fue enviado.")
+    return 0
+
+
+def cmd_reprocess_sent_v2(args: argparse.Namespace) -> int:
+    config = resolve_runtime_config(args.config, migrate=False).config
+    config.require_send_ready()
+    if (config.commerce_id, config.collector_id) != (args.expected_commerce_id, args.expected_collector_id):
+        raise ConfigError("La identidad del comercio o Collector no coincide.")
+    if config.raw.get("source_schema_version") != "2.0.0" or config.raw.get("daily_source_id") != args.expected_source_id:
+        raise ConfigError("La fuente configurada no coincide con v2 y source_id esperado.")
+    if not config.raw.get("source_read_only") or config.raw.get("move_processed_files") is not False:
+        raise ConfigError("El reproceso requiere una carpeta de sólo lectura y originales preservados.")
+    path = _verified_source_file(args.file, args.expected_sha256)
+    if path.parent != config.path("input_dir").resolve(strict=True):
+        raise ConfigError("El archivo no pertenece a la carpeta configurada.")
+    with _single_run_lock(config) as acquired:
+        if not acquired:
+            raise ConfigError("Hay otra sincronización activa.")
+        conn = connect_local_state(local_db_path(config))
+        try:
+            previous = conn.execute(
+                """SELECT * FROM processed_files WHERE commerce_id=? AND collector_id=?
+                AND (backend_url=? OR backend_url IS NULL) AND file_sha256=?
+                AND file_path=? AND status='sent' AND COALESCE(source_schema_version,'1.0.0')='1.0.0'
+                AND backend_summary_id=?""",
+                (config.commerce_id, config.collector_id, _backend_target(config), args.expected_sha256.lower(), str(path), args.expected_v1_summary_id),
+            ).fetchone()
+            if previous is None:
+                raise ConfigError("No existe un envío v1 exacto para esta identidad, archivo y summary.")
+            old_id = str(previous["file_id"])
+            new_id = hashlib.sha256(f"{old_id}|2.0.0".encode()).hexdigest()
+            attempted = conn.execute("SELECT status FROM processed_files WHERE file_id=?", (new_id,)).fetchone()
+            if attempted is not None:
+                print(f"Reproceso v2 ya registrado: {attempted['status']}. No se creó otro intento.")
+                return 0
+            queued = conn.execute("SELECT 1 FROM upload_queue WHERE file_id=? AND status IN ('pending','retrying','processing')", (old_id,)).fetchone()
+            if queued:
+                raise ConfigError("El envío v1 aún tiene payload pendiente en cola.")
+            add_event(conn, file_id=old_id, event_type="v1_to_v2_reprocess_requested", level="info", message="Reproceso selectivo solicitado.", context={"new_file_id": new_id})
+            status, message = _process_reliable_file(
+                config=config, client=CollectorClient(config), conn=conn, path=path,
+                backend_mapping=_backend_mapping(config), reprocess_v1_file_id=old_id,
+                expected_sha256=args.expected_sha256.lower(),
+            )
+            print(f"Reproceso v2: {status}. {message or ''}")
+            return 0 if status in {"sent", "pending_send", "duplicate"} else 2
+        finally:
+            conn.close()
 
 def cmd_run_auto(args: argparse.Namespace) -> int:
     config = _load_runtime_config(args)
@@ -1465,6 +1642,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_auto = sub.add_parser("run-auto")
     p_auto.add_argument("--config", default=config_default)
     p_auto.set_defaults(func=cmd_run_auto)
+
+    p_configure_daily = sub.add_parser("configure-daily-source")
+    p_configure_daily.add_argument("--config", default=config_default)
+    p_configure_daily.add_argument("--file", required=True)
+    p_configure_daily.add_argument("--manifest", required=True)
+    p_configure_daily.add_argument("--expected-sha256", required=True)
+    p_configure_daily.add_argument("--expected-commerce-id", required=True)
+    p_configure_daily.add_argument("--expected-collector-id", required=True)
+    p_configure_daily.add_argument("--source-id", required=True)
+    p_configure_daily.add_argument("--timezone", required=True)
+    p_configure_daily.set_defaults(func=cmd_configure_daily_source)
+
+    p_reprocess = sub.add_parser("reprocess-sent-v2")
+    p_reprocess.add_argument("--config", default=config_default)
+    p_reprocess.add_argument("--file", required=True)
+    p_reprocess.add_argument("--expected-sha256", required=True)
+    p_reprocess.add_argument("--expected-commerce-id", required=True)
+    p_reprocess.add_argument("--expected-collector-id", required=True)
+    p_reprocess.add_argument("--expected-source-id", required=True)
+    p_reprocess.add_argument("--expected-v1-summary-id", required=True)
+    p_reprocess.set_defaults(func=cmd_reprocess_sent_v2)
 
     p_status = sub.add_parser("status")
     p_status.add_argument("--config", default=config_default)

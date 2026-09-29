@@ -469,7 +469,7 @@ def test_diagnostic_export_reads_pre_rc2_database_without_migrating_it(tmp_path,
 def test_local_state_migrates_global_sha_index_without_losing_rows(tmp_path):
     db_path = tmp_path / "estado" / "aiva_collector.db"
     conn = connect(db_path)
-    conn.execute("DROP INDEX idx_processed_files_context_sha256")
+    conn.execute("DROP INDEX idx_processed_files_context_sha256_schema")
     conn.execute("CREATE UNIQUE INDEX idx_processed_files_sha256 ON processed_files(file_sha256)")
     conn.execute(
         """
@@ -486,7 +486,7 @@ def test_local_state_migrates_global_sha_index_without_losing_rows(tmp_path):
         assert migrated.execute("SELECT COUNT(*) FROM processed_files WHERE file_id = 'legacy'").fetchone()[0] == 1
         indexes = {row[1] for row in migrated.execute("PRAGMA index_list(processed_files)")}
         assert "idx_processed_files_sha256" not in indexes
-        assert "idx_processed_files_context_sha256" in indexes
+        assert "idx_processed_files_context_sha256_schema" in indexes
         assert migrated.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     finally:
         migrated.close()

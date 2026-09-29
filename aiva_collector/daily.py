@@ -35,7 +35,9 @@ def build_daily(rows, config, discarded):
         raise ValueError(
             "Unsupported price semantics; gross pricing requires an explicit contract"
         )
-    declared = config.raw.get("daily_snapshot_complete") is True and discarded == 0
+    expected_sha = config.raw.get("daily_complete_file_sha256")
+    digest_matches = not expected_sha or expected_sha == config.raw.get("_active_file_sha256")
+    declared = config.raw.get("daily_snapshot_complete") is True and discarded == 0 and digest_matches
     source_id = str(
         config.raw.get("daily_source_id")
         or (
