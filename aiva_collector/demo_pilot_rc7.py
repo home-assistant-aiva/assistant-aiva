@@ -68,12 +68,12 @@ def _paths() -> tuple[Path, Path, Path]:
     return root, installed, bundle
 
 
-def _powershell(command: str) -> str:
+def _powershell(command: str, *, failure: str = "No se pudo inspeccionar la tarea programada.") -> str:
     result = subprocess.run(
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
         capture_output=True, text=True, timeout=90, check=False,
     )
-    require(result.returncode == 0, "No se pudo inspeccionar la tarea programada.")
+    require(result.returncode == 0, failure)
     return result.stdout.strip()
 
 
@@ -103,7 +103,7 @@ def _active_processes() -> set[str]:
 
 
 def _stop_gui_and_wait() -> None:
-    _powershell("Get-Process -Name 'aiva-collector' -ErrorAction SilentlyContinue | ForEach-Object { [void]$_.CloseMainWindow() }")
+    _powershell("[System.Diagnostics.Process]::GetProcessesByName('aiva-collector') | ForEach-Object { [void]$_.CloseMainWindow() }", failure="No se pudo cerrar la interfaz del Collector.")
     for _ in range(90):
         if not _active_processes():
             return

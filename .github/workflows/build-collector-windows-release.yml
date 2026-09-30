@@ -180,11 +180,14 @@ jobs:
             -ExpectedPublicVersion "$env:AIVA_RELEASE_VERSION" `
             -DefenderEvidencePath ".\dist\windows-defender-scan.json"
 
+      - name: Verify pilot closes an absent GUI without error
+        run: python -c "from aiva_collector.demo_pilot_rc7 import _stop_gui_and_wait; _stop_gui_and_wait()"
+
       - name: Build demo RC7 one-shot pilot EXE
         shell: pwsh
         run: |
           python -m PyInstaller --clean --noconfirm --onefile --console `
-            --name AIVA-Demo-RC7-OneShot `
+            --name AIVA-Demo-RC7-OneShot-v2 `
             --collect-data tzdata `
             --add-data 'support\demo_daily_v2_rc7\aiva-demo-daily-v2-source-20260929.zip;.' `
             packaging\pyinstaller\aiva_demo_pilot_entrypoint.py
@@ -192,11 +195,11 @@ jobs:
       - name: Verify demo pilot EXE, source and PE structure
         shell: pwsh
         run: |
-          $exe = 'dist\AIVA-Demo-RC7-OneShot.exe'
+          $exe = 'dist\AIVA-Demo-RC7-OneShot-v2.exe'
           if (-not (Test-Path -LiteralPath $exe)) { throw 'Pilot EXE missing' }
           $self = & $exe --self-check | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $self.version -ne '0.2.7rc7' -or $self.bundle_sha256 -ne '5b258b2edf6745c6149aef4a4c9ecb7dc061522ad5c15e8378a2c235302e37ef') { throw 'Pilot self-check failed' }
-          python -c "import pefile; p=pefile.PE(r'dist\AIVA-Demo-RC7-OneShot.exe'); assert p.DOS_HEADER.e_magic == 0x5A4D and all(not s.Name.rstrip(b'\0').startswith(b'UPX') for s in p.sections)"
+          python -c "import pefile; p=pefile.PE(r'dist\AIVA-Demo-RC7-OneShot-v2.exe'); assert p.DOS_HEADER.e_magic == 0x5A4D and all(not s.Name.rstrip(b'\0').startswith(b'UPX') for s in p.sections)"
           if ($LASTEXITCODE -ne 0) { throw 'Pilot PE structure failed' }
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
           [ordered]@{build_commit=$env:AIVA_BUILD_COMMIT; version='0.2.7rc7'; executable_sha256=$hash; source_sha256=$self.source_sha256; source_bundle_sha256=$self.bundle_sha256; self_check='passed'} |
@@ -205,7 +208,7 @@ jobs:
       - name: Scan demo pilot EXE with Microsoft Defender
         shell: pwsh
         run: |
-          .\scripts\verify_windows_defender.ps1 -ScanPath @('dist\AIVA-Demo-RC7-OneShot.exe') -EvidencePath 'dist\demo-pilot-defender-scan.json' -BuildCommit $env:AIVA_BUILD_COMMIT
+          .\scripts\verify_windows_defender.ps1 -ScanPath @('dist\AIVA-Demo-RC7-OneShot-v2.exe') -EvidencePath 'dist\demo-pilot-defender-scan.json' -BuildCommit $env:AIVA_BUILD_COMMIT
           $scan = Get-Content -LiteralPath 'dist\demo-pilot-defender-scan.json' -Raw | ConvertFrom-Json
           if ($scan.status -ne 'clean' -or $scan.new_threat_detections -ne 0 -or $scan.scan_count -lt 1) { throw 'Pilot Defender scan did not verify clean' }
 
@@ -225,7 +228,7 @@ jobs:
         run: |
           $assets = @(
             "dist\$env:AIVA_INSTALLER_ASSET",
-            "dist\AIVA-Demo-RC7-OneShot.exe",
+            "dist\AIVA-Demo-RC7-OneShot-v2.exe",
             "dist\demo-pilot-verification.json",
             "dist\demo-pilot-defender-scan.json",
             "dist\$env:AIVA_MANIFEST_ASSET",
@@ -248,7 +251,7 @@ jobs:
         run: |
           $required = @(
             "dist\$env:AIVA_INSTALLER_ASSET",
-            "dist\AIVA-Demo-RC7-OneShot.exe",
+            "dist\AIVA-Demo-RC7-OneShot-v2.exe",
             "dist\demo-pilot-verification.json",
             "dist\demo-pilot-defender-scan.json",
             "dist\$env:AIVA_MANIFEST_ASSET",
@@ -270,7 +273,7 @@ jobs:
           if-no-files-found: error
           path: |
             dist/${{ env.AIVA_INSTALLER_ASSET }}
-            dist/AIVA-Demo-RC7-OneShot.exe
+            dist/AIVA-Demo-RC7-OneShot-v2.exe
             dist/demo-pilot-verification.json
             dist/demo-pilot-defender-scan.json
             dist/${{ env.AIVA_MANIFEST_ASSET }}
