@@ -1,0 +1,57 @@
+name: RC7 offline pilot verifier
+on:
+  push:
+    branches: [support/rc7-verifier-20261007]
+    paths:
+      - aiva_collector/pilot_verifier.py
+      - tests/test_pilot_verifier.py
+      - packaging/pyinstaller/aiva_pilot_verifier_entrypoint.py
+      - support/rc7-verifier/**
+      - .github/workflows/verify-rc7-pilot.yml
+permissions:
+  contents: read
+jobs:
+  windows-verifier:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install build dependencies
+        shell: cmd
+        run: python -m pip install -e ".[dev]" pyinstaller==6.16.0 pefile==2024.8.26
+      - name: Test Collector and verifier
+        shell: cmd
+        run: python -m pytest
+      - name: Build standalone verifier
+        shell: cmd
+        run: python -m PyInstaller --clean --noconfirm --onefile --console --uac-admin --noupx --collect-data tzdata --name AIVA-RC7-Verificar packaging/pyinstaller/aiva_pilot_verifier_entrypoint.py
+      - name: Check executable imports and format
+        shell: cmd
+        run: |
+          dist\AIVA-RC7-Verificar.exe --self-check
+          if errorlevel 1 exit /b 1
+          python -c "import pefile; p=pefile.PE('dist/AIVA-RC7-Verificar.exe'); assert all(not s.Name.startswith(b'UPX') for s in p.sections)"
+      - name: Scan with Defender on build runner
+        shell: pwsh
+        run: |
+          ./scripts/verify_windows_defender.ps1 -ScanPath 'dist/AIVA-RC7-Verificar.exe' -EvidencePath 'dist/defender-verifier.json' -BuildCommit '${{ github.sha }}'
+          $result = Get-Content 'dist/defender-verifier.json' -Raw | ConvertFrom-Json
+          if ($result.status -ne 'clean' -or $result.new_threat_detections -ne 0) { throw 'Defender did not verify clean' }
+      - name: Assemble user files and checksums
+        shell: cmd
+        run: |
+          copy support\rc7-verifier\LEEME.txt dist\LEEME.txt
+          python -c "import hashlib,pathlib,json; p=pathlib.Path('dist/AIVA-RC7-Verificar.exe'); pathlib.Path('dist/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n'); pathlib.Path('dist/build.json').write_text(json.dumps({'commit':'${{ github.sha }}','physical_windows_pilot':'pending','ingestion':False,'messaging':False}))"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIVA-RC7-Verificador-sin-comandos
+          if-no-files-found: error
+          path: |
+            dist/AIVA-RC7-Verificar.exe
+            dist/LEEME.txt
+            dist/SHA256SUMS.txt
+            dist/build.json
+            dist/defender-verifier.json

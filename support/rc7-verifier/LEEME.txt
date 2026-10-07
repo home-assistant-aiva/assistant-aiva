@@ -1,0 +1,26 @@
+AIVA RC7 - Verificacion del Excel de tres meses
+
+1. Descarga el ZIP desde Artifacts en la ejecucion de GitHub Actions indicada.
+2. Extrae el ZIP y cierra la ventana de AIVA Collector.
+3. Abre AIVA-RC7-Verificar.exe con doble clic. Acepta la elevacion de Windows.
+4. Si aparece el selector, elige Ventas_demo_RC7.xlsx, el archivo de tres meses.
+5. Guarda el diagnostico JSON donde indique la ventana y adjunta ese JSON en el chat de Codex.
+
+No necesitas Python, PowerShell, Tailscale ni escribir comandos.
+El programa funciona sin conexion y no sube archivos a GitHub ni a otro servidor.
+
+Comprueba el CLI RC7, la configuracion efectiva, el SHA del Excel, el mapping,
+la cobertura observada, descuentos y sumas mensuales independientes. No certifica
+la procedencia sintetica ni la semantica del precio: permanecen para revision.
+
+Deshabilita la tarea automatica AIVA Collector Auto y la deja deshabilitada.
+Con Collector cerrado, respalda ProgramData y verifica la integridad SQLite y
+una copia restaurada. El respaldo privado permanece en ProgramData/AIVA.
+No adjuntes respaldos, bases, tokens ni la carpeta de datos: solo el JSON generado.
+
+No modifica el Excel ni la configuracion de ingesta, no edita SQLite o cola,
+no ingiere ventas y no envia WhatsApp. No reemplaza ni reinstala RC7.
+Un bloqueo se informa en el JSON sin exponer rutas ni credenciales.
+
+Es una herramienta de soporte, no una nueva version del instalador.
+Las pruebas del runner de GitHub no sustituyen la verificacion en tu PC.
