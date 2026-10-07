@@ -21,7 +21,7 @@ jobs:
           python-version: '3.11'
       - name: Install build dependencies
         shell: cmd
-        run: python -m pip install -e ".[dev]" pyinstaller==6.16.0 pefile==2024.8.26
+        run: python -m pip install -e ".[dev]" pyinstaller==6.16.0
       - name: Test Collector and verifier
         shell: cmd
         run: python -m pytest
