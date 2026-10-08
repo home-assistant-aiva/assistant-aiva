@@ -27,6 +27,8 @@ def build_summary(
     rows_read: int,
     rows_discarded: int,
 ) -> dict[str, Any]:
+    if config.raw.get("source_profile") and (rows_discarded or any(not row.get("fecha") or not row.get("producto_codigo") for row in rows)):
+        raise ValidationError("La fuente tiene filas inválidas, fechas o códigos faltantes. Corregí el archivo antes de sincronizar.")
     dates = [row["fecha"] for row in rows if row.get("fecha")]
     fecha_inicio = min(dates).isoformat() if dates else date.today().isoformat()
     fecha_fin = max(dates).isoformat() if dates else date.today().isoformat()
@@ -57,7 +59,12 @@ def build_summary(
             status = "invalid"
         item["cost_status_counts"][status] += 1
         item["cantidad_vendida"] += qty
-        item["facturacion_total"] += qty * price
+        from .daily import row_economics
+        try:
+            net, _discount = row_economics(row, config)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        item["facturacion_total"] += float(net)
         if cost is not None:
             item["costo_total_estimado"] += qty * float(cost)
             item["cantidad_con_costo"] += qty

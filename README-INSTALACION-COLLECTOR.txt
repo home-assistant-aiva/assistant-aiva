@@ -1,68 +1,43 @@
-AIVA Collector Desktop RC4
-==========================
+AIVA Collector Desktop RC8 — 0.2.8rc8
+CANDIDATO DE PRUEBA. No aprobado para instalar en clientes con HTTP.
 
-Versión candidata para validar primero en una PC controlada del comercio.
+Instalación y primera sincronización
+1. Ejecutar AIVA-Collector-Setup-v0.2.8-desktop-rc8.exe.
+2. Abrir AIVA Collector y vincular el comercio con su código de activación.
+3. Abrir Configurar archivo y precios. Elegir una exportación CSV o XLSX.
+4. Asignar fecha, producto, código estable, cantidad y precio unitario.
+   Opcionales: descuento, costo unitario, categoría, stock y fecha del stock.
+   Para XLSX se puede indicar hoja y fila de encabezado (1 a 25).
+5. Definir precio bruto antes del descuento o neto ya descontado, y descuento
+   por unidad, por línea o porcentaje del importe bruto (escala 0 a 100).
+   No adivinar: confirmar estos significados con quien genera la exportación.
+6. Revisar el ejemplo y los totales de Previsualizar. Confirmar cobertura
+   completa sólo si cada archivo contiene todas las ventas de cada día incluido.
+   Días ausentes no se consideran días con cero ventas. Guardar configuración.
+7. Probar conexión y Sincronizar ahora. Repetir no debe duplicar las ventas.
+8. Para un archivo previamente rechazado, corregir la configuración y usar
+   Reprocesar archivo rechazado, eligiendo únicamente ese archivo.
 
-Qué corrige
------------
+Compatibilidad
+CSV UTF-8 (con o sin BOM), separadores coma/punto y coma. XLSX con una hoja
+por fuente. Exportación tabular, precios/costos unitarios y cantidades no
+negativas. Una fuente lógica por carpeta. Los archivos que cubren el mismo día
+son reemplazos completos, NO lotes incrementales de tickets. No se combinan
+hojas, bases, XLS antiguos ni APIs propietarias. Fechas deben ser inequívocas.
+Stock sin fecha coincidente con el día de venta se conserva como desconocido.
+Costos ausentes no se convierten en cero. Fuentes ambiguas quedan para revisión.
 
-- "AIVA Collector" ahora abre una aplicación visible; ya no abre una consola que se cierra.
-- La aplicación muestra si el equipo está conectado, la carpeta observada, la última sincronización y la cola pendiente.
-- La configuración automática usa la ruta real: %ProgramData%\AIVA\Collector\config.windows.json.
-- La tarea automática continúa en segundo plano cada 15 minutos sin mostrar una consola.
-- La aplicación técnica de consola queda separada como aiva-collector-cli.exe.
-- La carpeta elegida se trata como solo lectura: AIVA no mueve ni borra archivos del sistema de ventas.
+Preservación
+La fuente es de sólo lectura. Actualizar/desinstalar conserva ProgramData.
+Una nueva vinculación crea un contexto separado y exige configurar su fuente.
+Las colas anteriores permanecen preservadas; no se envían con otra vinculación.
+La tarea automática usa el proceso background cada 15 minutos y al iniciar sesión.
+Un rechazo persistente requiere acción; fallos de red tienen reintento con espera.
 
-Instalación
------------
-
-1. Ejecutar AIVA-Collector-Setup-v0.2.7-desktop-rc4.exe.
-2. Dejar marcada la opción de acceso directo en el escritorio.
-3. Al terminar, abrir "AIVA Collector".
-4. Presionar "Conectar con AIVA".
-5. Pegar el código de activación generado desde AIVA Comercial.
-6. Presionar "Elegir carpeta de datos" y seleccionar la carpeta donde el sistema de ventas exporta CSV o Excel.
-7. Presionar "Probar conexión".
-8. Presionar "Sincronizar ahora" para la primera prueba controlada.
-
-Uso normal
-----------
-
-- No hace falta dejar abierta la ventana.
-- Windows ejecuta aiva-collector-background.exe al iniciar sesión y luego cada 15 minutos.
-- Si no hay Internet, los envíos quedan en cola y se reintentan.
-- La ventana puede abrirse en cualquier momento para revisar el estado o sincronizar manualmente.
-
-Actualización desde RC6 o versiones anteriores
------------------------------------------------
-
-- Conserva %ProgramData%\AIVA\Collector.
-- Conserva activación, token protegido, estado, cola, mapeos y registros.
-- Reinstala únicamente las tareas conocidas de AIVA Collector.
-- Migra una configuración previa válida a config.windows.json cuando corresponde.
-- No publica tokens ni los muestra en pantalla.
-
-Archivos y seguridad
---------------------
-
-- Configuración: %ProgramData%\AIVA\Collector\config.windows.json
-- Estado y token protegido: %ProgramData%\AIVA\Collector\estado
-- Registros: %ProgramData%\AIVA\Collector\logs
-- Backups de configuración: %ProgramData%\AIVA\Collector\backups
-- El token se protege con Windows DPAPI para el usuario que activa el equipo.
-- El Collector admite CSV y XLSX.
-- Al seleccionar una carpeta externa, los archivos originales permanecen en su lugar.
-- Para producción y demostraciones con datos reales, el servicio AIVA debe usar una URL HTTPS válida. La IP HTTP heredada queda únicamente para pruebas controladas.
-
-Límite actual
--------------
-
-Esta versión conecta de forma automática una carpeta de exportación CSV/XLSX. La conexión directa a bases propietarias del sistema de caja requiere un conector específico y no debe declararse disponible sin validarlo con ese proveedor.
-
-Rollback
---------
-
-1. Copiar %ProgramData%\AIVA\Collector como backup operativo.
-2. Desinstalar AIVA Collector desde Windows sin borrar ProgramData.
-3. Reinstalar el instalador anterior aprobado.
-4. Restaurar la tarea automática de la versión anterior si fuera necesario.
+Requisitos pendientes antes de clientes
+- HTTPS con certificado y URL válidos. La dirección HTTP actual es sólo de prueba.
+- Backend compatible con final_net_with_discounts y Admin con el dato canónico.
+  Los cambios acompañantes deben desplegarse antes de enviar descuentos.
+- Prueba física de instalación, reinicio y actualización en la PC de destino.
+Las pruebas CI y Defender no sustituyen esta validación física ni la firma digital.
+No ejecutar herramientas especiales del piloto RC7 para configurar RC8.

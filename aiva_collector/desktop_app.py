@@ -225,6 +225,11 @@ class CollectorApp:
         self.sync_button = ttk.Button(action_panel, text="Sincronizar ahora", style="Secondary.TButton", command=self.sync_now)
         self.sync_button.pack(side="left", padx=(10, 0))
 
+        setup_panel = ttk.Frame(body, style="Surface.TFrame", padding=(18, 0, 18, 12))
+        setup_panel.pack(fill="x")
+        ttk.Button(setup_panel, text="Configurar archivo y precios", command=self.configure_file).pack(side="left")
+        ttk.Button(setup_panel, text="Reprocesar archivo rechazado", command=self.retry_file).pack(side="left", padx=12)
+
         footer = ttk.Frame(body, style="App.TFrame")
         footer.pack(fill="x", side="bottom", pady=(18, 0))
         self.activity_var = tk.StringVar(value="AIVA Collector listo.")
@@ -363,6 +368,20 @@ class CollectorApp:
         if not selected:
             return
         self._run_async(lambda: configure_source_folder(selected), progress="Guardando la carpeta de datos…")
+
+    def configure_file(self) -> None:
+        if self._busy:
+            return
+        from .source_dialog import SourceDialog
+        SourceDialog(self)
+
+    def retry_file(self) -> None:
+        if self._busy:
+            return
+        from .source_setup import reprocess_rejected
+        value = filedialog.askopenfilename(parent=self.root, title="Elegí sólo el archivo rechazado", filetypes=[("Ventas", "*.csv *.xlsx")])
+        if value:
+            self._run_async(lambda: reprocess_rejected(value), progress="Reprocesando sólo el archivo seleccionado…")
 
     def test_connection(self) -> None:
         self._run_async(test_aiva_connection, progress="Probando la conexión segura con AIVA…")

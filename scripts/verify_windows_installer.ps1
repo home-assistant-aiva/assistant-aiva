@@ -6,10 +6,13 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExpectedPublicVersion,
   [Parameter(Mandatory = $true)]
-  [string]$DefenderEvidencePath
+  [string]$DefenderEvidencePath,
+  [Parameter(Mandatory = $true)]
+  [string]$PreviousInstallerPath
 )
 
 $ErrorActionPreference = "Stop"
+if ($env:GITHUB_ACTIONS -ne "true") { throw "Este verificador requiere un runner descartable de GitHub Actions; elimina sólo el fixture de ProgramData del runner." }
 $TaskName = "AIVA Collector Auto"
 $InstallDir = Join-Path $env:RUNNER_TEMP "AIVA Collector Upgrade Test"
 $DataRoot = Join-Path $env:ProgramData "AIVA\Collector"
@@ -195,7 +198,7 @@ try {
     (Join-Path $DataRoot "mapeos"), `
     (Join-Path $DataRoot "logs") | Out-Null
   $legacyConfig = @{
-    collector_version = "0.2.7rc1"
+    collector_version = "0.2.7rc7"
     backend_url = "https://backend.invalid"
     commerce_id = "commerce-simulated-rc1"
     collector_id = "collector-simulated-rc1"
@@ -224,13 +227,23 @@ try {
   [System.IO.File]::WriteAllText($mappingPath, '{"mapping":"preserve"}', [System.Text.UTF8Encoding]::new($false))
   [System.IO.File]::WriteAllText($logPath, 'PREVIOUS-VERSION-LOG', [System.Text.UTF8Encoding]::new($false))
   [System.IO.File]::WriteAllText($sourcePath, "producto,cantidad`nPrueba,1", [System.Text.UTF8Encoding]::new($false))
+  python scripts/seed_windows_upgrade_state.py
+  Assert-True ($LASTEXITCODE -eq 0) "No se pudo preparar SQLite y DPAPI sinteticos."
   $persistentHashes = @{}
-  foreach ($path in @($configPath, $tokenPath, $statePath, $queuePath, $mappingPath, $logPath, $sourcePath)) {
+  foreach ($path in @($configPath, $tokenPath, $statePath, $queuePath, $mappingPath, $logPath, $sourcePath) + @(Get-ChildItem -LiteralPath (Join-Path $DataRoot "estado") -Recurse -File | ForEach-Object { $_.FullName })) {
     $persistentHashes[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
   }
-  foreach ($name in @("aiva-collector.exe", "aiva-collector-cli.exe", "aiva-collector-background.exe")) {
-    Set-Content -LiteralPath (Join-Path $InstallDir $name) -Value "RC1-OLD-BINARY" -NoNewline
-  }
+  $previousInstaller = (Resolve-Path $PreviousInstallerPath).Path
+  $previousHash = (Get-FileHash -LiteralPath $previousInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+  Assert-True ($previousHash -eq "a280e24643ff454043acddf398db063802121c0025b28fb03da038560b4fd5a3") "El instalador RC7 no coincide con la referencia verificada."
+  $previous = Start-Process -FilePath $previousInstaller -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=`"$InstallDir`"") -Wait -PassThru
+  Assert-True ($previous.ExitCode -eq 0) "No se pudo instalar RC7 para probar la actualizacion."
+  Stop-InstalledCollectorProcesses
+  $previousVersion = (& (Join-Path $InstallDir "aiva-collector-cli.exe") --version | Out-String).Trim()
+  Assert-True ($previousVersion -eq "0.2.7rc7") "La version previa instalada no es RC7."
+  Assert-PreservedFiles $persistentHashes
+  $evidence["previous_installer_sha256"] = $previousHash
+  $evidence["actual_previous_version"] = $previousVersion
 
   Invoke-Installer
   Assert-PreservedFiles $persistentHashes

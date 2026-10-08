@@ -135,6 +135,9 @@ def test_retry_success_sends_saved_payload_and_moves_file(tmp_path, monkeypatch)
     assert main(["run-auto", "--config", str(config_path)]) == 0
 
     _write_valid(source, "Producto Modificado")
+    with connect(local_db_path(load_config(config_path))) as conn:
+        conn.execute("UPDATE upload_queue SET next_retry_at = NULL")
+        conn.commit()
     _mock_backend(monkeypatch, sent, fail=False)
     assert main(["run-auto", "--config", str(config_path)]) == 0
 

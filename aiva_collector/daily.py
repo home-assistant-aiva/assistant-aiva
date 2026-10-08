@@ -26,15 +26,42 @@ def decimal_number(value):
         return None
 
 
+def row_economics(row, config):
+    """Return exact net line revenue and informational total discount, once."""
+    numbers = row.get("_daily_decimal", {})
+    def number(key):
+        return decimal_number(numbers.get(key, row.get(key)))
+    quantity, price = number("cantidad_vendida"), number("precio_venta")
+    discount = number("descuento") or Decimal(0)
+    semantics = config.raw.get("price_semantics", "final_net")
+    kind = config.raw.get("discount_semantics")
+    if semantics not in {"final_net", "gross_before_discount"}:
+        raise ValueError("Elegí si el precio es bruto o neto en Configurar archivo.")
+    if discount < 0:
+        raise ValueError("El descuento no puede ser negativo.")
+    amount = quantity * price
+    if discount:
+        if kind not in {"per_unit", "per_line", "percentage"}:
+            raise ValueError("Descuento (discount) ambiguo: abrí Configurar archivo y elegí por unidad, por línea o porcentaje.")
+        if kind == "percentage":
+            if discount > 100 or (semantics == "final_net" and discount == 100):
+                raise ValueError("Porcentaje inválido: un precio neto con 100% no permite reconstruir el descuento; usá el importe por línea.")
+            discount = amount * discount / (100 if semantics == "gross_before_discount" else 100 - discount)
+        elif kind == "per_unit":
+            discount *= quantity
+    if quantity == 0 and discount != 0:
+        raise ValueError("Una línea sin unidades no puede tener descuento monetario.")
+    net = amount - discount if semantics == "gross_before_discount" else amount
+    if net < 0:
+        raise ValueError("El descuento supera la venta bruta. Revisá precio y tipo de descuento.")
+    return net, discount
+
+
 def build_daily(rows, config, discarded):
     timezone = str(
         config.raw.get("business_timezone", "America/Argentina/Buenos_Aires")
     )
     ZoneInfo(timezone)
-    if config.raw.get("price_semantics", "final_net") != "final_net":
-        raise ValueError(
-            "Unsupported price semantics; gross pricing requires an explicit contract"
-        )
     expected_sha = config.raw.get("daily_complete_file_sha256")
     digest_matches = not expected_sha or expected_sha == config.raw.get("_active_file_sha256")
     declared = config.raw.get("daily_snapshot_complete") is True and discarded == 0 and digest_matches
@@ -57,6 +84,7 @@ def build_daily(rows, config, discarded):
                 "category": row.get("categoria"),
                 "quantity": Decimal(0),
                 "net_revenue": Decimal(0),
+                "discount": Decimal(0),
                 "cogs": Decimal(0),
                 "cost_known": True,
                 "stocks": set(),
@@ -74,7 +102,9 @@ def build_daily(rows, config, discarded):
         price = value("precio_venta")
         cost = value("costo_unitario")
         item["quantity"] += qty
-        item["net_revenue"] += qty * price
+        revenue, discount = row_economics(row, config)
+        item["net_revenue"] += revenue
+        item["discount"] += discount
         item["prices"].add(price)
         if cost is None:
             item["cost_known"] = False
@@ -82,15 +112,12 @@ def build_daily(rows, config, discarded):
             item["cogs"] += qty * cost
             item["costs"].add(cost)
         stock = value("stock_actual")
+        if config.raw.get("source_profile") and row.get("fecha_stock") != row["fecha"]:
+            stock = None
         if stock is not None and stock >= 0:
             item["stocks"].add(stock)
         else:
             item["stock_known"] = False
-        discount = value("descuento")
-        if discount not in (None, Decimal(0)):
-            raise ValueError(
-                "daily final_net requires zero discount; select explicit price semantics before using discounts"
-            )
     metrics = []
 
     def text(value):
@@ -127,7 +154,7 @@ def build_daily(rows, config, discarded):
                     if cost == 0
                     else None
                 ),
-                "discount_amount": "0",
+                "discount_amount": text(item["discount"]),
                 "net_revenue": text(revenue),
                 "cogs": text(cost),
                 "closing_stock": text(stock),
@@ -140,7 +167,7 @@ def build_daily(rows, config, discarded):
         "revision": time.time_ns(),
         "timezone": timezone,
         "semantics": "snapshot_replace",
-        "price_semantics": "final_net",
+        "price_semantics": "final_net_with_discounts" if any(m["discount_amount"] != "0.000000" for m in metrics) else "final_net",
         "scope": "whole_commerce",
         "completeness_declared": declared,
         "currency": config.raw.get("currency"),

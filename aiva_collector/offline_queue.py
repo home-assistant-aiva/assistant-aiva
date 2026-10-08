@@ -236,6 +236,18 @@ def process_queue(
     client = client or CollectorClient(config)
     result = QueueProcessResult()
     for item in list_due_queue_items(conn, force=force):
+        # Inspect ownership before changing status or attempting any network request.
+        try:
+            candidate = _load_payload(item.get("payload_json_path"))
+        except (OSError, ValueError):
+            candidate = None
+        file_row = get_file(conn, str(item["file_id"]))
+        if candidate and (candidate.get("commerce_id") != config.commerce_id or candidate.get("collector_id") != config.collector_id):
+            result.skipped += 1
+            continue
+        if file_row and file_row.get("backend_url") and file_row["backend_url"].rstrip("/") != config.backend_url:
+            result.skipped += 1
+            continue
         result.attempted += 1
         file_id = str(item["file_id"])
         retry_count = int(item.get("retry_count") or 0)

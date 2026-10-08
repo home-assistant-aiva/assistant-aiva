@@ -129,6 +129,10 @@ def normalize_rows(
         }
         if costo_estado not in {"valid", "zero"}:
             exact["costo_unitario"] = None
+        discount_raw = mapped("descuento")
+        if discount_raw not in (None, "") and decimal_number(discount_raw) is None:
+            from .errors import ValidationError
+            raise ValidationError("El descuento contiene un valor inválido; corregí la fuente o el mapeo.")
         raw_date = mapped("fecha")
         if isinstance(raw_date, str) and "T" in raw_date:
             try:
@@ -149,6 +153,7 @@ def normalize_rows(
             {
                 "_daily_decimal": exact,
                 "fecha": parse_date(raw_date, date_format),
+                "fecha_stock": parse_date(mapped("fecha_stock"), date_format),
                 "producto_codigo": clean_string(mapped("producto_codigo")),
                 "producto_nombre": producto_nombre,
                 "categoria": clean_string(mapped("categoria")) or "Sin categoria",

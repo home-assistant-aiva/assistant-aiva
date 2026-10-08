@@ -136,6 +136,7 @@ def test_configure_source_preserves_config_and_creates_backup(tmp_path, monkeypa
 def test_activation_writes_config_and_keeps_token_out_of_json(tmp_path, monkeypatch):
     config_path = tmp_path / "config.windows.json"
     state_dir = tmp_path / "state"
+    monkeypatch.setenv("AIVA_COLLECTOR_DATA_DIR", str(tmp_path / "programdata"))
     monkeypatch.setenv("AIVA_COLLECTOR_STANDARD_CONFIG", str(config_path))
     monkeypatch.setattr("aiva_collector.desktop_service.stable_machine_id", lambda: "machine-1")
     monkeypatch.setattr(
@@ -163,9 +164,10 @@ def test_activation_writes_config_and_keeps_token_out_of_json(tmp_path, monkeypa
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert result.ok is True
     assert saved["commerce_id"] == "commerce-1"
-    assert saved["collector_version"] == "0.2.7rc7"
+    from aiva_collector.version import VERSION
+    assert saved["collector_version"] == VERSION
     assert "collector_token" not in saved
-    assert (state_dir / "collector.token").exists()
+    assert (Path(saved["state_dir"]) / "collector.token").exists()
     assert "secret-value" not in config_path.read_text(encoding="utf-8")
 
 

@@ -227,7 +227,7 @@ def test_rc6_state_index_upgrades_without_losing_sent_v1(tmp_path):
     # Build an RC6-shaped database from a fresh schema without touching product state.
     conn = connect(db)
     try:
-        conn.execute("DROP INDEX idx_processed_files_context_sha256_schema")
+        conn.execute("DROP INDEX idx_processed_files_context_source_sha256_schema")
         conn.execute(
             """CREATE UNIQUE INDEX idx_processed_files_context_sha256 ON processed_files(
             COALESCE(commerce_id,''),COALESCE(collector_id,''),COALESCE(backend_url,''),file_sha256)"""
@@ -246,7 +246,7 @@ def test_rc6_state_index_upgrades_without_losing_sent_v1(tmp_path):
         assert upgraded.execute("SELECT status FROM processed_files WHERE file_id='rc6-v1'").fetchone()[0] == "sent"
         indexes = {r[1] for r in upgraded.execute("PRAGMA index_list(processed_files)")}
         assert "idx_processed_files_context_sha256" not in indexes
-        assert "idx_processed_files_context_sha256_schema" in indexes
+        assert "idx_processed_files_context_source_sha256_schema" in indexes
         assert upgraded.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
         upgraded.close()

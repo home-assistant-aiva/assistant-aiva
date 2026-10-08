@@ -175,3 +175,22 @@ def test_activate_collector_invalid_code_has_user_message(monkeypatch):
         )
 
     assert "El código no es válido" in str(exc.value)
+
+
+def test_https_keeps_certificate_validation_and_blocks_redirects(monkeypatch):
+    monkeypatch.setenv("AIVA_COLLECTOR_TOKEN", "synthetic")
+    config = load_config("configs/example_config.json")
+    config.raw["backend_url"] = "https://synthetic.invalid"
+    captured = {}
+    class Response:
+        status_code = 200
+        content = b"{}"
+        def json(self):
+            return {}
+    def get(url, **kwargs):
+        captured.update(kwargs)
+        return Response()
+    monkeypatch.setattr("aiva_collector.client.requests.get", get)
+    CollectorClient(config).service_status()
+    assert captured["verify"] is True
+    assert captured["allow_redirects"] is False

@@ -58,6 +58,7 @@ def build_file_id(
     commerce_id: str | None = None,
     collector_id: str | None = None,
     backend_url: str | None = None,
+    source_id: str | None = None,
 ) -> str:
     base = "|".join(
         (
@@ -68,6 +69,8 @@ def build_file_id(
             Path(file_name).name,
         )
     )
+    if source_id:
+        base += "|source=" + source_id
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 

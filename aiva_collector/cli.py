@@ -134,6 +134,13 @@ def _resolve_mapping_for_rows(
     backend_mapping: dict[str, str] | None = None,
 ) -> tuple[CollectorConfig, ColumnMappingResult]:
     headers = _headers_from_rows(rows)
+    if config.raw.get("source_profile"):
+        from .source_setup import validate_profile
+        validate_profile(config, headers)
+        result = validate_explicit_mapping(config.column_mapping, headers)
+        if result.status != "auto_approved":
+            raise ValidationError("Las columnas cambiaron. Abrí Configurar archivo para revisar el mapeo.")
+        return config, result
     warnings: list[str] = []
     daily_candidate = None
     if config.raw.get("source_schema_version") != "1.0.0":
@@ -187,6 +194,8 @@ def _collect(config: CollectorConfig, *, backend_mapping: dict[str, str] | None 
     discarded = []
     rows_read = 0
     for path in files:
+        if config.raw.get("source_profile") and path.suffix.lower() != config.raw["source_profile"].get("suffix"):
+            raise ValidationError("El formato no corresponde a la fuente configurada. Revisá Configurar archivo.")
         raw_rows = read_file(path, config)
         if not raw_rows:
             raise ValidationError("El archivo no contiene registros para procesar.")
@@ -356,7 +365,7 @@ def _filter_unchanged_read_only_files(
         return files
     selected: list[Path] = []
     skipped = 0
-    terminal_or_queued = {"sent", "duplicate", "pending_send", "retrying"}
+    terminal_or_queued = {"sent", "duplicate", "pending_send", "retrying", "error"}
     for path in files:
         try:
             stat = path.stat()
@@ -371,10 +380,11 @@ def _filter_unchanged_read_only_files(
               AND COALESCE(commerce_id, '') = COALESCE(?, '')
               AND COALESCE(collector_id, '') = COALESCE(?, '')
               AND (COALESCE(backend_url, '') = COALESCE(?, '') OR backend_url IS NULL)
+              AND (source_id = ? OR source_id IS NULL)
             ORDER BY updated_at DESC
             LIMIT 1
             """,
-            (str(path), config.commerce_id, config.collector_id, _backend_target(config)),
+            (str(path), config.commerce_id, config.collector_id, _backend_target(config), config.raw.get("daily_source_id")),
         ).fetchone()
         current_mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
         if (
@@ -386,6 +396,7 @@ def _filter_unchanged_read_only_files(
             skipped += 1
             status = str(row["status"])
             reason = {
+                "error": "Archivo rechazado: corregí Configurar archivo y usá Reprocesar archivo rechazado.",
                 "sent": "El archivo ya fue enviado a este comercio.",
                 "duplicate": "El Backend ya habia recibido este archivo.",
                 "pending_send": "El archivo esta pendiente de envio.",
@@ -509,7 +520,7 @@ def _normalize_backend_url(value: str) -> str:
             "Parece que pegaste el código en el campo URL. Presioná Enter en Backend URL y pegá el código cuando se pida Código de activación."
         )
     parsed = urlparse(backend_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ConfigError("Backend URL inválida. Debe empezar con http:// o https://.")
     return backend_url
 
@@ -525,6 +536,19 @@ def _write_activation_config(path: Path, *, backend_url: str, response: dict) ->
         "collector_token_env": "AIVA_COLLECTOR_TOKEN",
     }
     config.pop("collector_token", None)
+    # New activations never inherit source settings or runtime from a previous tenant.
+    identity = hashlib.sha256(json.dumps([config["backend_url"], config["commerce_id"], config["collector_id"]]).encode()).hexdigest()[:32]
+    from .config import collector_data_dir
+    scope = collector_data_dir() / "contexts" / identity
+    for key, value in {"state_dir": "state", "processed_dir": "processed", "error_dir": "error", "output_dir": "output", "log_file": "logs/collector.log", "input_dir": "unconfigured"}.items():
+        config[key] = str(scope / value)
+    for key in ("column_mapping", "source_profile", "price_semantics", "discount_semantics", "daily_source_id", "daily_snapshot_complete", "daily_complete_file_sha256"):
+        config.pop(key, None)
+    config["source_setup_required"] = True
+    if path.exists():
+        backups = collector_data_dir() / "backups"
+        backups.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, backups / ("config-before-activation-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f") + ".json"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
@@ -620,6 +644,8 @@ def _collect_auto(
     rows_read = 0
     for path in files:
         try:
+            if config.raw.get("source_profile") and path.suffix.lower() != config.raw["source_profile"].get("suffix"):
+                raise ValidationError("El formato no corresponde a la fuente configurada. Revisá Configurar archivo.")
             raw_rows = read_file(path, config)
             rows_read += len(raw_rows)
             effective_config, mapping_result = _resolve_mapping_for_rows(config, raw_rows, backend_mapping=backend_mapping)
@@ -681,9 +707,10 @@ def _process_reliable_file(
           AND COALESCE(commerce_id, '') = COALESCE(?, '')
           AND COALESCE(collector_id, '') = COALESCE(?, '')
           AND (COALESCE(backend_url, '') = COALESCE(?, '') OR backend_url IS NULL)
+          AND (source_id = ? OR source_id IS NULL)
         ORDER BY updated_at DESC LIMIT 1
         """,
-        (str(path), config.commerce_id, config.collector_id, backend_target),
+        (str(path), config.commerce_id, config.collector_id, backend_target, config.raw.get("daily_source_id")),
     ).fetchone()
     if existing_path:
         row = dict(existing_path)
@@ -711,6 +738,8 @@ def _process_reliable_file(
         commerce_id=config.commerce_id,
         collector_id=config.collector_id,
         backend_url=backend_target,
+        source_id=config.raw.get("daily_source_id") if config.raw.get("source_profile") else None,
+        source_path=str(path),
     )
     if existing and existing.get("status") == "sent" and not reprocess_v1_file_id:
         duplicate_dir = config.path("processed_dir") / "duplicados"
@@ -744,6 +773,7 @@ def _process_reliable_file(
         commerce_id=config.commerce_id,
         collector_id=config.collector_id,
         backend_url=backend_target,
+        source_id=config.raw.get("daily_source_id") if config.raw.get("source_profile") else None,
     )
     upsert_detected_file(
         conn,
@@ -755,6 +785,7 @@ def _process_reliable_file(
         file_sha256=file_sha256,
         status="processing",
         source_schema_version="2.0.0" if reprocess_v1_file_id else None,
+        source_id=config.raw.get("daily_source_id") if config.raw.get("source_profile") else None,
     )
     if reprocess_v1_file_id:
         add_event(conn, file_id=file_id, event_type="v1_to_v2_reprocess_started", level="info", message="Reproceso selectivo v1 a v2 iniciado.", context={"previous_file_id": reprocess_v1_file_id})
@@ -767,6 +798,8 @@ def _process_reliable_file(
     add_event(conn, file_id=file_id, event_type="processing_started", level="info", message="Procesamiento iniciado.")
 
     try:
+        if config.raw.get("source_profile") and path.suffix.lower() != config.raw["source_profile"].get("suffix"):
+            raise ValidationError("El formato no corresponde a la fuente configurada. Revisá Configurar archivo.")
         raw_rows = read_file(path, config)
         if not raw_rows:
             raise ValidationError("El archivo no contiene registros para procesar.")
@@ -1129,6 +1162,8 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
     config = _load_runtime_config(args)
     setup_logging(config)
     config.require_send_ready()
+    if config.raw.get("source_setup_required"):
+        raise ConfigError("Abrí Configurar archivo: faltan el mapeo, precios y cobertura de esta fuente.")
     _runtime_dirs(config)
     with _single_run_lock(config) as acquired:
         if not acquired:
@@ -1180,6 +1215,7 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
             counts = queue_counts(conn)
             pending_count = counts.get("pending", 0) + counts.get("retrying", 0) + counts.get("processing", 0)
             conn.close()
+            blocked = sum(item["status"] == "error" for item in skipped_details)
             skip_summary = "; ".join(item["reason"] for item in skipped_details)[:500] or None
             _write_auto_run_state(
                 config,
@@ -1187,14 +1223,14 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
                     "started_at": started_at,
                     "finished_at": utc_now(),
                     "version": config.collector_version,
-                    "result": "ok",
+                    "result": "error" if blocked else "ok",
                     "files_found": len(discovered_files),
                     "files_eligible": 0,
                     "files_skipped": len(skipped_details),
                     "skipped_details": skipped_details,
                     "files_processed": 0,
                     "duplicates": 0,
-                    "rejected": 0,
+                    "rejected": blocked,
                     "summaries_sent": initial_queue.sent,
                     "queue_pending": pending_count,
                     "error_summary": skip_summary,
@@ -1205,7 +1241,7 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
                 print(f"Archivos encontrados={len(discovered_files)} elegibles=0 omitidos={len(skipped_details)}. {skip_summary}")
             else:
                 print("Sin archivos CSV/XLSX en la carpeta configurada.")
-            return 0
+            return 2 if blocked else 0
         backend_mapping = _backend_mapping(config)
         results: list[tuple[str, str | None]] = []
         try:
@@ -1219,7 +1255,7 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
                 )
                 results.append((status, message))
                 logging.info("run-auto file=%s status=%s message=%s", path.name, status, message)
-            final_queue = process_queue(conn, config, client=client, force=True)
+            final_queue = process_queue(conn, config, client=client)
             queue_after = queue_counts(conn)
         finally:
             conn.close()
@@ -1227,12 +1263,12 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         sent = sum(1 for status, _ in results if status == "sent") + initial_queue.sent + final_queue.sent
         duplicates = sum(1 for status, _ in results if status == "duplicate")
         pending = sum(1 for status, _ in results if status == "pending_send")
-        rejected = sum(1 for status, _ in results if status == "error")
+        rejected = sum(1 for status, _ in results if status == "error") + sum(item["status"] == "error" for item in skipped_details)
         needs_review = sum(1 for status, _ in results if status == "needs_review")
         skipped = len(skipped_details) + sum(1 for status, _ in results if status == "skipped")
         processed = sum(1 for status, _ in results if status in {"sent", "pending_send", "error"})
         errors = rejected + initial_queue.errors + final_queue.errors
-        error_summary = "; ".join(message for status, message in results if status == "error" and message)[:500] or None
+        error_summary = "; ".join([message for status, message in results if status == "error" and message] + [item["reason"] for item in skipped_details if item["status"] == "error"])[:500] or None
         logging.info(
             "run-auto summary version=%s result=%s files_found=%s files_processed=%s duplicates=%s rejected=%s sent=%s pending=%s next_attempt=scheduled",
             config.collector_version,
@@ -1479,6 +1515,8 @@ def cmd_retry_pending(args: argparse.Namespace) -> int:
     config = _load_runtime_config(args)
     setup_logging(config)
     config.require_send_ready()
+    if config.raw.get("source_setup_required"):
+        raise ConfigError("Abrí Configurar archivo: faltan el mapeo, precios y cobertura de esta fuente.")
     _runtime_dirs(config)
     conn = connect_local_state(local_db_path(config))
     try:

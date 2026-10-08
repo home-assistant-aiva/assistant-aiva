@@ -80,6 +80,8 @@ class CollectorClient:
                 json=payload,
                 headers=_headers(self.config),
                 timeout=self.timeout,
+                verify=True,
+                allow_redirects=False,
             )
         except RequestException as exc:
             raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
@@ -96,6 +98,8 @@ class CollectorClient:
                 params={"commerce_id": self.config.commerce_id, "collector_id": self.config.collector_id},
                 headers=_headers(self.config),
                 timeout=self.timeout,
+                verify=True,
+                allow_redirects=False,
             )
         except RequestException as exc:
             raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
@@ -111,6 +115,8 @@ class CollectorClient:
                 json=summary,
                 headers=_headers(self.config, idem_key),
                 timeout=self.timeout,
+                verify=True,
+                allow_redirects=False,
             )
         except RequestException as exc:
             raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
@@ -127,6 +133,8 @@ class CollectorClient:
                 params={"commerce_id": self.config.commerce_id},
                 headers=_headers(self.config),
                 timeout=self.timeout,
+                verify=True,
+                allow_redirects=False,
             )
         except RequestException as exc:
             raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
@@ -141,6 +149,8 @@ class CollectorClient:
                 json=payload,
                 headers=_headers(self.config),
                 timeout=self.timeout,
+                verify=True,
+                allow_redirects=False,
             )
         except RequestException as exc:
             raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
@@ -159,6 +169,8 @@ class CollectorClient:
                 json=request_payload,
                 headers=_headers(self.config),
                 timeout=self.timeout,
+                verify=True,
+                allow_redirects=False,
             )
         except RequestException as exc:
             raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc
@@ -188,6 +200,8 @@ def activate_collector(
                 "collector_version": collector_version,
             },
             timeout=timeout,
+            verify=True,
+            allow_redirects=False,
         )
     except RequestException as exc:
         raise BackendError(f"No se pudo conectar con el backend de AIVA: {exc}") from exc

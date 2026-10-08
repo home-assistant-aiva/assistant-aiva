@@ -36,6 +36,7 @@ def init_state(config: CollectorConfig):
 
 
 def test_rc6_rejected_rc7_accepted_before_work(monkeypatch, tmp_path):
+    monkeypatch.setattr(pilot, "VERSION", "0.2.7rc7")
     cli = tmp_path / "aiva-collector-cli.exe"
     cli.write_bytes(b"representative-installed-binary")
     monkeypatch.setattr(pilot, "CLI_SHA", pilot.sha256(cli))
@@ -149,7 +150,7 @@ def test_unmigrated_rc6_sqlite_can_be_inspected_read_only(tmp_path):
     init_state(config)
     db = pilot.local_db_path(config)
     with sqlite3.connect(db) as con:
-        con.execute("DROP INDEX IF EXISTS idx_processed_files_context_sha256_schema")
+        con.execute("DROP INDEX IF EXISTS idx_processed_files_context_source_sha256_schema")
         con.execute("ALTER TABLE processed_files DROP COLUMN source_schema_version")
     assert pilot._check_existing_state(config) == "new"
     with sqlite3.connect(db) as con:

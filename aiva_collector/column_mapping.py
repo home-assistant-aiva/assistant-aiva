@@ -16,6 +16,8 @@ CANONICAL_FIELDS = (
     "precio_venta",
     "costo_unitario",
     "stock_actual",
+    "descuento",
+    "fecha_stock",
 )
 REQUIRED_FIELDS = ("producto_nombre", "cantidad_vendida", "precio_venta")
 RECOMMENDED_FIELDS = ("fecha", "producto_codigo", "categoria", "costo_unitario", "stock_actual")
@@ -23,6 +25,8 @@ AUTO_APPROVED_THRESHOLD = 0.85
 NEEDS_REVIEW_THRESHOLD = 0.60
 
 ALIASES: dict[str, tuple[str, ...]] = {
+    "descuento": ("descuento", "discount", "bonificación"),
+    "fecha_stock": ("fecha_stock", "fecha del stock", "stock_date"),
     "producto_nombre": (
         "producto",
         "producto_nombre",

@@ -14,14 +14,14 @@ from aiva_collector.version import (
 )
 
 
-def test_rc7_version_and_release_names_have_one_canonical_source():
-    assert VERSION == "0.2.7rc7"
+def test_rc8_version_and_release_names_have_one_canonical_source():
+    assert VERSION == "0.2.8rc8"
     assert aiva_collector.__version__ == VERSION
-    assert PUBLIC_VERSION == "0.2.7-desktop-rc7"
-    assert INSTALLER_FILENAME == "AIVA-Collector-Setup-v0.2.7-desktop-rc7.exe"
-    assert INSTALLER_MANIFEST_FILENAME == "AIVA-Collector-Installer-v0.2.7rc7.manifest.json"
-    assert MANUAL_ZIP_FILENAME == "aiva-collector-windows-manual-v0.2.7-desktop-rc7.zip"
-    assert RELEASE_TAG == "v0.2.7-collector-desktop-rc7"
+    assert PUBLIC_VERSION == "0.2.8-desktop-rc8"
+    assert INSTALLER_FILENAME == "AIVA-Collector-Setup-v0.2.8-desktop-rc8.exe"
+    assert INSTALLER_MANIFEST_FILENAME == "AIVA-Collector-Installer-v0.2.8rc8.manifest.json"
+    assert MANUAL_ZIP_FILENAME == "aiva-collector-windows-manual-v0.2.8-desktop-rc8.zip"
+    assert RELEASE_TAG == "v0.2.8-collector-desktop-rc8"
     assert release_metadata()["package_version"] == VERSION
 
 
@@ -36,8 +36,8 @@ def test_pyproject_derives_distribution_version_from_canonical_module():
 
 def test_runtime_version_does_not_regress_when_upgrade_preserves_legacy_config(tmp_path):
     config = CollectorConfig(
-        raw={"collector_version": "0.2.7rc1"},
+        raw={"collector_version": "0.2.8rc1"},
         config_path=tmp_path / "config.windows.json",
     )
-    assert config.raw["collector_version"] == "0.2.7rc1"
+    assert config.raw["collector_version"] == "0.2.8rc1"
     assert config.collector_version == VERSION

@@ -47,6 +47,8 @@ def read_csv(path: Path, config: CollectorConfig) -> list[dict[str, Any]]:
             fieldnames = [str(value or "").lstrip("\ufeff").strip() for value in (reader.fieldnames or [])]
             if not fieldnames or (len(fieldnames) == 1 and any(mark in fieldnames[0] for mark in (",", ";"))):
                 raise ValidationError("No pude reconocer las columnas del CSV ni su separador.")
+            if len(set(fieldnames)) != len(fieldnames):
+                raise ValidationError("El CSV tiene encabezados duplicados; corregí la exportación.")
             rows = []
             for raw in reader:
                 row = {fieldnames[index]: value for index, value in enumerate(raw.values()) if index < len(fieldnames) and fieldnames[index]}
@@ -83,11 +85,19 @@ def read_xlsx(path: Path, config: CollectorConfig | None = None) -> list[dict[st
         raise ValidationError(f"No pude leer {path.name}; puede estar abierto o no ser un XLSX valido.") from exc
     try:
         configured_sheet = str((config.raw if config else {}).get("xlsx_sheet", "")).strip()
+        if configured_sheet and configured_sheet not in workbook.sheetnames:
+            raise ValidationError("La hoja configurada no existe. Revisá Configurar archivo.")
         sheets = [workbook[configured_sheet]] if configured_sheet and configured_sheet in workbook.sheetnames else list(workbook.worksheets)
         candidates: list[tuple[tuple[int, float, int], int, Any, list[tuple[Any, ...]]]] = []
         for sheet in sheets:
             rows = list(sheet.iter_rows(values_only=True))
-            scored = [(_xlsx_header_score(row, config), index) for index, row in enumerate(rows[:25])]
+            header = (config.raw if config else {}).get("xlsx_header_row")
+            if header is not None:
+                if not isinstance(header, int) or not 1 <= header <= min(25, len(rows)):
+                    raise ValidationError("La fila de encabezado debe estar entre 1 y 25 y existir en la hoja.")
+                scored = [(_xlsx_header_score(rows[header-1], config), header-1)]
+            else:
+                scored = [(_xlsx_header_score(row, config), index) for index, row in enumerate(rows[:25])]
             scored = [(score, index) for score, index in scored if score[2] >= 2]
             if not scored:
                 continue
@@ -97,6 +107,9 @@ def read_xlsx(path: Path, config: CollectorConfig | None = None) -> list[dict[st
             _score, negative_header_index, _sheet, rows = max(candidates, key=lambda item: (item[0], item[1]))
             header_index = -negative_header_index
             headers = [str(value).lstrip("\ufeff").strip() if value is not None else "" for value in rows[header_index]]
+            named = [h for h in headers if h]
+            if len(set(named)) != len(named):
+                raise ValidationError("El XLSX tiene encabezados duplicados; corregí la exportación.")
             result: list[dict[str, Any]] = []
             for row in rows[header_index + 1 :]:
                 item = {header: row[index] if index < len(row) else None for index, header in enumerate(headers) if header}

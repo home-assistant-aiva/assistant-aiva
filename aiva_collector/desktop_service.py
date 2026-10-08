@@ -22,6 +22,7 @@ from .cli import (
     DEFAULT_COLLECTOR_VERSION,
     _report_selected_input_source,
     _write_activation_config,
+    _normalize_backend_url,
     cmd_run_auto,
     stable_machine_id,
 )
@@ -192,6 +193,14 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         state = "attention"
         title = "Conectado, falta elegir la carpeta de datos"
         detail = "Seleccioná la carpeta donde el sistema de ventas genera archivos CSV o XLSX."
+    elif config.raw.get("source_setup_required"):
+        state = "attention"
+        title = "Falta configurar el archivo de ventas"
+        detail = "Abrí Configurar archivo y precios: revisá columnas, descuentos y cobertura antes de sincronizar."
+    elif last_result == "error":
+        state = "error"
+        title = "Sincronización pendiente de revisión"
+        detail = last_error or "Abrí Configurar archivo y usá Reprocesar archivo rechazado."
     elif not _uses_secure_transport(config.backend_url):
         state = "attention"
         title = "Conectado en modo de prueba"
@@ -208,6 +217,9 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         state = "connected"
         title = "AIVA Collector está conectado"
         detail = "La conexión está preparada y la sincronización automática queda activa."
+
+    if not _uses_secure_transport(config.backend_url) and "HTTP" not in detail:
+        detail += " Modo de prueba: el servicio usa HTTP; requiere HTTPS para clientes."
 
     return DashboardSnapshot(
         state=state,
@@ -245,6 +257,7 @@ def activate_installation(code: str, backend_url: str = DEFAULT_BACKEND_URL) -> 
     if not (url.startswith("https://") or url.startswith("http://")):
         return OperationResult(False, "Dirección inválida", "La dirección de AIVA debe comenzar con https:// o http://.")
     try:
+        url = _normalize_backend_url(url)
         response = activate_collector(
             backend_url=url,
             activation_code=activation_code,
@@ -292,6 +305,10 @@ def configure_source_folder(value: str | Path) -> OperationResult:
         backup_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         shutil.copy2(config_path, backup_dir / f"config-before-source-{stamp}.json")
+        if str(folder) != str(runtime.config.path("input_dir")):
+            for key in ("column_mapping", "source_profile", "price_semantics", "discount_semantics", "daily_source_id", "daily_snapshot_complete", "daily_complete_file_sha256", "xlsx_sheet", "xlsx_header_row"):
+                payload.pop(key, None)
+            payload["source_setup_required"] = True
         payload["input_dir"] = str(folder)
         payload["source_mode"] = "watched_folder"
         payload["source_read_only"] = True
