@@ -13,8 +13,22 @@ def _money(value: float | None) -> float | None:
     return None if value is None else round(float(value), 2)
 
 
-def _product_key(row: dict[str, Any]) -> tuple[str, str, str]:
+def _product_key(row: dict[str, Any], guided: bool = False) -> tuple[str, str, str]:
+    """Identidad del producto en el resumen.
+
+    En una fuente configurada es la misma que el detalle diario: sin codigo,
+    "Coca", "coca" y "Cóca" de la misma categoria son un solo producto, igual
+    que en ``daily.stable_product_code``. Sin configurar, la regla de RC8.
+    """
+
     code = row.get("producto_codigo")
+    if guided:
+        from .daily import _normalized_text
+
+        code = str(code or "").strip()
+        if code:
+            return ("code", code, "")
+        return ("name", _normalized_text(row["producto_nombre"]), _normalized_text(row.get("categoria")) or "sin categoria")
     if code:
         return ("code", str(code), "")
     return ("name", str(row["producto_nombre"]), str(row.get("categoria") or "Sin categoria"))
@@ -27,16 +41,20 @@ def build_summary(
     rows_read: int,
     rows_discarded: int,
 ) -> dict[str, Any]:
-    if config.raw.get("source_profile") and (rows_discarded or any(not row.get("fecha") or not row.get("producto_codigo") for row in rows)):
-        raise ValidationError("La fuente tiene filas inválidas, fechas o códigos faltantes. Corregí el archivo antes de sincronizar.")
+    if config.raw.get("source_profile") and (rows_discarded or any(not row.get("fecha") for row in rows)):
+        raise ValidationError(
+            "La fuente tiene filas que AIVA no pudo leer o ventas sin fecha. "
+            "Abrí Configurar archivo y previsualizá: ahí se indica la fila y la columna."
+        )
     dates = [row["fecha"] for row in rows if row.get("fecha")]
     fecha_inicio = min(dates).isoformat() if dates else date.today().isoformat()
     fecha_fin = max(dates).isoformat() if dates else date.today().isoformat()
     period_days = max(1, (date.fromisoformat(fecha_fin) - date.fromisoformat(fecha_inicio)).days + 1)
 
     grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    guided = bool(config.raw.get("source_profile"))
     for row in rows:
-        key = _product_key(row)
+        key = _product_key(row, guided)
         item = grouped.setdefault(
             key,
             {
@@ -142,9 +160,20 @@ def build_summary(
 
     # Undated legacy sources keep their existing contract. Eligible dated sources
     # preserve daily observations even when source completeness is unknown.
-    daily_rows = [row for row in rows if row.get("fecha") and row.get("producto_codigo")]
+    from .daily import stable_product_code
+
+    # Fuente configurada en la pantalla guiada: el codigo es opcional y se
+    # deriva del nombre. Sincronizacion automatica sin configurar: igual que
+    # RC8, el detalle diario solo lleva filas con codigo (el payload de esos
+    # comercios no cambia hasta que alguien configure la fuente).
+    daily_rows = [
+        row for row in rows
+        if row.get("fecha") and (stable_product_code(row) if guided else str(row.get("producto_codigo") or "").strip())
+    ]
     if not daily_rows and config.raw.get("source_schema_version") == "2.0.0":
-        raise ValidationError("Daily contract requires business dates and stable product codes")
+        if guided:
+            raise ValidationError("El detalle diario necesita la fecha de cada venta; sin fecha no se puede armar una semana exacta.")
+        raise ValidationError("El detalle diario necesita fecha y código de producto. Configurá la fuente en Configurar archivo para usar productos sin código.")
     if files_processed > 1 and config.raw.get("source_schema_version") != "2.0.0":
         summary["metadata"]["daily_granularity_unavailable"] = "legacy_multi_file_summary"
         return summary

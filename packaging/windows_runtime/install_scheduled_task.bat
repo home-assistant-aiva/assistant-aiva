@@ -9,6 +9,11 @@ set "TASK_XML=%TEMP%\aiva-collector-task.xml"
 set "TASK_LIMIT=PT30M"
 set "AIVA_QUIET=0"
 
+rem La tarea corre con la sesion de quien inicia Windows (grupo Usuarios,
+rem S-1-5-32-545), no con la cuenta de administrador que instalo. El token
+rem esta cifrado con DPAPI para el usuario que activo AIVA: atada al
+rem administrador, la sincronizacion automatica nunca podia descifrarlo.
+
 if /I "%~1"=="/quiet" set "AIVA_QUIET=1"
 
 if not exist "%AIVA_ROOT%\logs" mkdir "%AIVA_ROOT%\logs" 2>nul
@@ -36,7 +41,7 @@ for %%T in ("AIVA Collector" "AIVA Collector Scheduled" "AIVA Collector Auto") d
   echo   ^</Triggers^>
   echo   ^<Principals^>
   echo     ^<Principal id="Author"^>
-  echo       ^<LogonType^>InteractiveToken^</LogonType^>
+  echo       ^<GroupId^>S-1-5-32-545^</GroupId^>
   echo       ^<RunLevel^>LeastPrivilege^</RunLevel^>
   echo     ^</Principal^>
   echo   ^</Principals^>

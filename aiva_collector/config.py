@@ -80,7 +80,8 @@ class CollectorConfig:
                 return raw_value.strip()
         try:
             return load_token(self.path("state_dir"))
-        except ConfigError:
+        except (ConfigError, OSError):
+            # OSError: el archivo es de otro usuario de Windows (ver token_status).
             return None
 
     @property

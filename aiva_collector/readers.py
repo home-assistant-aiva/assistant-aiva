@@ -12,6 +12,23 @@ from .errors import ValidationError
 SUPPORTED_SUFFIXES = {".csv", ".xlsx"}
 
 
+class SourceRows(list):
+    """Filas leidas, con el numero de fila de la planilla de cada una.
+
+    Es una lista comun para todo el resto del Collector. El numero de fila
+    sirve para que un error diga "fila 847" como lo ve el comercio en Excel,
+    aunque haya filas vacias o un titulo arriba del encabezado.
+    """
+
+    def __init__(self, rows=(), row_numbers=()):
+        super().__init__(rows)
+        self.row_numbers = list(row_numbers)
+
+
+def _is_blank_row(row: dict[str, Any]) -> bool:
+    return not any(str(value if value is not None else "").strip() for value in row.values())
+
+
 def discover_input_files(config: CollectorConfig) -> list[Path]:
     input_dir = config.path("input_dir")
     if not input_dir.exists():
@@ -49,19 +66,29 @@ def read_csv(path: Path, config: CollectorConfig) -> list[dict[str, Any]]:
                 raise ValidationError("No pude reconocer las columnas del CSV ni su separador.")
             if len(set(fieldnames)) != len(fieldnames):
                 raise ValidationError("El CSV tiene encabezados duplicados; corregí la exportación.")
-            rows = []
+            rows = SourceRows()
             for raw in reader:
                 row = {fieldnames[index]: value for index, value in enumerate(raw.values()) if index < len(fieldnames) and fieldnames[index]}
+                if _is_blank_row(row):
+                    # Excel deja filas vacias al final; no son ventas ni errores.
+                    continue
                 rows.append(row)
+                rows.row_numbers.append(reader.line_num)
             return rows
     except (OSError, UnicodeError) as exc:
         raise ValidationError(f"No pude leer {path.name}; puede estar abierto o usar una codificacion no soportada.") from exc
 
 
-def _xlsx_header_score(row: tuple[Any, ...], config: CollectorConfig | None) -> tuple[int, float, int]:
+# Lo que hace que una hoja sea de ventas: fecha, producto, cantidad y precio.
+# Una hoja de catalogo o de stock puede tener mas columnas reconocibles y aun
+# asi no ser la de ventas.
+_SALES_FIELDS = ("fecha", "producto_nombre", "cantidad_vendida", "precio_venta")
+
+
+def _xlsx_header_score(row: tuple[Any, ...], config: CollectorConfig | None) -> tuple[int, int, float, int]:
     headers = [str(value).lstrip("\ufeff").strip() for value in row if value not in (None, "")]
     if len(headers) < 2:
-        return (0, 0.0, len(headers))
+        return (0, 0, 0.0, len(headers))
     detected = detect_column_mapping(headers)
     configured_sources = {
         normalize_header(source)
@@ -69,8 +96,9 @@ def _xlsx_header_score(row: tuple[Any, ...], config: CollectorConfig | None) -> 
         if str(source).strip()
     }
     configured_matches = sum(normalize_header(header) in configured_sources for header in headers)
+    sales_matches = sum(field in detected.mapping for field in _SALES_FIELDS) + configured_matches
     semantic_matches = len(detected.mapping) + configured_matches
-    return (semantic_matches, detected.confidence, len(headers))
+    return (sales_matches, semantic_matches, detected.confidence, len(headers))
 
 
 def read_xlsx(path: Path, config: CollectorConfig | None = None) -> list[dict[str, Any]]:
@@ -88,7 +116,7 @@ def read_xlsx(path: Path, config: CollectorConfig | None = None) -> list[dict[st
         if configured_sheet and configured_sheet not in workbook.sheetnames:
             raise ValidationError("La hoja configurada no existe. Revisá Configurar archivo.")
         sheets = [workbook[configured_sheet]] if configured_sheet and configured_sheet in workbook.sheetnames else list(workbook.worksheets)
-        candidates: list[tuple[tuple[int, float, int], int, Any, list[tuple[Any, ...]]]] = []
+        candidates: list[tuple[tuple[int, int, float, int], int, Any, list[tuple[Any, ...]]]] = []
         for sheet in sheets:
             rows = list(sheet.iter_rows(values_only=True))
             header = (config.raw if config else {}).get("xlsx_header_row")
@@ -98,7 +126,7 @@ def read_xlsx(path: Path, config: CollectorConfig | None = None) -> list[dict[st
                 scored = [(_xlsx_header_score(rows[header-1], config), header-1)]
             else:
                 scored = [(_xlsx_header_score(row, config), index) for index, row in enumerate(rows[:25])]
-            scored = [(score, index) for score, index in scored if score[2] >= 2]
+            scored = [(score, index) for score, index in scored if score[-1] >= 2]
             if not scored:
                 continue
             score, header_index = max(scored, key=lambda item: (item[0], -item[1]))
@@ -110,13 +138,14 @@ def read_xlsx(path: Path, config: CollectorConfig | None = None) -> list[dict[st
             named = [h for h in headers if h]
             if len(set(named)) != len(named):
                 raise ValidationError("El XLSX tiene encabezados duplicados; corregí la exportación.")
-            result: list[dict[str, Any]] = []
-            for row in rows[header_index + 1 :]:
+            result = SourceRows()
+            for offset, row in enumerate(rows[header_index + 1 :]):
                 item = {header: row[index] if index < len(row) else None for index, header in enumerate(headers) if header}
-                if any(value not in (None, "") for value in item.values()):
+                if not _is_blank_row(item):
                     result.append(item)
+                    result.row_numbers.append(header_index + 2 + offset)
             return result
-        return []
+        return SourceRows()
     finally:
         workbook.close()
 

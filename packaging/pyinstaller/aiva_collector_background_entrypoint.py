@@ -32,6 +32,9 @@ def _rotate_background_log(log_path: Path) -> None:
 
 
 if __name__ == "__main__":
+    import os
+
+    os.environ["AIVA_COLLECTOR_BACKGROUND"] = "1"
     log_path = _background_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     _rotate_background_log(log_path)

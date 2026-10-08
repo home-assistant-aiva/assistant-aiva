@@ -146,6 +146,47 @@ ALIASES: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Abreviaturas y sinonimos que RC8 no conocia. Solo valen por coincidencia
+# exacta y puntuan por debajo de los alias de siempre: si una planilla trae
+# "Kg" y "Cantidad", gana "Cantidad"; si trae "Concepto" y "Producto", gana
+# "Producto". Los de 0.85 son debiles (pueden ser otra cosa en algunos ERPs).
+# "Ref"/"Referencia" no estan a proposito: en muchos sistemas es el numero de
+# ticket, y como codigo partiria cada producto en uno por ticket.
+SECONDARY_ALIASES: dict[str, dict[str, float]] = {
+    "fecha": {alias: 0.90 for alias in ("fec", "fch", "f_venta", "f_vta", "fecha_vta", "fec_venta", "f_emision",
+                                         "fecha_emision", "fecha_operacion", "fecha_de_venta", "fecha_factura",
+                                         "emision", "dia_venta")},
+    "producto_codigo": {
+        **{alias: 0.90 for alias in ("cod_barras", "codigo_de_barras", "gtin", "upc", "plu", "cod_int",
+                                     "codigo_interno", "id_articulo", "id_producto", "nro_articulo", "cod_art", "art")},
+    },
+    "producto_nombre": {
+        **{alias: 0.90 for alias in ("denominacion", "nom", "prod", "art", "nombre_articulo", "descripcion_articulo",
+                                     "desc_articulo", "producto_servicio")},
+        **{alias: 0.85 for alias in ("concepto",)},
+    },
+    "categoria": {alias: 0.90 for alias in ("cat", "rub", "fam", "subrubro", "sub_rubro")},
+    "cantidad_vendida": {
+        **{alias: 0.90 for alias in ("un", "unid", "uds", "u", "q", "cdad", "ctd", "cnt", "cant_vend", "vendidas")},
+        **{alias: 0.85 for alias in ("kilos", "kg", "litros", "piezas")},
+    },
+    "precio_venta": {
+        **{alias: 0.90 for alias in ("pu", "p_u", "p_unit", "p_unitario", "pr_unit", "pre_unit", "prec_unit", "precio_u",
+                                     "p_venta", "p_vta", "pventa", "prec_vta", "precio_vta", "precio_neto", "imp_unit",
+                                     "importe_unit", "pcio", "pcio_unit", "monto_unitario")},
+        **{alias: 0.85 for alias in ("unitario",)},
+    },
+    "costo_unitario": {alias: 0.90 for alias in ("costo_u", "costo_unit", "cto", "cto_unit", "pcosto", "p_costo",
+                                                  "precio_de_costo", "ultimo_costo", "costo_ultimo", "costo_reposicion",
+                                                  "costo_promedio")},
+    "stock_actual": {alias: 0.90 for alias in ("stk", "stock_final", "existencia_actual", "cant_stock", "disp")},
+    "descuento": {
+        **{alias: 0.90 for alias in ("bonificacion", "bonif", "dto", "dcto", "descuento_importe", "importe_descuento",
+                                     "descuento_porcentaje", "porc_desc", "desc_porc", "rebaja")},
+        **{alias: 0.85 for alias in ("desc",)},
+    },
+}
+
 FIELD_LABELS = {
     "fecha": "fecha",
     "producto_codigo": "codigo",
@@ -194,33 +235,205 @@ NORMALIZED_ALIASES = {
     field: tuple(dict.fromkeys(normalize_header(alias) for alias in aliases if normalize_header(alias)))
     for field, aliases in ALIASES.items()
 }
+NORMALIZED_SECONDARY = {
+    field: {normalize_header(alias): score for alias, score in aliases.items() if normalize_header(alias)}
+    for field, aliases in SECONDARY_ALIASES.items()
+}
 
 
-def detect_column_mapping(headers: list[str] | tuple[str, ...] | set[str]) -> ColumnMappingResult:
+# Campos que siempre son numeros, fechas o texto. Sirve para descartar una
+# columna cuyo nombre engaña: "Desc." con importes no es la descripcion.
+_NUMERIC_FIELDS = {"cantidad_vendida", "precio_venta", "costo_unitario", "stock_actual", "descuento"}
+_DATE_FIELDS = {"fecha", "fecha_stock"}
+_MONEY_WORDS = ("precio", "importe", "valor", "monto", "total", "costo", "pvp")
+# Un nombre de producto tiene palabras separadas o minusculas ("Alfajor",
+# "COCA COLA 2.25"); un codigo no ("P001", "7790895000782", "DEMO-SYN-A").
+_NAME_LIKE_RE = re.compile(r"[^\W\d_]{2,}\s+[^\W_]|[a-záéíóúüñ]{3,}")
+_DATE_LIKE_RE = re.compile(r"^\s*(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{1,4})(?:[ T].*)?$")
+_PROFILE_SAMPLE = 300
+
+
+@dataclass(frozen=True)
+class ColumnProfile:
+    """Lo que dicen los valores de una columna, sin mirar su nombre."""
+
+    non_empty: int
+    date_share: float
+    numeric_share: float
+    text_share: float
+    integer_share: float
+    distinct_ratio: float
+    median: float | None
+    # Valores que parecen nombres de producto y no codigos.
+    wordy_share: float = 0.0
+    # Numeros enteros en el rango de fechas de Excel (1982 a 2091).
+    serial_share: float = 0.0
+
+
+def profile_columns(headers: list[str] | tuple[str, ...], rows: list[dict[str, Any]] | None) -> dict[str, ColumnProfile]:
+    if not rows:
+        return {}
+    from .numeric_format import parse_decimal_with
+
+    sample = rows[:_PROFILE_SAMPLE]
+    profiles: dict[str, ColumnProfile] = {}
+    for header in headers:
+        values = [row.get(header) for row in sample]
+        values = [value for value in values if value is not None and str(value).strip() != ""]
+        if not values:
+            profiles[header] = ColumnProfile(0, 0.0, 0.0, 0.0, 0.0, 0.0, None)
+            continue
+        dates = numbers = texts = integers = wordy = serials = 0
+        numeric_values: list[float] = []
+        for value in values:
+            if _looks_like_date(value):
+                dates += 1
+                continue
+            number = parse_decimal_with(value)
+            if number is not None and not isinstance(value, bool):
+                numbers += 1
+                numeric_values.append(float(number))
+                if number == number.to_integral_value():
+                    integers += 1
+                    if 30000 <= number <= 70000 and "." not in str(value) and "," not in str(value):
+                        serials += 1
+            else:
+                texts += 1
+                if _NAME_LIKE_RE.search(str(value)):
+                    wordy += 1
+        total = len(values)
+        numeric_values.sort()
+        median = numeric_values[len(numeric_values) // 2] if numeric_values else None
+        distinct = len({str(value).strip().casefold() for value in values})
+        profiles[header] = ColumnProfile(
+            non_empty=total,
+            date_share=dates / total,
+            numeric_share=numbers / total,
+            text_share=texts / total,
+            integer_share=(integers / numbers) if numbers else 0.0,
+            distinct_ratio=distinct / total,
+            median=median,
+            wordy_share=wordy / total,
+            serial_share=serials / total,
+        )
+    return profiles
+
+
+def _looks_like_date(value: Any) -> bool:
+    from datetime import date, datetime
+
+    if isinstance(value, (datetime, date)):
+        return True
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if len(text) == 8 and text.isdigit():
+        # aaaammdd: solo si es una fecha valida de este siglo.
+        year, month, day = int(text[:4]), int(text[4:6]), int(text[6:])
+        return 1990 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31
+    match = _DATE_LIKE_RE.match(value)
+    if not match:
+        return False
+    first, second, third = (int(part) for part in match.groups())
+    if len(match.group(1)) == 4:
+        return 1 <= second <= 12 and 1 <= third <= 31
+    return 1 <= first <= 31 and 1 <= second <= 12
+
+
+def _value_compatibility(field: str, profile: ColumnProfile | None) -> float:
+    """1 si los valores encajan con el campo, 0 si lo contradicen."""
+
+    if profile is None:
+        return 1.0
+    if profile.non_empty == 0:
+        # Columna vacia en la muestra: no hay evidencia ni a favor ni en contra.
+        return 0.9
+    if field in _DATE_FIELDS:
+        if profile.date_share >= 0.6:
+            return 1.0
+        if profile.serial_share >= 0.9:
+            # Fechas guardadas como numero de serie de Excel: solo si el nombre
+            # de la columna ya dice que es una fecha (el puntaje lo exige).
+            return 0.9
+        return 0.0 if profile.date_share < 0.2 else 0.5
+    if field in _NUMERIC_FIELDS:
+        if profile.numeric_share >= 0.8:
+            return 1.0
+        return 0.0 if profile.numeric_share < 0.3 else 0.5
+    if field == "producto_nombre":
+        if profile.date_share >= 0.6:
+            return 0.0
+        if profile.text_share >= 0.6:
+            return 1.0 if profile.wordy_share >= 0.5 else 0.7
+        return 0.25
+    if field == "producto_codigo":
+        if profile.date_share >= 0.6:
+            return 0.0
+        # "Coca Cola 2.25" o "Alfajor" son nombres; "P001" o "7790895000782", codigos.
+        return 0.7 if profile.wordy_share >= 0.7 else 1.0
+    if field == "categoria":
+        if profile.date_share >= 0.6 or profile.numeric_share >= 0.9:
+            return 0.0
+        return 1.0
+    return 1.0
+
+
+def detect_column_mapping(
+    headers: list[str] | tuple[str, ...] | set[str],
+    rows: list[dict[str, Any]] | None = None,
+    *,
+    fill_from_values: bool = False,
+    secondary_aliases: bool = True,
+) -> ColumnMappingResult:
+    """Sugiere que columna corresponde a cada campo.
+
+    Mira primero el nombre de la columna y, si recibe filas, tambien sus
+    valores: una columna llamada "Desc." con importes es un descuento, no la
+    descripcion. La asignacion es global por puntaje, asi un campo que se
+    evalua antes no le roba la columna a otro que encaja mejor.
+
+    ``fill_from_values`` completa fecha y producto solo por los valores cuando
+    ningun nombre de columna ayuda. Es para la configuracion guiada, donde una
+    persona confirma; la sincronizacion automatica no lo usa.
+
+    ``secondary_aliases=False`` reconoce solo los alias de RC8: la
+    sincronizacion automatica lo usa para no cambiar lo que RC8 ya mandaba.
+    """
+
     detected_headers = [str(header).strip() for header in headers if str(header).strip()]
     normalized_headers = {header: normalize_header(header) for header in detected_headers}
+    scoring_headers = {header: _scoring_text(header, normalized) for header, normalized in normalized_headers.items()}
+    profiles = profile_columns(detected_headers, rows)
     used_headers: set[str] = set()
     mapping: dict[str, str] = {}
     scores: dict[str, float] = {}
     warnings: list[str] = []
 
-    for field in CANONICAL_FIELDS:
-        best_header = None
-        best_score = 0.0
-        for header, normalized in normalized_headers.items():
-            if header in used_headers:
+    candidates: list[tuple[float, int, int, str, str]] = []
+    for field_order, field in enumerate(CANONICAL_FIELDS):
+        # Sin una persona que elija el tipo de descuento, mapear "Dto." o "Bonif."
+        # rechazaria el archivo entero ("descuento ambiguo"). RC8 no las tomaba.
+        allow_secondary = secondary_aliases and (fill_from_values or field != "descuento")
+        for header_order, header in enumerate(detected_headers):
+            score = _score_header(field, scoring_headers[header], secondary=allow_secondary)
+            if score <= 0:
                 continue
-            score = _score_header(field, normalized)
-            if score > best_score:
-                best_header = header
-                best_score = score
-        if best_header and best_score >= 0.60:
-            mapping[field] = best_header
-            scores[field] = round(best_score, 3)
-            used_headers.add(best_header)
+            score *= _value_compatibility(field, profiles.get(header))
+            if score >= 0.60:
+                candidates.append((score, field_order, header_order, field, header))
+    for score, _field_order, _header_order, field, header in sorted(candidates, key=lambda item: (-item[0], item[1], item[2])):
+        if field in mapping or header in used_headers:
+            continue
+        mapping[field] = header
+        scores[field] = round(score, 3)
+        used_headers.add(header)
 
     _prefer_product_name_when_better(mapping, scores, normalized_headers, used_headers)
     _prefer_description_as_product_name(mapping, scores, normalized_headers, used_headers)
+    if rows:
+        _drop_code_that_does_not_identify_products(mapping, scores, rows, used_headers, warnings)
+    if profiles and fill_from_values:
+        _fill_from_values(mapping, scores, detected_headers, profiles, used_headers)
 
     missing_required = [field for field in REQUIRED_FIELDS if field not in mapping]
     confidence = _confidence(scores, missing_required)
@@ -249,6 +462,81 @@ def detect_column_mapping(headers: list[str] | tuple[str, ...] | set[str]) -> Co
         detected_headers=detected_headers,
         scores=scores,
     )
+
+
+def _drop_code_that_does_not_identify_products(
+    mapping: dict[str, str],
+    scores: dict[str, float],
+    rows: list[dict[str, Any]],
+    used_headers: set[str],
+    warnings: list[str],
+) -> None:
+    """Un codigo de producto no se repite con productos distintos.
+
+    "Ref" o "Referencia" a veces es el numero de ticket: usarlo como codigo
+    fundiria en uno solo todos los productos de cada ticket.
+    """
+
+    code_header = mapping.get("producto_codigo")
+    name_header = mapping.get("producto_nombre")
+    if not code_header or not name_header:
+        return
+    if _primary_score("producto_codigo", normalize_header(code_header)) > 0:
+        # "Codigo", "SKU", "EAN": es el codigo aunque el comercio use uno
+        # generico como "999 Varios" para varios productos.
+        return
+    names_by_code: dict[str, set[str]] = {}
+    for row in rows[:_PROFILE_SAMPLE]:
+        code = str(row.get(code_header) or "").strip()
+        name = " ".join(str(row.get(name_header) or "").strip().casefold().split())
+        if code and name:
+            names_by_code.setdefault(code, set()).add(name)
+    if len(names_by_code) < 2:
+        return
+    mixed = sum(1 for names in names_by_code.values() if len(names) > 1)
+    if mixed / len(names_by_code) > 0.2:
+        mapping.pop("producto_codigo", None)
+        scores.pop("producto_codigo", None)
+        used_headers.discard(code_header)
+        warnings.append(f"La columna '{code_header}' no identifica productos: un mismo valor aparece con productos distintos.")
+
+
+def _scoring_text(header: str, normalized: str) -> str:
+    """'$ Unit' es un precio: el simbolo de pesos se pierde al normalizar."""
+
+    if "$" in header and not any(word in normalized for word in _MONEY_WORDS):
+        return normalize_header("precio " + normalized.replace("_", " "))
+    return normalized
+
+
+def _fill_from_values(
+    mapping: dict[str, str],
+    scores: dict[str, float],
+    headers: list[str],
+    profiles: dict[str, ColumnProfile],
+    used_headers: set[str],
+) -> None:
+    """Completa fecha y producto cuando el nombre de la columna no ayuda.
+
+    Solo con evidencia fuerte y con puntaje bajo, para que quede en revision:
+    nunca aprueba sola un mapeo que salio de los valores.
+    """
+
+    free = [header for header in headers if header not in used_headers]
+    if "fecha" not in mapping:
+        dated = [header for header in free if profiles[header].non_empty >= 3 and profiles[header].date_share >= 0.9]
+        if len(dated) == 1:
+            mapping["fecha"] = dated[0]
+            scores["fecha"] = 0.70
+            used_headers.add(dated[0])
+            free.remove(dated[0])
+    if "producto_nombre" not in mapping:
+        texts = [header for header in free if profiles[header].non_empty >= 3 and profiles[header].text_share >= 0.9]
+        if texts:
+            best = max(texts, key=lambda header: profiles[header].distinct_ratio)
+            mapping["producto_nombre"] = best
+            scores["producto_nombre"] = 0.65
+            used_headers.add(best)
 
 
 def validate_explicit_mapping(mapping: dict[str, str], headers: list[str] | set[str] | tuple[str, ...]) -> ColumnMappingResult:
@@ -306,7 +594,9 @@ def _safe_preview_value(value: Any) -> str | None:
     return text[:80]
 
 
-def _score_header(field: str, normalized_header: str) -> float:
+def _primary_score(field: str, normalized_header: str) -> float:
+    """Puntaje de RC8: alias de siempre, con prefijo, sufijo y parecido."""
+
     if not normalized_header:
         return 0.0
     if normalized_header == field:
@@ -325,6 +615,15 @@ def _score_header(field: str, normalized_header: str) -> float:
     if similarity >= 0.78:
         return max(0.70, min(0.78, similarity))
     return 0.0
+
+
+def _score_header(field: str, normalized_header: str, *, secondary: bool = True) -> float:
+    """Puntaje de RC8 para los alias de siempre, mas coincidencia exacta de los nuevos."""
+
+    best = _primary_score(field, normalized_header)
+    if secondary and normalized_header:
+        best = max(best, NORMALIZED_SECONDARY.get(field, {}).get(normalized_header, 0.0))
+    return best
 
 
 def _confidence(scores: dict[str, float], missing_required: list[str]) -> float:

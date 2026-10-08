@@ -3,34 +3,67 @@
 import hashlib
 import json
 import time
+import unicodedata
 from decimal import Decimal, ROUND_HALF_EVEN
 from zoneinfo import ZoneInfo
 
+from .numeric_format import CONVENTION_UNKNOWN, canonical_decimal, parse_decimal_with
 
-def decimal_number(value):
-    if value is None or str(value).strip() == "":
+
+def decimal_number(value, convention=CONVENTION_UNKNOWN):
+    """Lee un valor tal como viene del archivo del comercio ("$ 1.890,00").
+
+    Comparte la limpieza y la convencion decimal con el resto del Collector,
+    asi el resumen y el detalle diario de un mismo archivo nunca se contradicen.
+    Para valores que el Collector ya normalizo, usar ``canonical_decimal``.
+    """
+
+    return parse_decimal_with(value, convention)
+
+
+def _normalized_text(value) -> str:
+    """Minusculas, sin acentos y sin espacios de mas, para una clave estable."""
+
+    text = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return " ".join(text.split())
+
+
+def stable_product_code(row):
+    """Codigo estable del producto para la observacion diaria.
+
+    El codigo es opcional: un kiosco que exporta sin codigo de barras es lo
+    normal. Cuando falta, se deriva uno estable del nombre mas la categoria
+    normalizados, la misma regla con la que el resumen agrupa productos sin
+    codigo. Si el comercio renombra el producto, pasa a ser otro producto.
+    """
+
+    code = str(row.get("producto_codigo") or "").strip()
+    if code:
+        return code
+    name = _normalized_text(row.get("producto_nombre"))
+    if not name:
         return None
-    text = str(value).strip().replace(" ", "")
-    if "," in text and "." in text:
-        text = (
-            text.replace(".", "").replace(",", ".")
-            if text.rfind(",") > text.rfind(".")
-            else text.replace(",", "")
-        )
-    else:
-        text = text.replace(",", ".")
-    try:
-        value = Decimal(text)
-        return value if value.is_finite() else None
-    except Exception:
-        return None
+    category = _normalized_text(row.get("categoria")) or "sin categoria"
+    # Encode the pair without delimiter ambiguity ("a|b", "c") vs ("a", "b|c").
+    identity = json.dumps([name, category], ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    return "name_hash:" + digest
+
+
+def _exact(row, key):
+    """Valor exacto ya normalizado; nunca vuelve a aplicar reglas locales."""
+
+    numbers = row.get("_daily_decimal") or {}
+    if key in numbers:
+        return canonical_decimal(numbers.get(key))
+    return canonical_decimal(row.get(key))
 
 
 def row_economics(row, config):
     """Return exact net line revenue and informational total discount, once."""
-    numbers = row.get("_daily_decimal", {})
     def number(key):
-        return decimal_number(numbers.get(key, row.get(key)))
+        return _exact(row, key)
     quantity, price = number("cantidad_vendida"), number("precio_venta")
     discount = number("descuento") or Decimal(0)
     semantics = config.raw.get("price_semantics", "final_net")
@@ -76,7 +109,7 @@ def build_daily(rows, config, discarded):
     )
     grouped = {}
     for row in rows:
-        key = (row["fecha"].isoformat(), row["producto_codigo"])
+        key = (row["fecha"].isoformat(), stable_product_code(row))
         item = grouped.setdefault(
             key,
             {
@@ -93,10 +126,8 @@ def build_daily(rows, config, discarded):
                 "costs": set(),
             },
         )
-        numbers = row.get("_daily_decimal", {})
-
         def value(name):
-            return decimal_number(numbers.get(name, row.get(name)))
+            return _exact(row, name)
 
         qty = value("cantidad_vendida")
         price = value("precio_venta")

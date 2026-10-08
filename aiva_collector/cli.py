@@ -45,12 +45,12 @@ from .local_state import (
     utc_now,
 )
 from .logging_setup import setup_logging
-from .normalizer import normalize_rows
+from .normalizer import count_problem_rows, describe_problems, normalize_rows
 from .offline_queue import enqueue_payload, process_queue
 from .readers import detect_columns, discover_input_files, read_file
 from .state import save_state
 from .summarizer import build_summary, idempotency_key
-from .token_store import save_token
+from .token_store import TOKEN_OTHER_USER, save_token, token_status
 from .validation import validate_normalized_data
 from .version import VERSION
 
@@ -59,6 +59,8 @@ WINDOWS_DEFAULT_CONFIG = r"C:\ProgramData\AIVA\Collector\config.windows.json"
 DEFAULT_BACKEND_URL = "http://187.77.44.118:8080"
 DEFAULT_COLLECTOR_VERSION = VERSION
 PROCESSING_LEASE_MINUTES = 15
+# Lo define el runner silencioso de la tarea programada.
+BACKGROUND_ENV = "AIVA_COLLECTOR_BACKGROUND"
 RUN_LOCK_LEASE_MINUTES = 30
 
 
@@ -142,24 +144,35 @@ def _resolve_mapping_for_rows(
             raise ValidationError("Las columnas cambiaron. Abrí Configurar archivo para revisar el mapeo.")
         return config, result
     warnings: list[str] = []
+    daily_fields = {"fecha", "producto_codigo"}
+    # Deteccion con los alias de RC8: decide igual que RC8 cuando un mapeo
+    # aprobado se reemplaza y que mapeo se usa. Los valores solo descartan
+    # coincidencias falsas ("Dia de la semana" con "Lunes" no es la fecha).
+    rc8_detected = detect_column_mapping(headers, rows, secondary_aliases=False)
     daily_candidate = None
     if config.raw.get("source_schema_version") != "1.0.0":
-        detected = detect_column_mapping(headers)
-        if detected.status == "auto_approved" and {"fecha", "producto_codigo"} <= set(detected.mapping):
-            daily_candidate = detected
+        if rc8_detected.status == "auto_approved" and daily_fields <= set(rc8_detected.mapping):
+            daily_candidate = rc8_detected
     for source, mapping in (("backend", backend_mapping), ("explicit", config.column_mapping)):
         if not mapping:
             continue
         result = validate_explicit_mapping(mapping, headers)
         if result.status == "auto_approved":
-            if daily_candidate and not {"fecha", "producto_codigo"} <= set(result.mapping):
+            if daily_candidate and not daily_fields <= set(result.mapping):
                 warnings.append(f"Mapping {source} omite fecha o código presentes; se usa autodetección diaria.")
                 continue
             if warnings:
                 result.warnings[:0] = warnings
             return _config_with_mapping(config, result.mapping), result
         warnings.append(f"Mapping {source} no coincide con las columnas detectadas; se intentó autodetección.")
-    result = daily_candidate or detect_column_mapping(headers)
+    if daily_candidate:
+        result = daily_candidate
+    elif rc8_detected.status == "auto_approved":
+        result = rc8_detected
+    else:
+        # Donde RC8 se quedaba en revision, se prueba con las abreviaturas nuevas
+        # ("P. UNIT.", "Cdad", "Fec."). Igual queda en revision si no alcanza.
+        result = detect_column_mapping(headers, rows)
     result.warnings[:0] = warnings
     return _config_with_mapping(config, result.mapping), result
 
@@ -389,6 +402,23 @@ def _filter_unchanged_read_only_files(
         current_mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
         if (
             row
+            and str(row["status"]) == "error"
+            and _rejected_by_previous_version(conn, str(row["file_id"]))
+        ):
+            # Una version anterior lo rechazo (RC8 descartaba precios con '$').
+            # Se vuelve a evaluar una sola vez: el nuevo rechazo queda con esta version.
+            add_event(
+                conn,
+                file_id=str(row["file_id"]),
+                event_type="rejected_file_reevaluated",
+                level="info",
+                message="Archivo rechazado por una version anterior; se vuelve a evaluar con la version actual.",
+                context={"file_name": path.name, "collector_version": VERSION},
+            )
+            selected.append(path)
+            continue
+        if (
+            row
             and (str(row["status"]) in terminal_or_queued or (str(row["status"]) == "processing" and _lease_is_active(row["lease_expires_at"])))
             and int(row["file_size"] or -1) == int(stat.st_size)
             and str(row["file_mtime"] or "") == current_mtime
@@ -418,6 +448,44 @@ def _filter_unchanged_read_only_files(
     if skipped:
         logging.info("run-auto read-only source skipped_unchanged=%s selected=%s", skipped, len(selected))
     return selected
+
+
+def _rejected_by_previous_version(conn, file_id: str) -> bool:
+    """True si el ultimo rechazo de este archivo lo hizo otra version del Collector."""
+
+    try:
+        event = conn.execute(
+            """
+            SELECT context_json FROM processed_file_events
+            WHERE file_id = ? AND event_type IN ('processing_error', 'validation_blocked')
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (file_id,),
+        ).fetchone()
+        reevaluations = conn.execute(
+            """
+            SELECT context_json FROM processed_file_events
+            WHERE file_id = ? AND event_type = 'rejected_file_reevaluated'
+            """,
+            (file_id,),
+        ).fetchall()
+    except Exception:
+        return False
+    for item in reevaluations:
+        # Ya se reevaluo con esta version: si despues lo rechazo el Backend o
+        # la cola, no se vuelve a intentar en cada corrida.
+        try:
+            if json.loads(item["context_json"] or "{}").get("collector_version") == VERSION:
+                return False
+        except (TypeError, ValueError):
+            continue
+    if not event:
+        return False
+    try:
+        context = json.loads(event["context_json"] or "{}")
+    except (TypeError, ValueError):
+        context = {}
+    return context.get("collector_version") != VERSION
 
 
 def _archive_file(config: CollectorConfig, path: Path, target_dir: Path, *, suffix: str | None = None) -> list[str]:
@@ -696,7 +764,17 @@ def _process_reliable_file(
         add_event(conn, file_id=None, event_type="file_not_stable", level="warning", message=message, context={"file_name": path.name})
         return "skipped", message
 
-    file_sha256 = compute_file_sha256(path)
+    try:
+        file_sha256 = compute_file_sha256(path)
+    except OSError as exc:
+        # En Windows: el sistema de caja lo tiene abierto con bloqueo exclusivo,
+        # la unidad de red se cayo o el antivirus lo esta revisando. No es un
+        # problema de los datos: se reintenta en la proxima corrida.
+        message = "No se pudo abrir el archivo (puede estar abierto por otro programa). Se intentara en la proxima ejecucion."
+        logging.warning("run-auto file=%s no legible: %s", path.name, exc.__class__.__name__)
+        with contextlib.suppress(Exception):
+            add_event(conn, file_id=None, event_type="file_not_readable", level="warning", message=message, context={"file_name": path.name})
+        return "skipped", message
     if expected_sha256 and file_sha256 != expected_sha256:
         raise ValidationError("El archivo cambió después de verificar el digest; no se envió.")
     backend_target = _backend_target(config)
@@ -842,6 +920,13 @@ def _process_reliable_file(
             )
             return "needs_review", "No pude reconocer todas las columnas. El mapeo sugerido esta disponible en Admin."
         result = normalize_rows(raw_rows, effective_config)
+        if config.raw.get("source_profile") and count_problem_rows(result, require_dates=True):
+            # Sin valores de celda: este mensaje queda en el estado y el diagnostico.
+            problems = describe_problems(result, require_dates=True, include_values=False)
+            total = count_problem_rows(result, require_dates=True)
+            raise ValidationError(
+                f"{total} fila(s) no se pudieron leer; no se envían totales parciales. " + " ".join(problems)
+            )
         validation = validate_normalized_data(
             raw_rows=raw_rows,
             mapping=effective_config.column_mapping,
@@ -851,7 +936,7 @@ def _process_reliable_file(
     except Exception as exc:
         message = str(exc)
         update_file_state(conn, file_id, status="error", error_message=message, processed_at=utc_now(), lease_expires_at=None)
-        add_event(conn, file_id=file_id, event_type="processing_error", level="error", message=message)
+        add_event(conn, file_id=file_id, event_type="processing_error", level="error", message=message, context={"collector_version": VERSION})
         if _config_bool(config, "move_error_files", True):
             moved = _archive_file(config, path, config.path("error_dir"), suffix="error")
             if moved:
@@ -878,7 +963,7 @@ def _process_reliable_file(
 
     if not validation.is_valid:
         message = "; ".join(validation.blocking_errors)
-        add_event(conn, file_id=file_id, event_type="validation_blocked", level="error", message=message)
+        add_event(conn, file_id=file_id, event_type="validation_blocked", level="error", message=message, context={"collector_version": VERSION})
         if _config_bool(config, "move_error_files", True):
             moved = _archive_file(config, path, config.path("error_dir"), suffix="validation_error")
             if moved:
@@ -936,6 +1021,7 @@ def _process_reliable_file(
             event_type="processing_error",
             level="error",
             message=message,
+            context={"collector_version": VERSION},
         )
         if _config_bool(config, "move_error_files", True):
             moved = _archive_file(config, path, config.path("error_dir"), suffix="error")
@@ -1158,9 +1244,48 @@ def cmd_reprocess_sent_v2(args: argparse.Namespace) -> int:
         finally:
             conn.close()
 
+def _token_from_other_windows_user(config: CollectorConfig) -> bool:
+    if os.getenv(config.collector_token_env):
+        return False
+    try:
+        return token_status(config.path("state_dir")) == TOKEN_OTHER_USER
+    except (ConfigError, OSError):
+        return False
+
+
+def _release_file_after_crash(conn, config: CollectorConfig, path: Path, message: str) -> None:
+    """Deja el archivo listo para reintentar despues de una falla inesperada."""
+
+    with contextlib.suppress(Exception):
+        conn.execute(
+            """
+            UPDATE processed_files SET lease_expires_at = NULL, error_message = ?
+            WHERE file_path = ? AND status IN ('processing', 'validated', 'detected')
+              AND COALESCE(commerce_id, '') = COALESCE(?, '')
+              AND COALESCE(collector_id, '') = COALESCE(?, '')
+              AND COALESCE(backend_url, '') = COALESCE(?, '')
+              AND COALESCE(source_id, '') = COALESCE(?, '')
+            """,
+            (message, str(path), config.commerce_id, config.collector_id,
+             _backend_target(config), config.raw.get("daily_source_id")),
+        )
+        conn.commit()
+    with contextlib.suppress(Exception):
+        add_event(conn, file_id=None, event_type="processing_crash", level="error", message=message, context={"file_name": path.name})
+
+
 def cmd_run_auto(args: argparse.Namespace) -> int:
     config = _load_runtime_config(args)
     setup_logging(config)
+    if _token_from_other_windows_user(config):
+        # La tarea corre para quien inicie sesion. Si es otra persona, no puede
+        # usar la activacion del comercio y no debe pisar su estado.
+        message = "AIVA fue activado por otro usuario de Windows en esta PC. Entrá con ese usuario o volvé a vincular AIVA desde esta sesión."
+        if os.environ.get(BACKGROUND_ENV) == "1":
+            logging.info("run-auto omitido: AIVA fue activado por otro usuario de Windows en esta PC.")
+            print(message)
+            return 0
+        raise ConfigError(message)
     config.require_send_ready()
     if config.raw.get("source_setup_required"):
         raise ConfigError("Abrí Configurar archivo: faltan el mapeo, precios y cobertura de esta fuente.")
@@ -1246,13 +1371,19 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         results: list[tuple[str, str | None]] = []
         try:
             for path in files:
-                status, message = _process_reliable_file(
-                    config=config,
-                    client=client,
-                    conn=conn,
-                    path=path,
-                    backend_mapping=backend_mapping,
-                )
+                try:
+                    status, message = _process_reliable_file(
+                        config=config,
+                        client=client,
+                        conn=conn,
+                        path=path,
+                        backend_mapping=backend_mapping,
+                    )
+                except Exception as exc:  # un archivo nunca voltea la corrida
+                    logging.exception("run-auto file=%s fallo inesperado", path.name)
+                    message = f"Falla inesperada procesando {path.name} ({exc.__class__.__name__}). Se reintentara en la proxima ejecucion."
+                    _release_file_after_crash(conn, config, path, message)
+                    status = "error"
                 results.append((status, message))
                 logging.info("run-auto file=%s status=%s message=%s", path.name, status, message)
             final_queue = process_queue(conn, config, client=client)

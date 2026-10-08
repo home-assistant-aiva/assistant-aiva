@@ -51,6 +51,40 @@ def load_token(state_dir: Path) -> str | None:
     raise ConfigError("collector_not_activated: formato de token local invalido")
 
 
+TOKEN_MISSING = "missing"
+TOKEN_READABLE = "readable"
+TOKEN_OTHER_USER = "other_user"
+TOKEN_UNREADABLE = "unreadable"
+
+
+def token_status(state_dir: Path) -> str:
+    """Dice si esta sesion de Windows puede usar el token guardado.
+
+    El token queda cifrado con DPAPI para el usuario que activo AIVA y el
+    archivo solo es legible para el. Si en la PC inicia sesion otra persona, la
+    tarea automatica corre con esa otra cuenta: el archivo existe pero no se
+    puede leer ni descifrar. Eso no es un error del comercio y no debe pisar el
+    estado de la sincronizacion del usuario que si activo.
+    """
+
+    path = token_path(state_dir)
+    try:
+        if not path.exists():
+            return TOKEN_MISSING
+    except PermissionError:
+        return TOKEN_OTHER_USER
+    try:
+        token = load_token(state_dir)
+    except PermissionError:
+        # El archivo esta restringido a la cuenta que activo (icacls).
+        return TOKEN_OTHER_USER
+    except (OSError, ConfigError):
+        # Token corrupto, o DPAPI no lo descifra (clave cambiada, otra PC):
+        # no es "otro usuario". Se informa como falta de activacion.
+        return TOKEN_UNREADABLE
+    return TOKEN_READABLE if token else TOKEN_MISSING
+
+
 def _dpapi_protect(data: bytes) -> bytes:
     blob_in = _blob_from_bytes(data)
     blob_out = DATA_BLOB()

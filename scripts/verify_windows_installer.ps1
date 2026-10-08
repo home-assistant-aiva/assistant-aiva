@@ -85,6 +85,15 @@ function Assert-ScheduledTask {
   Assert-True $argumentsMatch.Success "La tarea no declara argumentos verificables."
   $taskArguments = $argumentsMatch.Groups["value"].Value
   Assert-True ($taskArguments -notmatch "(?i)token|bearer") "La tarea expone un token en sus argumentos."
+  [xml]$taskDocument = $taskXml
+  $principal = $taskDocument.Task.Principals.Principal
+  $group = [string]$principal.GroupId
+  Assert-True (-not [string]::IsNullOrWhiteSpace($group)) "La tarea no usa un grupo de usuarios."
+  $groupSid = if ($group -match '^S-1-') { $group } else {
+    ([Security.Principal.NTAccount]::new($group)).Translate([Security.Principal.SecurityIdentifier]).Value
+  }
+  Assert-True ($groupSid -eq "S-1-5-32-545") "La tarea no usa el grupo Usuarios."
+  Assert-True ([string]::IsNullOrWhiteSpace([string]$principal.UserId)) "La tarea sigue atada al usuario instalador."
 }
 
 function Assert-TaskRemoved {
