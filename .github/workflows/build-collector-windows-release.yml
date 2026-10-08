@@ -1,6 +1,12 @@
 name: Build Collector Windows Desktop Release
 
 on:
+  # Candidate-only artifact build; the publish job remains manual and opt-in.
+  push:
+    branches:
+      - fix/collector-rc9-20261008
+    paths:
+      - .github/workflows/build-collector-windows-release.yml
   workflow_dispatch:
     inputs:
       publish_release:

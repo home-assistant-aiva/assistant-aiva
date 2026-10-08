@@ -125,7 +125,11 @@ def test_official_workflow_requires_explicit_manual_publication_opt_in():
     assert "workflow_dispatch:" in trigger
     assert "publish_release:" in trigger
     assert "default: false" in trigger
-    assert "\n  push:" not in trigger
+    candidate_trigger = trigger.split("\n  push:", maxsplit=1)[1].split("\n  workflow_dispatch:", maxsplit=1)[0]
+    assert candidate_trigger == (
+        "\n    branches:\n      - fix/collector-rc9-20261008"
+        "\n    paths:\n      - .github/workflows/build-collector-windows-release.yml"
+    )
     assert "\n  pull_request:" not in trigger
     assert "\n    tags:" not in trigger
     assert "if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true" in workflow
