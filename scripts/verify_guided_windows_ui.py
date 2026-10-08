@@ -1,6 +1,7 @@
 """Drive actual Tk widgets against a synthetic source; no network or real credentials."""
 import hashlib
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -58,6 +59,7 @@ def main():
                 assert hashlib.sha256(source.read_bytes()).hexdigest() == source_hash
             finally:
                 root.destroy()
+                logging.shutdown()
     evidence = {"build_commit": os.environ.get("AIVA_BUILD_COMMIT"), "actual_tk_widgets": True, "preview_net": "180", "preview_discount": "20", "dpapi_roundtrip": sys.platform == "win32", "sent_count_after_two_syncs": 1, "source_preserved": True, "network_used": False, "physical_windows_test": False}
     Path("dist").mkdir(exist_ok=True)
     Path("dist/windows-guided-ui-verification.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
