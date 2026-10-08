@@ -183,3 +183,12 @@ def test_installer_upgrade_and_uninstall_guards_cover_persistent_data():
         "uninstall",
     ):
         assert field in installer
+
+
+def test_installer_internal_version_cannot_be_zero_or_blank():
+    from scripts.verify_windows_binary_security import installer_metadata_mismatches
+    from scripts.generate_windows_version_info import numeric_version
+    bad = {"version_strings": {"FileVersion": " ", "ProductVersion": PUBLIC_VERSION}, "fixed_file_version": (0, 0, 0, 0)}
+    assert set(installer_metadata_mismatches(bad)) == {"FileVersion", "fixed_file_version"}
+    good = {"version_strings": {"FileVersion": ".".join(map(str, numeric_version())) + " ", "ProductVersion": PUBLIC_VERSION + " "}, "fixed_file_version": numeric_version()}
+    assert not installer_metadata_mismatches(good)

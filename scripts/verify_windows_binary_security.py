@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aiva_collector.version import PUBLIC_VERSION, VERSION
+from aiva_collector.version import PUBLIC_VERSION, VERSION, INSTALLER_FILENAME
 from scripts.generate_windows_version_info import (
     COMPANY_NAME,
     COPYRIGHT,
@@ -233,6 +233,9 @@ def verify(
             inspected["metadata_mismatches"] = mismatches
             main_binaries.append(inspected)
         if is_extra:
+            if path.name == INSTALLER_FILENAME:
+                inspected["metadata_mismatches"] = installer_metadata_mismatches(inspected)
+                inspected["metadata_valid"] = not inspected["metadata_mismatches"]
             additional_artifacts.append(inspected)
 
     evidence = {
@@ -252,13 +255,22 @@ def verify(
     evidence_path.write_text(json.dumps(evidence, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
     invalid_metadata = [
-        item["path"] for item in main_binaries if not item["metadata_valid"]
+        item["path"] for item in main_binaries + additional_artifacts if not item.get("metadata_valid", True)
     ]
     if upx_findings:
         raise BinarySecurityError(f"Se detectaron secciones UPX: {upx_findings}")
     if invalid_metadata:
         raise BinarySecurityError(f"Metadata PE invalida: {invalid_metadata}")
     return evidence
+
+
+def installer_metadata_mismatches(inspected):
+    strings = inspected.get("version_strings", {})
+    expected = {"FileVersion": ".".join(map(str, numeric_version())), "ProductVersion": PUBLIC_VERSION}
+    mismatches = {key: {"expected": value, "actual": strings.get(key)} for key, value in expected.items() if str(strings.get(key, "")).strip() != value}
+    if tuple(inspected.get("fixed_file_version") or ()) != numeric_version():
+        mismatches["fixed_file_version"] = {"expected": numeric_version(), "actual": inspected.get("fixed_file_version")}
+    return mismatches
 
 
 def main(argv: list[str] | None = None) -> int:

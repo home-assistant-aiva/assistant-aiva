@@ -54,7 +54,9 @@ jobs:
         shell: pwsh
         run: |
           $metadata = python -c "import json; from aiva_collector.version import release_metadata; print(json.dumps(release_metadata()))" | ConvertFrom-Json
+          $numericVersion = python -c "from scripts.generate_windows_version_info import numeric_version; print('.'.join(map(str, numeric_version())))"
           $values = @{
+            AIVA_NUMERIC_VERSION = $numericVersion
             AIVA_PACKAGE_VERSION = $metadata.package_version
             AIVA_RELEASE_VERSION = $metadata.public_version
             AIVA_RELEASE_TAG = $metadata.release_tag
@@ -160,6 +162,7 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
             "/DAppVersion=$env:AIVA_PACKAGE_VERSION" `
             "/DPublicVersion=$env:AIVA_RELEASE_VERSION" `
+            "/DNumericVersion=$env:AIVA_NUMERIC_VERSION" `
             "packaging\inno\aiva_collector_setup.iss"
 
       - name: Inspect Windows installer structure

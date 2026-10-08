@@ -9,10 +9,18 @@
   #error PublicVersion must be supplied by the official build workflow
 #endif
 
+#ifndef NumericVersion
+  #error NumericVersion must be supplied by the official build workflow
+#endif
+
 [Setup]
 AppId={{8E61F9E0-4E7F-4CE7-9F4D-A1FA00010051}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#NumericVersion}
+VersionInfoTextVersion={#NumericVersion}
+VersionInfoProductVersion={#NumericVersion}
+VersionInfoProductTextVersion={#PublicVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\AIVA Collector
 DefaultGroupName=AIVA Collector
