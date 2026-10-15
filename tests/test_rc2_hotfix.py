@@ -421,12 +421,12 @@ def test_diagnostic_zip_excludes_source_content_and_redacts_secret(tmp_path, mon
         diagnostic = json.loads(archive.read("diagnostic.json"))
         combined = b"".join(archive.read(name) for name in archive.namelist())
     assert diagnostic["local_state"]["quick_check"] == "ok"
-    assert any("upload_queue" in item for item in diagnostic["local_state"]["schema"])
-    assert b"ventas.csv" in combined
+    assert "upload_queue" in diagnostic["local_state"]["table_names"]
+    assert b"ventas.csv" not in combined
     assert b"ventas.xls" not in combined
     assert secret.encode() not in combined
     assert commercial_secret.encode() not in combined
-    assert hashlib.sha256(source.read_bytes()).hexdigest().encode() in combined
+    assert hashlib.sha256(source.read_bytes()).hexdigest().encode() not in combined
     assert unsupported_source.read_bytes() == unsupported_content
     assert unsupported_source.stat().st_mtime_ns == unsupported_mtime_ns
 
@@ -461,7 +461,8 @@ def test_diagnostic_export_reads_pre_rc2_database_without_migrating_it(tmp_path,
         diagnostic = json.loads(archive.read("diagnostic.json"))
     assert diagnostic["version"] == VERSION
     assert diagnostic["local_state"]["quick_check"] == "ok"
-    assert diagnostic["local_state"]["processed_files"][0]["file_id"] == "legacy"
+    assert diagnostic["local_state"]["legacy_unscoped_excluded"] is True
+    assert "processed_files" not in diagnostic["local_state"]
     with sqlite3.connect(db_path) as conn:
         assert "backend_url" not in {row[1] for row in conn.execute("PRAGMA table_info(processed_files)")}
 

@@ -19,10 +19,14 @@ def safe_diagnostics(config):
     path=local_db_path(config)
     if path.exists():
         with sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True,timeout=3) as conn:
+            data['local_state'] = {'quick_check': conn.execute('PRAGMA quick_check').fetchone()[0]}
             tables={r[0] for r in conn.execute("SELECT name FROM sqlite_schema WHERE type='table'")}
+            data['local_state']['table_names'] = sorted(tables)
+            columns = {r[1] for r in conn.execute('PRAGMA table_info(processed_files)')} if 'processed_files' in tables else set()
+            data['local_state']['legacy_unscoped_excluded'] = bool(columns and not {'commerce_id','collector_id','backend_url'} <= columns)
             if setup and 'connection_batches' in tables:
                 data['pending']={r[0]:r[1] for r in conn.execute('SELECT status,count(*) FROM connection_batches WHERE context=? AND source_id=? GROUP BY status',(context(config),setup['source_id']))}
-            if {'processed_files','upload_queue'} <= tables:
+            if {'processed_files','upload_queue'} <= tables and {'commerce_id','collector_id','backend_url'} <= columns:
                 data['legacy_pending']=conn.execute("""SELECT count(*) FROM upload_queue q JOIN processed_files f ON f.file_id=q.file_id
                     WHERE f.commerce_id=? AND f.collector_id=? AND lower(rtrim(f.backend_url,'/'))=lower(rtrim(?,'/'))
                     AND q.status IN ('pending','retrying','processing')""",(config.commerce_id,config.collector_id,config.backend_url)).fetchone()[0]
@@ -31,7 +35,7 @@ def safe_diagnostics(config):
 
 def write_diagnostics(config, directory, filename):
     directory.mkdir(parents=True,exist_ok=True)
-    path=directory/(context(config)[:12]+'-'+filename)
+    path=directory/filename
     with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('diagnostic.json',json.dumps(safe_diagnostics(config),ensure_ascii=True,indent=2))
     return path
