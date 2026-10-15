@@ -72,3 +72,42 @@ def test_wizard_file_profile_uses_selected_path_without_worker_tk_access(tmp_pat
     result=ConnectionWizard.get_profile(view)
     assert result['folder']==str(tmp_path)
     assert result['suffix']=='.csv'
+
+
+def test_sqlite_internal_database_copy_is_never_a_commerce_source(tmp_path):
+    import sqlite3
+    from aiva_collector.connectors.sqlite import SQLiteConnector
+    path=tmp_path/'renamed-copy.sqlite'
+    with sqlite3.connect(path) as conn:conn.execute('CREATE TABLE processed_files(day TEXT)')
+    reader=SQLiteConnector({'path':str(path),'table':'processed_files','columns':['day'],'date_column':'day'})
+    with pytest.raises(AccessError) as caught:reader.read(Window(date(2026,10,1),date(2026,10,1)))
+    assert caught.value.code=='internal_database_forbidden'
+
+
+def test_oauth_refresh_preserves_rotating_token_and_expiration(monkeypatch):
+    from aiva_collector import oauth_access
+    saved=[]
+    calls=[]
+    monkeypatch.setattr(oauth_access, '_token', lambda profile, data: (calls.append(data) or {'access_token':'new-synthetic', 'refresh_token':'rotated-synthetic', 'expires_at':9999999999}))
+    profile={'oauth':{'client_id':'public-id'}}
+    renewed=oauth_access.refresh_if_needed(profile,{'refresh_token':'old-synthetic','expires_at':0},saved.append)
+    assert renewed==saved[0] and calls[0]['grant_type']=='refresh_token'
+    assert 'client_secret' not in calls[0]
+    with pytest.raises(AccessError):oauth_access.refresh_if_needed(profile,{'expires_at':0},saved.append)
+
+
+def test_diagnostic_contains_only_active_binding_counts(tmp_path):
+    import sqlite3, zipfile
+    from aiva_collector.connection_diagnostics import write_diagnostics
+    from aiva_collector.local_state import connect, local_db_path
+    cfg=config(tmp_path)
+    conn=connect(local_db_path(cfg))
+    conn.execute("CREATE TABLE connection_batches(context TEXT,source_id TEXT,status TEXT,payload_json TEXT)")
+    conn.execute("INSERT INTO connection_batches VALUES(?,?,?,?)",(context(config(tmp_path,'b')),'other-source','pending','PRIVATE-OTHER-COMMERCE'))
+    conn.commit();conn.close()
+    archive=write_diagnostics(cfg,tmp_path/'diagnostic','test.zip')
+    with zipfile.ZipFile(archive) as z:
+        result=z.read('diagnostic.json').decode()
+        assert 'PRIVATE-OTHER-COMMERCE' not in result and 'other-source' not in result
+        assert 'password' not in result and str(tmp_path) not in result
+        assert set(z.namelist())=={'diagnostic.json'}

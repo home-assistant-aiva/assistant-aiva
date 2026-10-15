@@ -539,56 +539,10 @@ def _local_state_diagnostics(db_path: Path) -> dict[str, Any]:
 
 def export_diagnostics() -> OperationResult:
     try:
-        runtime = resolve_runtime_config()
-        config = runtime.config
-        diagnostic_dir = collector_data_dir() / "diagnostico"
-        diagnostic_dir.mkdir(parents=True, exist_ok=True)
-        zip_path = diagnostic_dir / DIAGNOSTIC_FILENAME
-        input_dir = config.path("input_dir")
-        file_metadata = []
-        for path in sorted(input_dir.iterdir()) if input_dir.exists() else []:
-            if not path.is_file() or path.suffix.lower() not in SUPPORTED_SOURCE_SUFFIXES:
-                continue
-            try:
-                stat = path.stat()
-                file_metadata.append({
-                    "name": path.name,
-                    "extension": path.suffix.lower(),
-                    "size": stat.st_size,
-                    "modified_at_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-                    "sha256": compute_file_sha256(path),
-                })
-            except OSError as exc:
-                file_metadata.append({"name": path.name, "error": str(exc)[:300]})
-        auto_state = _read_json(config.path("state_dir") / "last_auto_run.json")
-        config_payload = _sanitize_config(dict(config.raw))
-        local_state = _local_state_diagnostics(local_db_path(config))
-        log_path = config.path("log_file")
-        log_text = _sanitize_diagnostic_text(log_path.read_text(encoding="utf-8", errors="replace")[-500_000:]) if log_path.exists() else ""
-        from .connection_sync import state_path
-        connection_status = _read_json(state_path(config))
-        manifest = {
-            "connection": {k: connection_status.get(k) for k in ("state", "version", "source_id", "configuration_revision", "rows", "sent", "duplicates", "missing_days", "code", "last_success", "next_attempt")},
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "version": config.collector_version or DEFAULT_COLLECTOR_VERSION,
-            "runtime_config": str(runtime.selected_path),
-            "scheduled_task": _scheduled_task_diagnostics(),
-            "last_auto_run": auto_state,
-            "source_files": file_metadata,
-            "local_state": local_state,
-        }
-        with tempfile.TemporaryDirectory(prefix="aiva-diagnostic-", dir=diagnostic_dir) as temporary:
-            root = Path(temporary)
-            (root / "config.sanitized.json").write_text(json.dumps(config_payload, indent=2, ensure_ascii=True), encoding="utf-8")
-            (root / "diagnostic.json").write_text(
-                json.dumps(_sanitize_diagnostic_value(manifest), indent=2, ensure_ascii=True),
-                encoding="utf-8",
-            )
-            (root / "collector.sanitized.log").write_text(log_text, encoding="utf-8")
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                for path in root.iterdir():
-                    archive.write(path, arcname=path.name)
-        digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
-        return OperationResult(True, "Diagnostico exportado", f"ZIP: {zip_path}\nSHA-256: {digest}")
-    except (CollectorError, OSError, ValueError) as exc:
-        return OperationResult(False, "No se pudo exportar el diagnostico", str(exc))
+        from .connection_diagnostics import write_diagnostics
+        config = resolve_runtime_config().config
+        path = write_diagnostics(config, collector_data_dir() / 'diagnostico', DIAGNOSTIC_FILENAME)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        return OperationResult(True, 'Diagnostico exportado', f'ZIP: {path}\nSHA-256: {digest}')
+    except (CollectorError, OSError, ValueError, sqlite3.Error):
+        return OperationResult(False, 'No se pudo exportar el diagnostico', 'Revisá la activación y el acceso al estado local.')

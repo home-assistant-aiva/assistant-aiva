@@ -19,6 +19,8 @@ class SQLiteConnector(Connector):
         try:
             if hasattr(conn, "setlimit"):
                 conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 1000000)
+            if path.name == 'aiva_collector.db' or conn.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name IN ('processed_files','upload_queue','commerce_collectors','commerce_ingestion_summaries') LIMIT 1").fetchone():
+                raise AccessError('internal_database_forbidden', 'La base interna de AIVA y sus copias no son fuentes comerciales; elegí una base del sistema del comercio.')
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA query_only=ON")
             conn.enable_load_extension(False)

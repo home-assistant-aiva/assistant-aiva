@@ -71,8 +71,7 @@ def main():
             result=subprocess.run([args.cli,'connection-driver-info'], capture_output=True, timeout=30)
             assert result.returncode==0, 'pyodbc unavailable in frozen candidate'
         assert hashlib.sha256(source.read_bytes()).hexdigest()==original
-        for timer in root.tk.splitlist(root.tk.call('after','info')):
-            root.after_cancel(timer)
+        wizard.destroy()
         root.destroy()
         evidence={'actual_tk_widgets':True,'source_preserved':True,'dpapi_source_roundtrip':True,
             'frozen_interactive_access':bool(args.cli),'frozen_background_access':bool(args.background),

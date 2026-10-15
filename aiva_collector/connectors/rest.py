@@ -1,5 +1,6 @@
 """Declarative GET-only REST profiles. No arbitrary code, SQL or remote schemas."""
 import json
+import hashlib
 import time
 from datetime import datetime, time as day_time, timedelta
 from urllib.parse import urljoin, urlsplit
@@ -84,9 +85,9 @@ class RESTConnector(Connector):
             items = field(data, p.get("items_path", ""))
             if not isinstance(items, list) or any(not isinstance(r, dict) for r in items):
                 raise AccessError("structure_changed", "La respuesta no contiene la lista de registros esperada.")
-            if items and __import__("hashlib").sha256(json.dumps(items, sort_keys=True, default=str).encode()).hexdigest() in page_contents:
+            if items and hashlib.sha256(json.dumps(items, sort_keys=True, default=str).encode()).hexdigest() in page_contents:
                 raise AccessError("pagination_loop", "La API devolvió la misma página; no se enviaron datos parciales.")
-            page_contents.add(__import__("hashlib").sha256(json.dumps(items, sort_keys=True, default=str).encode()).hexdigest())
+            page_contents.add(hashlib.sha256(json.dumps(items, sort_keys=True, default=str).encode()).hexdigest())
             for item in items:
                 rows.append({alias: field(item, path) for alias, path in p["fields"].items()})
                 if len(rows) > self.max_rows:

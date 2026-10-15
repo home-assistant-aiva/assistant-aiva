@@ -32,6 +32,8 @@ class ConnectionWizard(tk.Toplevel):
         self.sample = []
         self.credentials = {}
         self.busy = False
+        self._closed = False
+        self._poll_timer = None
         self.messages = queue.Queue()
         self.vars = {}
         self.mapping = {}
@@ -65,7 +67,7 @@ class ConnectionWizard(tk.Toplevel):
         self._history()
         self._review()
         self.restore()
-        self.after(100, self.poll)
+        self._poll_timer = self.after(100, self.poll)
 
     def entry(self, page, key, label, value='', *, secret=False):
         ttk.Label(page, text=label).pack(anchor='w', pady=(7, 2))
@@ -292,6 +294,8 @@ class ConnectionWizard(tk.Toplevel):
         threading.Thread(target=target, daemon=True).start()
 
     def poll(self):
+        if self._closed:
+            return
         try:
             ok, result, done = self.messages.get_nowait()
             self.busy = False
@@ -301,7 +305,16 @@ class ConnectionWizard(tk.Toplevel):
                 self.status.set(result['code'] + ': ' + result['message'])
         except queue.Empty:
             pass
-        self.after(100, self.poll)
+        self._poll_timer = self.after(100, self.poll)
+
+    def destroy(self):
+        if self._closed:
+            return
+        self._closed = True
+        if self._poll_timer is not None:
+            self.after_cancel(self._poll_timer)
+            self._poll_timer = None
+        super().destroy()
 
     def show_error(self, exc):
         error = safe_error(exc)
