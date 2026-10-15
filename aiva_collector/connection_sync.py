@@ -78,6 +78,8 @@ def build_capture(config, setup, reading, window, revision, *, features=(), toda
     normalized = normalize_rows(source_rows, CollectorConfig(raw, config.config_path))
     if count_problem_rows(normalized, require_dates=True):
         raise AccessError('invalid_rows', 'Hay filas con fechas, cantidades, devoluciones, costos o importes inválidos. Revisá el perfil; no se enviaron totales parciales.')
+    if normalized.parse_failures.get('stock_actual'):
+        raise AccessError('invalid_stock', 'Hay valores de stock ilegibles. Revisá la columna y el formato con el proveedor; no se enviaron datos parciales.')
     if any(r.get('stock_actual') is not None and r['stock_actual'] < 0 for r in normalized.rows):
         raise AccessError('negative_stock', 'El origen informó stock negativo. Revisá su significado con el proveedor antes de usarlo.')
     selected, outside = [], reading.outside

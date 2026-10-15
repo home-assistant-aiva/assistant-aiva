@@ -151,3 +151,10 @@ def test_file_expansion_counts_and_selected_sheet(tmp_path):
     reading=FilesConnector(p).read(Window(date(2026,10,1),date(2026,10,1)))
     assert len(reading.rows)==1 and reading.outside==1
     assert len(FilesConnector(p).read(Window(date(2026,9,30),date(2026,10,1))).rows)==2
+
+
+def test_illegible_stock_requires_review_instead_of_looking_absent(setup):
+    cfg, _, value=setup
+    with pytest.raises(AccessError) as caught:
+        build_capture(cfg,value,Reading([row(stock='inventario ilegible')],complete=True),Window(date(2026,10,1),date(2026,10,1)),1)
+    assert caught.value.code=='invalid_stock'
