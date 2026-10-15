@@ -1,3 +1,15 @@
+AIVA Collector 0.3.0rc1 — candidato de asistente de conexión
+Basado en RC9 f5751d7. No es una entrega de producción.
+Instalador: AIVA-Collector-Setup-v0.3.0-desktop-rc1.exe
+Abrir Asistente de conexión para archivos CSV/XLSX, SQLite o perfiles REST/SQL Server.
+Leer connection_assistant.md instalado junto al programa; perfiles sintéticos en profiles/.
+Requiere Backend HTTPS válido y prueba física en la PC antes de un piloto real.
+ODBC necesita controlador Microsoft oficial x64, cuenta de lectura y perfil probado.
+No se certifica un proveedor comercial real por detectar una URL o controlador.
+La ruta de archivos RC9 se conserva para instalaciones existentes.
+
+ANTECEDENTE RC9 (instrucciones anteriores conservadas):
+
 AIVA Collector Desktop RC9 — 0.2.8rc9
 CANDIDATO DE PRUEBA. No aprobado para instalar en clientes con HTTP.
 

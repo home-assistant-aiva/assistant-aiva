@@ -29,6 +29,8 @@ REQUIRED_EMPTY_DIRS = [
 
 INCLUDE_PATHS = [
     Path("aiva_collector"),
+    Path("configs/integration_profiles"),
+    Path("docs/connection_assistant.md"),
     Path("windows"),
     Path("docs/aiva_collector_clean_install_test.md"),
     Path("docs/aiva_collector_column_mapping.md"),

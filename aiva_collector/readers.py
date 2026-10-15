@@ -73,6 +73,8 @@ def read_csv(path: Path, config: CollectorConfig) -> list[dict[str, Any]]:
                     # Excel deja filas vacias al final; no son ventas ni errores.
                     continue
                 rows.append(row)
+                if config.raw.get("max_input_rows") and len(rows) > int(config.raw["max_input_rows"]):
+                    raise ValidationError("El archivo supera el límite de filas configurado; pedí una exportación menor.")
                 rows.row_numbers.append(reader.line_num)
             return rows
     except (OSError, UnicodeError) as exc:
@@ -118,7 +120,14 @@ def read_xlsx(path: Path, config: CollectorConfig | None = None) -> list[dict[st
         sheets = [workbook[configured_sheet]] if configured_sheet and configured_sheet in workbook.sheetnames else list(workbook.worksheets)
         candidates: list[tuple[tuple[int, int, float, int], int, Any, list[tuple[Any, ...]]]] = []
         for sheet in sheets:
-            rows = list(sheet.iter_rows(values_only=True))
+            limit = int((config.raw if config else {}).get("max_input_rows", 0))
+            if limit and sheet.max_column and sheet.max_column > 64:
+                raise ValidationError("La hoja supera 64 columnas; exportá sólo los campos necesarios.")
+            from itertools import islice
+            iterator = sheet.iter_rows(values_only=True)
+            rows = list(islice(iterator, limit + 26)) if limit else list(iterator)
+            if limit and len(rows) >= limit + 26:
+                raise ValidationError("El XLSX supera el límite de filas; pedí una exportación menor.")
             header = (config.raw if config else {}).get("xlsx_header_row")
             if header is not None:
                 if not isinstance(header, int) or not 1 <= header <= min(25, len(rows)):
@@ -143,6 +152,8 @@ def read_xlsx(path: Path, config: CollectorConfig | None = None) -> list[dict[st
                 item = {header: row[index] if index < len(row) else None for index, header in enumerate(headers) if header}
                 if not _is_blank_row(item):
                     result.append(item)
+                    if limit and len(result) > limit:
+                        raise ValidationError("El XLSX supera el límite de filas configurado.")
                     result.row_numbers.append(header_index + 2 + offset)
             return result
         return SourceRows()

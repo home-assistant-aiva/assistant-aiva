@@ -25,6 +25,7 @@ manual = Analysis(
         "tkinter.filedialog",
         "tkinter.messagebox",
         "requests",
+        "pyodbc",
         "openpyxl",
         "et_xmlfile",
         "certifi",
@@ -72,6 +73,7 @@ cli = Analysis(
     hiddenimports=[
         "tzdata",
         "requests",
+        "pyodbc",
         "openpyxl",
         "et_xmlfile",
         "certifi",
@@ -119,6 +121,7 @@ background = Analysis(
     hiddenimports=[
         "tzdata",
         "requests",
+        "pyodbc",
         "openpyxl",
         "et_xmlfile",
         "certifi",

@@ -207,7 +207,7 @@ try {
     (Join-Path $DataRoot "mapeos"), `
     (Join-Path $DataRoot "logs") | Out-Null
   $legacyConfig = @{
-    collector_version = "0.2.7rc7"
+    collector_version = "0.2.8rc9"
     backend_url = "https://backend.invalid"
     commerce_id = "commerce-simulated-rc1"
     collector_id = "collector-simulated-rc1"
@@ -244,12 +244,12 @@ try {
   }
   $previousInstaller = (Resolve-Path $PreviousInstallerPath).Path
   $previousHash = (Get-FileHash -LiteralPath $previousInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
-  Assert-True ($previousHash -eq "a280e24643ff454043acddf398db063802121c0025b28fb03da038560b4fd5a3") "El instalador RC7 no coincide con la referencia verificada."
+  Assert-True ($previousHash -eq "70dfbe23a743493de72bd538699496ca97733d01dfdff24618b97e28a57fb705") "El instalador RC9 no coincide con la referencia verificada."
   $previous = Start-Process -FilePath $previousInstaller -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=`"$InstallDir`"") -Wait -PassThru
-  Assert-True ($previous.ExitCode -eq 0) "No se pudo instalar RC7 para probar la actualizacion."
+  Assert-True ($previous.ExitCode -eq 0) "No se pudo instalar RC9 para probar la actualizacion."
   Stop-InstalledCollectorProcesses
   $previousVersion = (& (Join-Path $InstallDir "aiva-collector-cli.exe") --version | Out-String).Trim()
-  Assert-True ($previousVersion -eq "0.2.7rc7") "La version previa instalada no es RC7."
+  Assert-True ($previousVersion -eq "0.2.8rc9") "La version previa instalada no es RC9."
   Assert-PreservedFiles $persistentHashes
   $evidence["previous_installer_sha256"] = $previousHash
   $evidence["actual_previous_version"] = $previousVersion

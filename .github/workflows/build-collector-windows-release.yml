@@ -4,7 +4,7 @@ on:
   # Candidate-only artifact build; the publish job remains manual and opt-in.
   push:
     branches:
-      - fix/collector-rc9-20261008
+      - feat/connection-assistant-rc10
     paths:
       - .github/workflows/build-collector-windows-release.yml
   workflow_dispatch:
@@ -176,6 +176,11 @@ jobs:
         run: |
           python scripts/verify_windows_binary_security.py --extra-pe "dist\$env:AIVA_INSTALLER_ASSET"
 
+      - name: Verify connection wizard and frozen credential identities
+        shell: pwsh
+        run: |
+          python scripts/verify_connection_windows.py --cli ".\dist\aiva-collector\aiva-collector-cli.exe" --background ".\dist\aiva-collector\aiva-collector-background.exe"
+
       - name: Build manual ZIP
         run: |
           python scripts/build_windows_package.py
@@ -184,15 +189,15 @@ jobs:
         run: |
           python scripts/verify_windows_exe_package.py --require-artifacts
 
-      - name: Download immutable RC7 upgrade baseline
+      - name: Download immutable RC9 upgrade baseline
         uses: actions/download-artifact@v4
         with:
-          name: aiva-collector-windows-v0.2.7-desktop-rc7
-          run-id: 36727297974
+          name: aiva-collector-windows-v0.2.8-desktop-rc9
+          run-id: 37828497896
           github-token: ${{ github.token }}
-          path: rc7-baseline
+          path: rc9-baseline
 
-      - name: Verify clean install, actual RC7 update, task and uninstall
+      - name: Verify clean install, actual RC9 update, task and uninstall
         shell: pwsh
         run: |
           .\scripts\verify_windows_installer.ps1 `
@@ -200,7 +205,7 @@ jobs:
             -ExpectedVersion "$env:AIVA_PACKAGE_VERSION" `
             -ExpectedPublicVersion "$env:AIVA_RELEASE_VERSION" `
             -DefenderEvidencePath ".\dist\windows-defender-scan.json" `
-            -PreviousInstallerPath ".\rc7-baseline\AIVA-Collector-Setup-v0.2.7-desktop-rc7.exe"
+            -PreviousInstallerPath ".\rc9-baseline\AIVA-Collector-Setup-v0.2.8-desktop-rc9.exe"
 
       - name: Rename release assets
         shell: pwsh
@@ -224,6 +229,7 @@ jobs:
             "dist\windows-defender-scan.json",
             "dist\windows-installer-verification.json",
             "dist\windows-guided-ui-verification.json",
+            "dist\windows-connection-verification.json",
             "dist\README-INSTALACION-COLLECTOR.txt"
           )
           $lines = foreach ($asset in $assets) {
@@ -246,6 +252,7 @@ jobs:
             "dist\windows-installer-verification.json",
             "dist\windows-guided-ui-verification.json",
             "dist\SHA256SUMS.txt",
+            "dist\windows-connection-verification.json",
             "dist\README-INSTALACION-COLLECTOR.txt"
           )
           foreach ($path in $required) {
@@ -267,6 +274,7 @@ jobs:
             dist/windows-defender-scan.json
             dist/windows-installer-verification.json
             dist/windows-guided-ui-verification.json
+            dist/windows-connection-verification.json
 
   publish:
     name: Publish verified Windows pre-release

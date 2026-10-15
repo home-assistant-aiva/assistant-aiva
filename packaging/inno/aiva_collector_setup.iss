@@ -59,6 +59,9 @@ Source: "..\..\windows\config.windows.example.json"; DestDir: "{app}"; Flags: ig
 Source: "..\..\docs\aiva_collector_windows_installer.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\docs\aiva_collector_windows_exe.md"; DestDir: "{app}"; Flags: ignoreversion
 
+Source: "..\..\docs\connection_assistant.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\configs\integration_profiles\*.json"; DestDir: "{app}\profiles"; Flags: ignoreversion
+
 [Icons]
 Name: "{group}\AIVA Collector"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{group}\Soporte\Abrir registros"; Filename: "{sys}\explorer.exe"; Parameters: """{commonappdata}\AIVA\Collector\logs"""

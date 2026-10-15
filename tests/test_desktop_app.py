@@ -171,7 +171,7 @@ def test_activation_writes_config_and_keeps_token_out_of_json(tmp_path, monkeypa
     assert "secret-value" not in config_path.read_text(encoding="utf-8")
 
 
-def test_synchronize_now_shows_pending_send_cause(monkeypatch):
+def test_synchronize_now_shows_pending_send_cause(monkeypatch, tmp_path):
     snapshot = DashboardSnapshot(
         state="attention", title="Pendiente", detail="Pendiente", version="0.2.7rc7",
         config_path=None, commerce_id=None, collector_id=None, input_dir=None,
@@ -181,7 +181,7 @@ def test_synchronize_now_shows_pending_send_cause(monkeypatch):
         summaries_sent=0, duplicates=0, rejected=0, needs_review=0,
         queue_pending=1, last_error=None,
     )
-    runtime = type("Runtime", (), {"selected_path": Path("config.windows.json")})()
+    runtime = type("Runtime", (), {"selected_path": Path("config.windows.json"), "config": __import__("aiva_collector.config", fromlist=["CollectorConfig"]).CollectorConfig({"state_dir": str(tmp_path)}, tmp_path/"config.json")})()
     monkeypatch.setattr("aiva_collector.desktop_service.resolve_runtime_config", lambda: runtime)
     monkeypatch.setattr("aiva_collector.desktop_service.cmd_run_auto", lambda args: 2)
     monkeypatch.setattr("aiva_collector.desktop_service.load_dashboard_snapshot", lambda: snapshot)

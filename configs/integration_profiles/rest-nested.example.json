@@ -1,0 +1,12 @@
+{
+  "kind": "rest", "base_url": "https://proveedor.example.invalid", "path": "/documented-export",
+  "auth": "api_key", "key_header": "X-API-Key", "timezone": "America/Argentina/Buenos_Aires",
+  "semantics": "whole_day_snapshot", "complete_days": false, "empty_days_complete": false,
+  "cost_basis": "historical", "max_rows": 50000, "max_pages": 100, "timeout_seconds": 20,
+  "date_filters": {"from": "from", "to": "to", "format": "datetime", "end_exclusive": true},
+  "items_path": "data.sales", "pagination": {"mode": "cursor", "parameter": "cursor", "next_path": "data.next_cursor"},
+  "identity_fields": ["Operacion", "Linea"], "status_column": "Estado", "accepted_values": ["settled"], "cancelled_values": ["cancelled"],
+  "fields": {"Fecha": "sale.at", "Codigo": "product.code", "Producto": "product.name", "Cantidad": "units", "Precio": "final_unit_price", "Costo": "historical_unit_cost", "Stock": "closing_stock", "FechaStock": "stock_business_date", "Operacion": "sale.id", "Linea": "line_id", "Estado": "sale.status"},
+  "mapping": {"fecha": "Fecha", "producto_codigo": "Codigo", "producto_nombre": "Producto", "cantidad_vendida": "Cantidad", "precio_venta": "Precio", "costo_unitario": "Costo", "stock_actual": "Stock", "fecha_stock": "FechaStock"},
+  "reader": {"price_semantics": "final_net", "discount_semantics": "per_line"}
+}

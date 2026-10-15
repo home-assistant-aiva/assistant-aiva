@@ -1,0 +1,9 @@
+{
+  "kind": "odbc", "engine": "sqlserver", "driver": "ODBC Driver 18 for SQL Server",
+  "server": "SERVIDOR_AUTORIZADO", "database": "BASE_AUTORIZADA", "schema": "dbo", "table": "SalesExportRows",
+  "auth": "database_password", "timezone": "America/Argentina/Buenos_Aires", "currency": "ARS",
+  "columns": ["sale_date", "product_code", "product_name", "quantity", "final_unit_price", "historical_unit_cost", "stock", "stock_date"],
+  "date_column": "sale_date", "complete_days": false, "empty_days_complete": false, "cost_basis": "unknown", "max_rows": 50000,
+  "mapping": {"fecha": "sale_date", "producto_codigo": "product_code", "producto_nombre": "product_name", "cantidad_vendida": "quantity", "precio_venta": "final_unit_price", "costo_unitario": "historical_unit_cost", "stock_actual": "stock", "fecha_stock": "stock_date"},
+  "reader": {"price_semantics": "final_net", "discount_semantics": "per_line"}
+}

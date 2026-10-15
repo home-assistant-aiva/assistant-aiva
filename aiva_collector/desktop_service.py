@@ -73,6 +73,8 @@ class DashboardSnapshot:
     needs_review: int
     queue_pending: int
     last_error: str | None
+    source_kind: str | None = None
+    source_label: str | None = None
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -185,6 +187,17 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
     last_result = str(auto_state.get("result") or "") or None
     last_error = str(auto_state.get("error_summary") or "") or None
 
+    from .connection_config import load_connection
+    from .connection_sync import state_path
+    active = load_connection(config)
+    connection_status = _read_json(state_path(config)) if active else {}
+    if active:
+        source_exists = True
+        auto_state = {"finished_at": connection_status.get("finished_at"), "summaries_sent": connection_status.get("sent", 0),
+                      "duplicates": connection_status.get("duplicates", 0)}
+        last_error = connection_status.get("message") if connection_status.get("code") else None
+        last_result = "error" if connection_status.get("state") == "intervention_required" else "ok"
+
     if not token_configured:
         state = "setup"
         title = "Falta conectar AIVA Collector"
@@ -193,7 +206,9 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         state = "attention"
         title = "Conectado, falta elegir la carpeta de datos"
         detail = "Seleccioná la carpeta donde el sistema de ventas genera archivos CSV o XLSX."
-    elif config.raw.get("source_setup_required"):
+    elif active and active.get("paused"):
+        state, title, detail = "attention", "Fuente pausada", "Abrí el asistente para reanudar; el avance confirmado se conserva."
+    elif not active and config.raw.get("source_setup_required"):
         state = "attention"
         title = "Falta configurar el archivo de ventas"
         detail = "Abrí Configurar archivo y precios: revisá columnas, descuentos y cobertura antes de sincronizar."
@@ -246,6 +261,8 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         needs_review=int(auto_state.get("needs_review") or 0),
         queue_pending=pending,
         last_error=last_error or token_error,
+        source_kind=active["profile"]["kind"] if active else None,
+        source_label=("Fuente " + active["profile"]["kind"] + " · " + connection_status.get("state", "lista para primera sincronización")) if active else None,
     )
 
 
@@ -348,6 +365,12 @@ def test_aiva_connection() -> OperationResult:
 def synchronize_now() -> OperationResult:
     try:
         runtime = resolve_runtime_config()
+        from .connection_config import load_connection
+        if load_connection(runtime.config):
+            from .connection_sync import synchronize
+            result = synchronize(runtime.config, force=True)
+            return OperationResult(result['state'] == 'sync_completed', 'Sincronización de la fuente',
+                f"{result.get('message', '')} Enviados: {result.get('sent', 0)}. Duplicados: {result.get('duplicates', 0)}. Días sin información: {result.get('missing_days', 0)}.")
         code = cmd_run_auto(argparse.Namespace(config=str(runtime.selected_path)))
     except CollectorError as exc:
         return OperationResult(False, "No se pudo sincronizar", str(exc))
@@ -542,7 +565,10 @@ def export_diagnostics() -> OperationResult:
         local_state = _local_state_diagnostics(local_db_path(config))
         log_path = config.path("log_file")
         log_text = _sanitize_diagnostic_text(log_path.read_text(encoding="utf-8", errors="replace")[-500_000:]) if log_path.exists() else ""
+        from .connection_sync import state_path
+        connection_status = _read_json(state_path(config))
         manifest = {
+            "connection": {k: connection_status.get(k) for k in ("state", "version", "source_id", "configuration_revision", "rows", "sent", "duplicates", "missing_days", "code", "last_success", "next_attempt")},
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "version": config.collector_version or DEFAULT_COLLECTOR_VERSION,
             "runtime_config": str(runtime.selected_path),

@@ -19,7 +19,7 @@ def test_cli_reports_rc6_version(capsys):
     with pytest.raises(SystemExit) as exc:
         build_parser().parse_args(["--version"])
     assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == "0.2.8rc9"
+    assert capsys.readouterr().out.strip() == "0.3.0rc1"
 
 
 def test_cli_run_once_dry_generates_last_summary(monkeypatch, tmp_path):

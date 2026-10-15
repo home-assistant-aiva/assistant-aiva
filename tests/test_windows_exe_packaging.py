@@ -127,7 +127,7 @@ def test_official_workflow_requires_explicit_manual_publication_opt_in():
     assert "default: false" in trigger
     candidate_trigger = trigger.split("\n  push:", maxsplit=1)[1].split("\n  workflow_dispatch:", maxsplit=1)[0]
     assert candidate_trigger == (
-        "\n    branches:\n      - fix/collector-rc9-20261008"
+        "\n    branches:\n      - feat/connection-assistant-rc10"
         "\n    paths:\n      - .github/workflows/build-collector-windows-release.yml"
     )
     assert "\n  pull_request:" not in trigger

@@ -1,0 +1,11 @@
+{
+  "kind": "rest", "base_url": "https://proveedor.example.invalid", "path": "/documented-sales",
+  "auth": "bearer", "timezone": "America/Argentina/Buenos_Aires", "currency": "ARS",
+  "semantics": "whole_day_snapshot", "complete_days": false, "empty_days_complete": false,
+  "cost_basis": "unknown", "max_rows": 50000, "max_pages": 100, "timeout_seconds": 20,
+  "date_filters": {"from": "since", "to": "before", "end_exclusive": true, "format": "date"},
+  "pagination": {"mode": "none"}, "items_path": "",
+  "fields": {"Fecha": "date", "Codigo": "product_id", "Producto": "product_name", "Cantidad": "quantity", "Precio": "final_unit_price"},
+  "mapping": {"fecha": "Fecha", "producto_codigo": "Codigo", "producto_nombre": "Producto", "cantidad_vendida": "Cantidad", "precio_venta": "Precio"},
+  "reader": {"price_semantics": "final_net", "discount_semantics": "per_line"}
+}

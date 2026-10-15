@@ -1,3 +1,8 @@
+## Candidato 0.3.0rc1: asistente de conexión
+
+Ver [guía operativa, conectores, límites y recuperación](docs/connection_assistant.md).
+El resto del documento conserva la ruta de archivos RC9 y antecedentes.
+
 # AIVA Collector v1
 
 AIVA Collector lee exportaciones CSV/Excel de una carpeta local del comercio, normaliza columnas, valida datos, calcula un resumen por producto y opcionalmente envia solo ese summary al backend de AIVA Comercial.

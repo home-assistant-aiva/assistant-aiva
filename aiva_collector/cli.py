@@ -1287,6 +1287,12 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
             return 0
         raise ConfigError(message)
     config.require_send_ready()
+    from .connection_config import load_connection
+    if load_connection(config):
+        from .connection_sync import synchronize
+        result = synchronize(config)
+        print(f"connection state={result['state']} sent={result.get('sent', 0)} duplicate={result.get('duplicates', 0)} code={result.get('code') or 'ok'}")
+        return 2 if result['state'] == 'intervention_required' else 0
     if config.raw.get("source_setup_required"):
         raise ConfigError("Abrí Configurar archivo: faltan el mapeo, precios y cobertura de esta fuente.")
     _runtime_dirs(config)
@@ -1468,6 +1474,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_run_once(args: argparse.Namespace) -> int:
     config = _load_runtime_config(args)
+    from .connection_config import load_connection
+    if args.send and load_connection(config):
+        raise ConfigError('Hay una fuente del asistente activa. Usá run-auto o Sincronizar ahora para preservar snapshots diarios.')
     setup_logging(config)
     if args.send:
         config.require_send_ready()
@@ -1646,6 +1655,12 @@ def cmd_retry_pending(args: argparse.Namespace) -> int:
     config = _load_runtime_config(args)
     setup_logging(config)
     config.require_send_ready()
+    from .connection_config import load_connection
+    if load_connection(config):
+        from .connection_sync import synchronize
+        result = synchronize(config)
+        print(f"connection state={result['state']} sent={result.get('sent', 0)} duplicate={result.get('duplicates', 0)} code={result.get('code') or 'ok'}")
+        return 2 if result['state'] == 'intervention_required' else 0
     if config.raw.get("source_setup_required"):
         raise ConfigError("Abrí Configurar archivo: faltan el mapeo, precios y cobertura de esta fuente.")
     _runtime_dirs(config)
@@ -1777,6 +1792,30 @@ def cmd_diagnose_config(args: argparse.Namespace) -> int:
     return 0 if resolved else 2
 
 
+def cmd_connection_status(args):
+    from .connection_config import load_connection
+    from .connection_sync import state_path
+    from .source_credentials import CredentialVault
+    if args.command == 'connection-driver-info':
+        from .connectors.odbc import odbc_module
+        print(json.dumps({'architecture': __import__('struct').calcsize('P')*8, 'drivers': odbc_module().drivers()}))
+        return 0
+    config = _load_runtime_config(args)
+    source = load_connection(config)
+    if args.command == "connection-credential-check":
+        if not source or not CredentialVault(config, source['source_id']).load():
+            print("credentials_unavailable")
+            return 2
+        print("credentials_available")
+        return 0
+    status = {}
+    if state_path(config).exists():
+        status = json.loads(state_path(config).read_text())
+    print(json.dumps({"version": config.collector_version, "configured": bool(source),
+                     **{k: status.get(k) for k in ('state','source_id','configuration_revision','rows','sent','duplicates','code','last_success','next_attempt')}}, ensure_ascii=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="aiva-collector")
     parser.add_argument("--version", action="version", version=DEFAULT_COLLECTOR_VERSION)
@@ -1865,6 +1904,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_service_status = sub.add_parser("service-status")
     p_service_status.add_argument("--config", default=config_default)
     p_service_status.set_defaults(func=cmd_status)
+    for command in ("connection-status", "connection-credential-check", "connection-driver-info"):
+        p_connection = sub.add_parser(command)
+        p_connection.add_argument("--config", default=config_default)
+        p_connection.set_defaults(func=cmd_connection_status)
     return parser
 
 

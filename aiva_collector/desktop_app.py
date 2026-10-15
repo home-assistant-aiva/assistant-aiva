@@ -148,6 +148,10 @@ class CollectorApp:
         self.root.after(100, self.refresh)
         self.root.after(150, self._poll_results)
 
+    def open_connection_wizard(self):
+        from .connection_wizard import ConnectionWizard
+        ConnectionWizard(self.root)
+
     def _configure_styles(self) -> None:
         style = ttk.Style(self.root)
         try:
@@ -228,6 +232,7 @@ class CollectorApp:
         setup_panel = ttk.Frame(body, style="Surface.TFrame", padding=(18, 0, 18, 12))
         setup_panel.pack(fill="x")
         ttk.Button(setup_panel, text="Configurar archivo y precios", command=self.configure_file).pack(side="left")
+        ttk.Button(setup_panel, text="Asistente de conexión", command=self.open_connection_wizard).pack(side="left", padx=8)
         ttk.Button(setup_panel, text="Reprocesar archivo rechazado", command=self.retry_file).pack(side="left", padx=12)
 
         footer = ttk.Frame(body, style="App.TFrame")
@@ -283,7 +288,10 @@ class CollectorApp:
             connection_detail.set("Necesita un código de AIVA Comercial")
 
         source_value, source_detail = self.source_card
-        if snapshot.source_exists:
+        if snapshot.source_kind:
+            source_value.set(snapshot.source_kind.upper())
+            source_detail.set(snapshot.source_label or "Abrí el asistente de conexión")
+        elif snapshot.source_exists:
             source_value.set(f"{snapshot.source_files} archivo(s)")
             source_detail.set(snapshot.input_dir or "Carpeta configurada")
         else:
@@ -299,7 +307,7 @@ class CollectorApp:
         )
 
         self.connect_button.configure(text="Volver a vincular" if snapshot.token_configured else "Conectar con AIVA")
-        self.source_button.configure(state="normal" if snapshot.token_configured else "disabled")
+        self.source_button.configure(state="normal" if snapshot.token_configured else "disabled", text="Revisar fuente" if snapshot.source_kind else "Elegir carpeta de datos", command=self.open_connection_wizard if snapshot.source_kind else self.choose_source)
         self.test_button.configure(state="normal" if snapshot.token_configured else "disabled")
         self.sync_button.configure(state="normal" if snapshot.token_configured and snapshot.source_exists else "disabled")
 
@@ -370,6 +378,11 @@ class CollectorApp:
         self._run_async(lambda: configure_source_folder(selected), progress="Guardando la carpeta de datos…")
 
     def configure_file(self) -> None:
+        from .connection_config import load_connection
+        from .config_discovery import resolve_runtime_config
+        if load_connection(resolve_runtime_config().config):
+            self.open_connection_wizard()
+            return
         if self._busy:
             return
         from .source_dialog import SourceDialog
