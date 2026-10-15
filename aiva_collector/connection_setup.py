@@ -58,7 +58,7 @@ def preview(config, profile, mapping, window, secrets=None, *, sample=None):
                          for k, v in mapping.items()})
     return {'context': context(config), 'expected': digest(old) if old else None, 'profile': profile,
             'mapping': mapping, 'window': window, 'examples': examples, 'ambiguous': sorted(ambiguous),
-            'counts': counts, 'found_window': {'start': str(min(r['fecha'] for r in normalized.rows)), 'end': str(max(r['fecha'] for r in normalized.rows))}, 'signature': digest([profile, mapping, str(window.start), str(window.end)])}
+            'sample_totals': summary['resumen_financiero'] if summary else {}, 'counts': counts, 'found_window': {'start': str(min(r['fecha'] for r in normalized.rows)), 'end': str(max(r['fecha'] for r in normalized.rows))}, 'signature': digest([profile, mapping, str(window.start), str(window.end)])}
 
 
 def activate(config, reviewed, *, frequency=15, review_days=7, secrets=None):

@@ -121,7 +121,7 @@ def build_capture(config, setup, reading, window, revision, *, features=(), toda
             for product in summary['productos_resumidos']:
                 for name in ('costo_total_estimado', 'costo_unitario_promedio', 'margen_bruto_estimado', 'margen_porcentaje_estimado'):
                     product[name] = None
-            summary['resumen_financiero'] = {'cost_basis': profile.get('cost_basis', 'unknown'), 'limitations': ['historical_cost_unavailable']}
+            summary['resumen_financiero'].update({'cost_basis': profile.get('cost_basis', 'unknown'), 'limitations': ['historical_cost_unavailable'], 'costo_total_estimado': None, 'margen_bruto_estimado': None, 'margen_porcentaje_estimado': None, 'productos_con_costo': 0, 'productos_sin_costo': len(summary['productos_resumidos']), 'cobertura_costos_porcentaje': 0})
     snapshot = summary['daily_snapshot']
     today = today or datetime.now(ZoneInfo(profile['timezone'])).date()
     for coverage in snapshot['coverage']:
@@ -211,7 +211,7 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
             # recent full-day recaptures. Each day is an independent recovery unit.
             history_days = [since + timedelta(days=i) for i in range((until-since).days+1)]
             recent_days = [last_closed - timedelta(days=i) for i in reversed(range(setup['review_days']))]
-            days = sorted(set(history_days + recent_days))
+            days = recent_days + [day for day in history_days if day not in recent_days]
             vault = CredentialVault(config, setup['source_id'])
             owned = connector is None
             if connector is None:

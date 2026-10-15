@@ -59,3 +59,16 @@ def test_old_confirmation_cannot_change_source_or_mapping(tmp_path):
     with pytest.raises(AccessError):activate(cfg,reviewed)
     with pytest.raises(AccessError):activate(config(tmp_path,'b'),reviewed)
     assert load_connection(cfg)['mapping']==mapping
+
+
+def test_wizard_file_profile_uses_selected_path_without_worker_tk_access(tmp_path):
+    from types import SimpleNamespace
+    from aiva_collector.connection_wizard import ConnectionWizard
+    class Value:
+        def __init__(self, value):self.value=value
+        def get(self):return self.value
+    path=tmp_path/'source.csv';path.write_text('Fecha,Producto,Cantidad,Precio\n2026-10-01,Producto,1,10\n')
+    view=SimpleNamespace(profile={'kind':'files'}, vars={'source_path':Value(str(path)), 'sheet':Value(''), 'header':Value('')})
+    result=ConnectionWizard.get_profile(view)
+    assert result['folder']==str(tmp_path)
+    assert result['suffix']=='.csv'

@@ -37,6 +37,9 @@ def field(value, path):
 class RESTConnector(Connector):
     def __init__(self, profile, secrets=None, *, allow_loopback=False, refreshed=None):
         super().__init__(profile, secrets)
+        route = urlsplit(profile['path'])
+        if route.query or route.fragment or route.username or route.password:
+            raise AccessError('url_invalid', 'La ruta del perfil no debe contener credenciales ni parámetros; usá los filtros y encabezados documentados.')
         self.base = secure_url(profile["base_url"], test_loopback=allow_loopback)
         self.session = requests.Session()
         self.session.trust_env = False  # no implicit .netrc credentials or proxy auth

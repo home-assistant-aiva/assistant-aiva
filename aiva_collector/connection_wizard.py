@@ -187,7 +187,7 @@ class ConnectionWizard(tk.Toplevel):
     def get_profile(self):
         profile = dict(self.profile)
         if profile['kind'] == 'files':
-            path = Path(source_path).resolve(strict=True)
+            path = Path(self.vars['source_path'].get()).resolve(strict=True)
             if path.suffix.lower() not in {'.csv', '.xlsx'}:
                 raise AccessError('format_unsupported', 'Sólo CSV y XLSX; no se admite XLS.')
             profile.update(folder=str(path.parent), suffix=path.suffix.lower())
@@ -354,6 +354,7 @@ class ConnectionWizard(tk.Toplevel):
             self.confirm.set(False)
             self.review_text.delete('1.0', 'end')
             self.review_text.insert('end', f"Comercio: {self.collector_config.commerce_id}\nFuente: {profile['kind']}\nPeríodo solicitado: {window.start} a {window.end}\nFrecuencia: {self.vars['frequency'].get()} minutos; revisión: {self.vars['review_days'].get()} días\nCobertura: {'declarada por el usuario; pendiente de lectura completa' if self.complete.get() else 'desconocida'}\nMuestra acotada; no demuestra toda la cobertura ni los totales del período. Rango encontrado en la muestra: {reviewed['found_window']['start']} a {reviewed['found_window']['end']}. Dentro: {reviewed['counts']['inside']}; fuera: {reviewed['counts']['outside']}.\nCampos faltantes: {', '.join(k for k in FIELDS if k not in mapping)}\nFormato ambiguo: {', '.join(reviewed['ambiguous']) or 'sin aviso'}\n")
+            self.review_text.insert('end', '\nTotales de la muestra (no del período completo): ' + json.dumps(reviewed['sample_totals'], ensure_ascii=False) + '\n')
             self.review_text.insert('end', '\nEjemplos locales: origen → interpretación\n')
             for row in reviewed['examples']:
                 self.review_text.insert('end', ' | '.join(f"{k}: {v['source']} → {v['interpreted']}" for k,v in row.items()) + '\n')

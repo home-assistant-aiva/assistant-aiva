@@ -20,8 +20,25 @@ class FilesConnector(Connector):
             if path.stat().st_size > min(int(p.get("max_file_bytes", 50000000)), 100000000):
                 raise AccessError("file_limit", "El archivo supera el tamaño permitido. Pedí exportaciones por períodos menores.")
             from ..file_fingerprint import compute_file_sha256
-            digest = compute_file_sha256(path)
-            raw = bounded_rows(read_file(path, cfg), self.max_rows)
+            stamp = (path.stat().st_size, path.stat().st_mtime_ns)
+            metadata = getattr(self, '_metadata', {}).get(path)
+            if metadata and metadata['stamp'] == stamp and not metadata['invalid'] and not any(window.start <= day <= window.end for day in metadata['days']):
+                outside += metadata['count']
+                continue
+            cached = getattr(self, '_raw_cache', None)
+            if cached and cached[0] == path and cached[1] == stamp:
+                raw = cached[2]
+                digest = cached[3]
+            else:
+                digest = compute_file_sha256(path)
+                raw = bounded_rows(read_file(path, cfg), self.max_rows)
+                if compute_file_sha256(path) != digest:
+                    raise AccessError('source_changed', 'El archivo cambió durante la lectura; se reintentará.')
+                self._raw_cache = (path, stamp, raw, digest)
+            observed = {business_date(row.get(p['mapping'].get('fecha')), p.get('timezone', 'America/Argentina/Buenos_Aires')) for row in raw}
+            if not hasattr(self, '_metadata'):
+                self._metadata = {}
+            self._metadata[path] = {'stamp': stamp, 'days': observed - {None}, 'invalid': None in observed, 'count': len(raw)}
             found = set()
             for row in raw:
                 day = business_date(row.get(p["mapping"].get("fecha")), p.get("timezone", "America/Argentina/Buenos_Aires"))

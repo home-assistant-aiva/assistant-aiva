@@ -1,7 +1,7 @@
 name: Build Collector Windows Desktop Release
 
 on:
-  # Candidate-only artifact build; the publish job remains manual and opt-in.
+  # Candidate-only artifact build, iteration 2; publication stays disabled for pushes.
   push:
     branches:
       - feat/connection-assistant-rc10
