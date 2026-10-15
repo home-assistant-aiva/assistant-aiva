@@ -242,6 +242,17 @@ def process_queue(
         except (OSError, ValueError):
             candidate = None
         file_row = get_file(conn, str(item["file_id"]))
+        if file_row and (
+            file_row.get("commerce_id") not in (None, "", config.commerce_id)
+            or file_row.get("collector_id") not in (None, "", config.collector_id)
+        ):
+            result.skipped += 1
+            continue
+        if candidate is None and (not file_row or not file_row.get("commerce_id") or not file_row.get("collector_id")):
+            # A damaged payload without an attributable owner requires review in
+            # its original binding; the active commerce must not claim its state.
+            result.skipped += 1
+            continue
         if candidate and (candidate.get("commerce_id") != config.commerce_id or candidate.get("collector_id") != config.collector_id):
             result.skipped += 1
             continue

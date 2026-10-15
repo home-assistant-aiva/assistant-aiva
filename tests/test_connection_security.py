@@ -111,3 +111,23 @@ def test_diagnostic_contains_only_active_binding_counts(tmp_path):
         assert 'PRIVATE-OTHER-COMMERCE' not in result and 'other-source' not in result
         assert 'password' not in result and str(tmp_path) not in result
         assert set(z.namelist())=={'diagnostic.json'}
+
+
+def test_corrupt_legacy_queue_of_another_commerce_is_untouched(tmp_path):
+    from types import SimpleNamespace
+    from aiva_collector.local_state import connect,local_db_path,upsert_detected_file,update_file_state
+    from aiva_collector.offline_queue import enqueue_payload,process_queue
+    cfg=config(tmp_path,'a')
+    other=config(tmp_path,'b')
+    source=tmp_path/'source.csv';source.write_text('synthetic')
+    conn=connect(local_db_path(cfg))
+    upsert_detected_file(conn,file_id='other-file',commerce_id='b',collector_id='collector',backend_url=other.backend_url,path=source,file_sha256='0'*64)
+    update_file_state(conn,'other-file',status='pending_send')
+    enqueue_payload(conn,other,file_id='other-file',payload={'commerce_id':'b','collector_id':'collector','fecha_inicio':'2026-10-01','fecha_fin':'2026-10-01','productos_resumidos':[]})
+    item=conn.execute('SELECT * FROM upload_queue').fetchone()
+    __import__('pathlib').Path(item['payload_json_path']).write_text('{invalid')
+    result=process_queue(conn,cfg,client=SimpleNamespace(send_summary=lambda value:pytest.fail('cross-tenant send')))
+    assert result.skipped==1
+    assert conn.execute('SELECT status FROM upload_queue').fetchone()[0]=='pending'
+    assert conn.execute('SELECT status FROM processed_files').fetchone()[0]=='pending_send'
+    conn.close()
