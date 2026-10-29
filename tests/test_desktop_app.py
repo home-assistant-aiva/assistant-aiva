@@ -76,7 +76,24 @@ def test_dashboard_reads_source_and_last_sync_without_network(tmp_path, monkeypa
     assert snapshot.source_files == 1
     assert snapshot.files_processed == 1
     assert snapshot.summaries_sent == 1
+    assert snapshot.last_success == "2026-08-30T12:00:00+00:00"
+    assert snapshot.last_contact == "2026-08-30T12:00:00+00:00"
     assert snapshot.commerce_id == "…34567890"
+
+
+def test_legacy_last_confirmed_send_survives_empty_run_but_not_commerce_change(tmp_path):
+    from aiva_collector.cli import _write_auto_run_state
+    from aiva_collector.config import CollectorConfig
+    raw = {'backend_url': 'https://backend.invalid', 'commerce_id': 'fictional-a',
+           'collector_id': 'collector-a', 'daily_source_id': 'source-a',
+           'state_dir': str(tmp_path / 'state')}
+    config = CollectorConfig(raw, tmp_path / 'config.json')
+    _write_auto_run_state(config, {'finished_at': '2026-10-17T12:00:00+00:00', 'result': 'ok', 'summaries_sent': 1})
+    path = _write_auto_run_state(config, {'finished_at': '2026-10-18T12:00:00+00:00', 'result': 'ok', 'summaries_sent': 0})
+    assert json.loads(path.read_text())['last_success'] == '2026-10-17T12:00:00+00:00'
+    other = CollectorConfig({**raw, 'commerce_id': 'fictional-b'}, tmp_path / 'other.json')
+    path = _write_auto_run_state(other, {'finished_at': '2026-10-19T12:00:00+00:00', 'result': 'ok', 'summaries_sent': 0})
+    assert json.loads(path.read_text()).get('last_success') is None
 
 
 def test_dashboard_names_only_supported_source_formats(tmp_path, monkeypatch):

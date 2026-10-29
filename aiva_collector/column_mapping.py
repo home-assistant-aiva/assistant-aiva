@@ -24,6 +24,7 @@ CANONICAL_FIELDS = (
     "precio_actual",
     "periodo_desde",
     "periodo_hasta",
+    "fecha_ultima_venta",
 )
 REQUIRED_FIELDS = ("producto_nombre", "cantidad_vendida", "precio_venta")
 RECOMMENDED_FIELDS = ("fecha", "producto_codigo", "categoria", "costo_unitario", "stock_actual")
@@ -39,6 +40,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "precio_actual": ("precio venta actual", "precio_actual", "precio lista actual", "current_price"),
     "periodo_desde": ("periodo desde", "período desde", "exportacion desde", "exportación desde"),
     "periodo_hasta": ("periodo hasta", "período hasta", "exportacion hasta", "exportación hasta"),
+    "fecha_ultima_venta": ("últ. venta", "ult venta", "última venta", "ultima venta", "fecha última venta"),
     "producto_nombre": (
         "producto",
         "producto_nombre",

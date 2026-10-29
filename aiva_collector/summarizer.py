@@ -67,6 +67,8 @@ def build_summary(
                 "cantidad_con_costo": 0.0,
                 "cost_status_counts": {"missing": 0, "invalid": 0, "negative": 0, "zero": 0, "valid": 0},
                 "stock_actual": None,
+                "last_positive_sale": None,
+                "reported_last_sales": set(),
             },
         )
         qty = float(row["cantidad_vendida"])
@@ -77,6 +79,11 @@ def build_summary(
             status = "invalid"
         item["cost_status_counts"][status] += 1
         item["cantidad_vendida"] += qty
+        if qty > 0 and row.get("fecha"):
+            previous = item["last_positive_sale"]
+            item["last_positive_sale"] = max(previous, row["fecha"]) if previous else row["fecha"]
+        if row.get("fecha_ultima_venta"):
+            item["reported_last_sales"].add(row["fecha_ultima_venta"])
         from .daily import row_economics
         try:
             net, _discount = row_economics(row, config)
@@ -98,6 +105,12 @@ def build_summary(
         costo_total = item["costo_total_estimado"] if has_valid_cost else None
         margen = facturacion - costo_total if costo_total is not None else None
         stock_actual = item["stock_actual"]
+        last_sale = item["last_positive_sale"]
+        if len(item["reported_last_sales"]) == 1:
+            reported = next(iter(item["reported_last_sales"]))
+            if reported <= date.fromisoformat(fecha_fin):
+                last_sale = max(last_sale, reported) if last_sale else reported
+        days_without_sales = (date.fromisoformat(fecha_fin) - last_sale).days if last_sale else None
         productos.append(
             {
                 "producto_codigo": item["producto_codigo"],
@@ -111,7 +124,7 @@ def build_summary(
                 "margen_bruto_estimado": _money(margen),
                 "margen_porcentaje_estimado": _money((margen / facturacion * 100) if margen is not None and facturacion else None),
                 "stock_actual": _money(stock_actual) if stock_actual is not None else None,
-                "dias_sin_ventas": 30 if qty <= 0 and (stock_actual or 0) > 0 else 0,
+                "dias_sin_ventas": days_without_sales,
                 "venta_promedio_diaria": _money(qty / period_days) or 0,
                 "costo_estado": "valid" if has_valid_cost else _dominant_missing_cost_status(item["cost_status_counts"]),
             }

@@ -35,6 +35,7 @@ FIELDS = {
     "precio_actual": "Precio de lista actual", "fecha_valores_actuales": "Fecha del costo y precio actuales",
     "fecha_costo": "Fecha del costo actual", "fecha_precio": "Fecha del precio actual",
     "periodo_desde": "Exportación desde", "periodo_hasta": "Exportación hasta",
+    "fecha_ultima_venta": "Última venta registrada en el origen",
 }
 # El codigo es opcional: un kiosco que exporta sin codigo de barras es lo
 # normal, y se deriva uno estable del nombre y la categoria.
@@ -64,7 +65,7 @@ TIMEZONES = (
     "America/Santiago",
 )
 
-TABLE_FIELDS = ("fecha", "producto_nombre", "producto_codigo", "cantidad_vendida", "precio_venta", "descuento", "costo_unitario", "stock_actual", "fecha_stock", "precio_actual", "fecha_valores_actuales", "fecha_costo", "fecha_precio")
+TABLE_FIELDS = ("fecha", "producto_nombre", "producto_codigo", "cantidad_vendida", "precio_venta", "descuento", "costo_unitario", "stock_actual", "fecha_stock", "precio_actual", "fecha_valores_actuales", "fecha_costo", "fecha_precio", "fecha_ultima_venta")
 NUMERIC_TABLE_FIELDS = {"cantidad_vendida", "precio_venta", "descuento", "costo_unitario", "stock_actual", "precio_actual"}
 PLACEHOLDER_FIELDS = {"descuento", "costo_unitario", "stock_actual"}
 

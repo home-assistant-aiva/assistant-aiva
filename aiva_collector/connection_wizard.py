@@ -17,7 +17,7 @@ from .source_credentials import CredentialVault
 FIELDS = ('fecha', 'producto_codigo', 'producto_nombre', 'categoria', 'cantidad_vendida', 'precio_venta',
           'descuento', 'costo_unitario', 'stock_actual', 'fecha_stock', 'precio_actual',
           'fecha_valores_actuales', 'fecha_costo', 'fecha_precio')
-FIELDS += ('periodo_desde', 'periodo_hasta')
+FIELDS += ('periodo_desde', 'periodo_hasta', 'fecha_ultima_venta')
 LABELS = {'files': 'Archivos CSV/Excel', 'rest': 'API REST', 'sqlite': 'Base SQLite (solo lectura)',
           'odbc': 'SQL Server por ODBC', 'unknown': 'No sé qué sistema tengo'}
 

@@ -347,6 +347,20 @@ def _write_auto_run_state(config: CollectorConfig, payload: dict) -> Path:
         for key, value in payload.items()
         if key.lower() not in forbidden_keys
     }
+    status_context = hashlib.sha256(json.dumps(
+        [config.backend_url, config.commerce_id, config.collector_id, config.raw.get('daily_source_id')],
+        ensure_ascii=True).encode()).hexdigest()
+    previous = {}
+    if path.exists():
+        try:
+            previous = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            pass
+    safe_payload['status_context'] = status_context
+    if int(safe_payload.get('summaries_sent') or 0) > 0:
+        safe_payload['last_success'] = safe_payload.get('finished_at')
+    elif previous.get('status_context') == status_context:
+        safe_payload['last_success'] = previous.get('last_success')
     path.write_text(json.dumps(safe_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return path
 

@@ -208,11 +208,12 @@ class CollectorApp:
 
         cards = ttk.Frame(body, style="App.TFrame")
         cards.pack(fill="x")
-        for column in range(3):
+        for column in range(4):
             cards.columnconfigure(column, weight=1, uniform="cards")
         self.connection_card = self._metric_card(cards, 0, "CONEXIÓN", "—", "Comercio sin vincular")
-        self.source_card = self._metric_card(cards, 1, "FUENTE DE DATOS", "—", "Elegí una carpeta")
-        self.sync_card = self._metric_card(cards, 2, "ÚLTIMA SINCRONIZACIÓN", "—", "Sin actividad registrada")
+        self.sync_card = self._metric_card(cards, 1, "ÚLTIMO ENVÍO CONFIRMADO", "—", "Sin envío aceptado")
+        self.data_card = self._metric_card(cards, 2, "DATOS HASTA", "—", "Ventas sin día confirmado")
+        self.inventory_card = self._metric_card(cards, 3, "INVENTARIO OBSERVADO EL", "—", "Sin foto fechada")
 
         actions_title = ttk.Frame(body, style="App.TFrame")
         actions_title.pack(fill="x", pady=(22, 10))
@@ -235,6 +236,15 @@ class CollectorApp:
         ttk.Button(setup_panel, text="Asistente de conexión", command=self.open_connection_wizard).pack(side="left", padx=8)
         ttk.Button(setup_panel, text="Reprocesar archivo rechazado", command=self.retry_file).pack(side="left", padx=12)
 
+        self.advanced_visible = tk.BooleanVar(value=False)
+        ttk.Checkbutton(body, text="Opciones avanzadas", variable=self.advanced_visible,
+                        command=self._toggle_advanced).pack(anchor="w", pady=(8, 0))
+        self.advanced_panel = ttk.Frame(body, style="Surface.TFrame", padding=12)
+        self.relink_button = ttk.Button(self.advanced_panel, text="Volver a vincular", command=self.open_activation)
+        self.relink_button.pack(side="left")
+        self.detail_button = ttk.Button(self.advanced_panel, text="Ver detalle", command=self._show_detail)
+        self.detail_button.pack(side="left", padx=8)
+
         footer = ttk.Frame(body, style="App.TFrame")
         footer.pack(fill="x", side="bottom", pady=(18, 0))
         self.activity_var = tk.StringVar(value="AIVA Collector listo.")
@@ -245,7 +255,7 @@ class CollectorApp:
 
     def _metric_card(self, parent: ttk.Frame, column: int, heading: str, value: str, detail: str) -> tuple[tk.StringVar, tk.StringVar]:
         frame = tk.Frame(parent, bg=COLORS["surface"], highlightthickness=1, highlightbackground=COLORS["border"], padx=18, pady=15)
-        frame.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 5, 0 if column == 2 else 5))
+        frame.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 5, 0 if column == 3 else 5))
         tk.Label(frame, text=heading, bg=COLORS["surface"], fg=COLORS["muted"], font=("Segoe UI Semibold", 8), anchor="w").pack(fill="x")
         value_var = tk.StringVar(value=value)
         detail_var = tk.StringVar(value=detail)
@@ -282,31 +292,24 @@ class CollectorApp:
         if snapshot.token_configured:
             connection_value.set("Conectado")
             task = _task_text(snapshot.scheduled_task_installed)
-            connection_detail.set(f"Comercio {snapshot.commerce_id or 'vinculado'} · Automático: {task}")
+            commerce = snapshot.commerce_name or "Comercio"
+            connection_detail.set(f"{commerce} · {snapshot.commerce_id or 'vinculado'} · Automático: {task}")
         else:
             connection_value.set("Sin activar")
             connection_detail.set("Necesita un código de AIVA Comercial")
 
-        source_value, source_detail = self.source_card
-        if snapshot.source_kind:
-            source_value.set(snapshot.source_kind.upper())
-            source_detail.set(snapshot.source_label or "Abrí el asistente de conexión")
-        elif snapshot.source_exists:
-            source_value.set(f"{snapshot.source_files} archivo(s)")
-            source_detail.set(snapshot.input_dir or "Carpeta configurada")
-        else:
-            source_value.set("Sin carpeta")
-            source_detail.set(snapshot.input_dir or "Elegí dónde se generan CSV o XLSX")
-
         sync_value, sync_detail = self.sync_card
-        sync_value.set(_friendly_time(snapshot.last_run_at))
-        sync_detail.set(
-            f"Encontrados {snapshot.files_found} · Elegibles {snapshot.files_eligible} · Omitidos {snapshot.files_skipped} · "
-            f"Procesados {snapshot.files_processed} · Enviados {snapshot.summaries_sent} · Duplicados {snapshot.duplicates} · "
-            f"Pendientes {snapshot.queue_pending} · Rechazados {snapshot.rejected}"
-        )
+        sync_value.set(_friendly_time(snapshot.last_success))
+        sync_detail.set(("Último contacto: " if snapshot.source_kind else "Última corrida: ") + _friendly_time(snapshot.last_contact))
+        self.data_card[0].set(snapshot.last_confirmed_business_date or "—")
+        self.inventory_card[0].set(snapshot.inventory_observed_on or "—")
+        self.inventory_card[1].set(snapshot.source_label or "Sin foto fechada")
 
-        self.connect_button.configure(text="Volver a vincular" if snapshot.token_configured else "Conectar con AIVA")
+        if snapshot.token_configured:
+            self.connect_button.pack_forget()
+        elif not self.connect_button.winfo_manager():
+            self.connect_button.pack(side="left")
+        self.relink_button.configure(state="normal" if snapshot.token_configured else "disabled")
         self.source_button.configure(state="normal" if snapshot.token_configured else "disabled", text="Revisar fuente" if snapshot.source_kind else "Elegir carpeta de datos", command=self.open_connection_wizard if snapshot.source_kind else self.choose_source)
         self.test_button.configure(state="normal" if snapshot.token_configured else "disabled")
         self.sync_button.configure(state="normal" if snapshot.token_configured and snapshot.source_exists else "disabled")
@@ -356,7 +359,29 @@ class CollectorApp:
         self.root.after(150, self._poll_results)
 
     def open_activation(self) -> None:
+        if self._snapshot and self._snapshot.token_configured:
+            if not messagebox.askyesno("Volver a vincular",
+                    "Al vincular otro comercio, la conexión anterior dejará de enviar. Su configuración, cola y estado quedan guardados; restaurarlos requiere una acción separada. ¿Continuar?",
+                    parent=self.root):
+                return
         ActivationDialog(self, self._activate)
+
+    def _toggle_advanced(self) -> None:
+        if self.advanced_visible.get():
+            self.advanced_panel.pack(fill="x", pady=(4, 0))
+        else:
+            self.advanced_panel.pack_forget()
+
+    def _show_detail(self) -> None:
+        snap = self._snapshot
+        if not snap:
+            return
+        messagebox.showinfo("Detalle técnico",
+            f"Última corrida: {_friendly_time(snap.last_run_at)}\n"
+            f"Encontrados: {snap.files_found} · Elegibles: {snap.files_eligible} · Omitidos: {snap.files_skipped}\n"
+            f"Procesados: {snap.files_processed} · Enviados: {snap.summaries_sent} · Duplicados: {snap.duplicates}\n"
+            f"Pendientes: {snap.queue_pending} · Rechazados: {snap.rejected}\n"
+            f"Error: {snap.last_error or 'ninguno'}", parent=self.root)
 
     def _activate(self, code: str, backend: str) -> None:
         self._run_async(

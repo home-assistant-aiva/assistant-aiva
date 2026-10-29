@@ -191,6 +191,9 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
     source_files = _source_file_count(input_path)
     last_result = str(auto_state.get("result") or "") or None
     last_error = str(auto_state.get("error_summary") or "") or None
+    legacy_last_success = auto_state.get('last_success') or (auto_state.get("finished_at") if last_result == "ok"
+                           and int(auto_state.get("summaries_sent") or 0) > 0 else None)
+    legacy_last_run = auto_state.get("finished_at") or auto_state.get("started_at")
 
     from .connection_config import load_connection
     from .connection_sync import state_path
@@ -269,8 +272,8 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         source_kind=active["profile"]["kind"] if active else None,
         source_label=("Fuente " + active["profile"]["kind"] + " · " + connection_status.get("state", "lista para primera sincronización")) if active else None,
         commerce_name=connection_status.get("commerce_name"),
-        last_contact=connection_status.get("last_contact"),
-        last_success=connection_status.get("last_success"),
+        last_contact=connection_status.get("last_contact") or (legacy_last_run if not active else None),
+        last_success=connection_status.get("last_success") or legacy_last_success,
         last_confirmed_business_date=connection_status.get("last_confirmed_business_date"),
         inventory_observed_on=connection_status.get("inventory_observed_on"),
     )
