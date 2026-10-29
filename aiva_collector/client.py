@@ -126,6 +126,22 @@ class CollectorClient:
         data["_http_status_code"] = response.status_code
         return data
 
+    def send_inventory(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        try:
+            response = requests.post(
+                f"{self.config.backend_url}/commerce/collector/inventory-snapshots",
+                json=snapshot,
+                headers=_headers(self.config, snapshot["content_sha256"]),
+                timeout=self.timeout,
+                verify=True,
+                allow_redirects=False,
+            )
+        except RequestException as exc:
+            raise BackendError("No se pudo confirmar el inventario en AIVA") from exc
+        if response.status_code not in (200, 201):
+            raise _safe_error(response)
+        return response.json() if response.content else {}
+
     def get_column_mapping(self) -> dict[str, Any]:
         try:
             response = requests.get(

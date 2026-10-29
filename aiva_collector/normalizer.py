@@ -21,7 +21,7 @@ from .numeric_format import (
 )
 
 # Campos canonicos que se leen como numero. El resto del payload es texto.
-NUMERIC_FIELDS = ("cantidad_vendida", "precio_venta", "costo_unitario", "stock_actual", "descuento")
+NUMERIC_FIELDS = ("cantidad_vendida", "precio_venta", "costo_unitario", "stock_actual", "descuento", "precio_actual")
 
 # Que hacer con una columna donde solo aparecen valores como "2.450": en plata
 # el punto separa miles; en cantidades suele ser una balanza (2,45 kg).
@@ -31,6 +31,7 @@ AMBIGUOUS_DEFAULTS = {
     "precio_venta": CONVENTION_COMMA,
     "costo_unitario": CONVENTION_COMMA,
     "descuento": CONVENTION_COMMA,
+    "precio_actual": CONVENTION_COMMA,
 }
 
 FIELD_NAMES_ES = {
@@ -44,6 +45,10 @@ FIELD_NAMES_ES = {
     "stock_actual": "stock",
     "descuento": "descuento",
     "fecha_stock": "fecha del stock",
+    "fecha_valores_actuales": "fecha del costo y precio actuales",
+    "fecha_costo": "fecha del costo actual",
+    "fecha_precio": "fecha del precio actual",
+    "precio_actual": "precio actual",
 }
 
 DEFAULT_DATE_FORMAT = "%Y-%m-%d"
@@ -413,6 +418,12 @@ def normalize_rows(raw_rows: list[dict[str, Any]], config: CollectorConfig) -> N
                 "stock_actual": None if stock_exact is None else float(stock_exact),
             }
         )
+        if mapping.get("precio_actual"):
+            _, price_current = numeric("precio_actual")
+            valid[-1]["precio_actual"] = None if price_current is None else float(price_current)
+        for date_field in ("fecha_valores_actuales", "fecha_costo", "fecha_precio"):
+            if mapping.get(date_field):
+                valid[-1][date_field] = parse_date(mapped(date_field), date_format)
         row_sources.append(source_row or index)
 
     return NormalizedResult(
