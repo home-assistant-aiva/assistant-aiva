@@ -75,6 +75,11 @@ class DashboardSnapshot:
     last_error: str | None
     source_kind: str | None = None
     source_label: str | None = None
+    commerce_name: str | None = None
+    last_contact: str | None = None
+    last_success: str | None = None
+    last_confirmed_business_date: str | None = None
+    inventory_observed_on: str | None = None
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -263,6 +268,11 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         last_error=last_error or token_error,
         source_kind=active["profile"]["kind"] if active else None,
         source_label=("Fuente " + active["profile"]["kind"] + " · " + connection_status.get("state", "lista para primera sincronización")) if active else None,
+        commerce_name=connection_status.get("commerce_name"),
+        last_contact=connection_status.get("last_contact"),
+        last_success=connection_status.get("last_success"),
+        last_confirmed_business_date=connection_status.get("last_confirmed_business_date"),
+        inventory_observed_on=connection_status.get("inventory_observed_on"),
     )
 
 
