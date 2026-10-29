@@ -32,6 +32,7 @@ class Reading:
     outside: int = 0
     complete: bool = False
     empty_confirmed: bool = False
+    source_file_sha256: str | None = None
 
 
 def identifier(value):

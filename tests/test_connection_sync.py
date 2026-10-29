@@ -49,7 +49,7 @@ class Client:
         self.fail = False
         self.received = set()
     def service_status(self):
-        return {'ingestion_features': ['dated_stock', 'cost_basis', 'empty_daily'], 'decision_readiness': {'capabilities': []}}
+        return {'ingestion_features': ['daily_v2', 'dated_stock', 'cost_basis', 'empty_daily'], 'decision_readiness': {'capabilities': []}}
     def send_summary(self, payload):
         from aiva_collector.summarizer import idempotency_key
         self.payloads.append(payload)
@@ -68,6 +68,9 @@ def test_period_closed_day_and_not_calendar_months():
     assert w.end == date(2026,10,2)
     assert (w.end-w.start).days == 89
     assert period(30, now=NOW, include_today=True).end == date(2026,10,3)
+    assert period(now=datetime(2026,10,29,12,tzinfo=timezone.utc),mode='three_closed_months_current').start == date(2026,7,1)
+    assert period(now=datetime(2026,10,29,12,tzinfo=timezone.utc),mode='three_closed_months_current').end == date(2026,10,28)
+    assert period(now=datetime(2026,11,1,12,tzinfo=timezone.utc),mode='three_closed_months_current') == Window(date(2026,8,1),date(2026,10,31))
 
 
 def test_snapshot_zero_dated_stock_current_partial_cost_and_negative(setup):

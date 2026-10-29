@@ -15,7 +15,9 @@ from .connectors.base import AccessError, safe_error
 from .source_credentials import CredentialVault
 
 FIELDS = ('fecha', 'producto_codigo', 'producto_nombre', 'categoria', 'cantidad_vendida', 'precio_venta',
-          'descuento', 'costo_unitario', 'stock_actual', 'fecha_stock')
+          'descuento', 'costo_unitario', 'stock_actual', 'fecha_stock', 'precio_actual',
+          'fecha_valores_actuales', 'fecha_costo', 'fecha_precio')
+FIELDS += ('periodo_desde', 'periodo_hasta')
 LABELS = {'files': 'Archivos CSV/Excel', 'rest': 'API REST', 'sqlite': 'Base SQLite (solo lectura)',
           'odbc': 'SQL Server por ODBC', 'unknown': 'No sé qué sistema tengo'}
 
@@ -167,6 +169,7 @@ class ConnectionWizard(tk.Toplevel):
             self.vars['header'].set(profile.get('reader', {}).get('xlsx_header_row') or '')
         self.vars['timezone'].set(profile.get('timezone', 'America/Argentina/Buenos_Aires'))
         self.vars['cost_basis'].set(profile.get('cost_basis', 'unknown'))
+        self.vars['currency'].set(profile.get('currency') or '')
         for key, field in [('price', 'price_semantics'), ('discount', 'discount_semantics')]:
             self.vars[key].set(profile.get('reader', {}).get(field, self.vars[key].get()))
         self.complete.set(profile.get('complete_days', False))
@@ -203,8 +206,34 @@ class ConnectionWizard(tk.Toplevel):
         if hasattr(self, 'complete'):
             profile.update(complete_days=self.complete.get(), timezone=self.vars['timezone'].get(),
                            cost_basis=self.vars['cost_basis'].get(), number_format=self.vars['numbers'].get())
+            currency = self.vars['currency'].get().strip().upper()
+            if currency and (len(currency) != 3 or not currency.isalpha()):
+                raise AccessError('currency_invalid', 'Indicá la moneda ISO de tres letras, por ejemplo ARS, o dejala desconocida.')
+            if currency:
+                profile['currency'] = currency
+            else:
+                profile.pop('currency', None)
+            if self.vars['days'].get() == '3 meses cerrados + mes en curso':
+                profile['history_mode'] = 'three_closed_months_current'
+            else:
+                profile.pop('history_mode', None)
+            profile['include_today'] = self.today.get()
             profile['reader'] = {**profile.get('reader', {}), 'price_semantics': self.vars['price'].get(),
                                  'discount_semantics': self.vars['discount'].get()}
+            if profile['kind'] == 'files':
+                profile.pop('inventory_confirmation', None)
+                if self.photo_confirm.get():
+                    from .file_fingerprint import compute_file_sha256
+                    from .normalizer import parse_date
+                    from datetime import datetime
+                    from zoneinfo import ZoneInfo
+                    observed = parse_date(self.vars['photo_date'].get())
+                    if observed is None or observed > datetime.now(ZoneInfo(profile['timezone'])).date():
+                        raise AccessError('inventory_date_invalid', 'Confirmá una fecha de foto válida que no sea futura.')
+                    path = Path(self.vars['source_path'].get()).resolve(strict=True)
+                    profile['inventory_confirmation'] = {'observed_on':str(observed),
+                        'file_sha256':compute_file_sha256(path),
+                        'source_id':source_identity(self.collector_config, profile)}
         return profile
 
     def get_secrets(self):
@@ -240,12 +269,13 @@ class ConnectionWizard(tk.Toplevel):
             var = tk.StringVar(value=default)
             self.vars[key] = var
             ttk.Combobox(p, textvariable=var, values=values, state='readonly').pack(fill='x')
+        self.entry(p, 'currency', 'Moneda confirmada por el operador (ISO, p. ej. ARS; vacía = desconocida)')
 
     def _history(self):
         p = self.pages[3]
-        self.vars['days'] = tk.StringVar(value='90')
-        ttk.Label(p, text='Historial en días: termina por defecto en el último día cerrado. 90 días no son tres meses calendario.').pack(anchor='w')
-        ttk.Combobox(p, textvariable=self.vars['days'], values=('30','90','180','365','personalizado'), state='readonly').pack(fill='x', pady=5)
+        self.vars['days'] = tk.StringVar(value='3 meses cerrados + mes en curso')
+        ttk.Label(p, text='Procesa tres meses calendario cerrados y el mes en curso hasta ayer. También mostrará qué rango debe exportar el comercio.').pack(anchor='w')
+        ttk.Combobox(p, textvariable=self.vars['days'], values=('3 meses cerrados + mes en curso','30','90','180','365','personalizado'), state='readonly').pack(fill='x', pady=5)
         self.entry(p, 'start', 'Desde personalizado (AAAA-MM-DD)')
         self.entry(p, 'end', 'Hasta personalizado (AAAA-MM-DD)')
         self.entry(p, 'timezone', 'Zona horaria IANA del comercio', 'America/Argentina/Buenos_Aires')
@@ -253,6 +283,9 @@ class ConnectionWizard(tk.Toplevel):
         ttk.Checkbutton(p, variable=self.today, text='Incluir hoy: se marcará como parcial').pack(anchor='w', pady=8)
         self.complete = tk.BooleanVar(value=False)
         ttk.Checkbutton(p, variable=self.complete, text='Confirmo con el proveedor: cada lectura contiene todas las ventas de cada día incluido.').pack(anchor='w', pady=8)
+        self.entry(p, 'photo_date', 'Fecha de la foto de stock, costo y precio actual si el archivo no trae fecha (AAAA-MM-DD)')
+        self.photo_confirm = tk.BooleanVar(value=False)
+        ttk.Checkbutton(p, variable=self.photo_confirm, text='Confirmo expresamente que los valores actuales del archivo seleccionado corresponden a esa fecha. La confirmación se liga al hash y a la fuente; otra exportación requiere nueva confirmación.').pack(anchor='w', pady=8)
         self.vars['frequency'] = tk.StringVar(value='15')
         ttk.Label(p, text='Frecuencia en minutos (la tarea consulta al iniciar sesión y cada 15 minutos)').pack(anchor='w')
         ttk.Combobox(p, textvariable=self.vars['frequency'], values=('15','30','60','180','360','1440'), state='readonly').pack(fill='x')
@@ -260,11 +293,14 @@ class ConnectionWizard(tk.Toplevel):
         ttk.Label(p, text='Para ampliar historial, elegí un rango mayor y volvé a confirmar. El archivo ya visto se reevalúa con la nueva configuración. Las fechas ausentes siguen sin información.', wraplength=900).pack(anchor='w', pady=12)
 
     def get_window(self):
-        custom = self.vars['days'].get() == 'personalizado'
+        selected = self.vars['days'].get()
+        custom = selected == 'personalizado'
+        calendar = selected == '3 meses cerrados + mes en curso'
         if custom and (not self.vars['start'].get() or not self.vars['end'].get()):
             raise AccessError('period_invalid', 'Completá desde y hasta.')
-        return period(days=90 if custom else int(self.vars['days'].get()), timezone=self.vars['timezone'].get(),
-            start=self.vars['start'].get() if custom else None, end=self.vars['end'].get() if custom else None, include_today=self.today.get())
+        return period(days=90 if custom or calendar else int(selected), timezone=self.vars['timezone'].get(),
+            start=self.vars['start'].get() if custom else None, end=self.vars['end'].get() if custom else None,
+            include_today=self.today.get(), mode='three_closed_months_current' if calendar else None)
 
     def _review(self):
         p = self.pages[4]
@@ -366,7 +402,10 @@ class ConnectionWizard(tk.Toplevel):
             self.form_signature = self.signature()
             self.confirm.set(False)
             self.review_text.delete('1.0', 'end')
-            self.review_text.insert('end', f"Comercio: {self.collector_config.commerce_id}\nFuente: {profile['kind']}\nPeríodo solicitado: {window.start} a {window.end}\nFrecuencia: {self.vars['frequency'].get()} minutos; revisión: {self.vars['review_days'].get()} días\nCobertura: {'declarada por el usuario; pendiente de lectura completa' if self.complete.get() else 'desconocida'}\nMuestra acotada; no demuestra toda la cobertura ni los totales del período. Rango encontrado en la muestra: {reviewed['found_window']['start']} a {reviewed['found_window']['end']}. Dentro: {reviewed['counts']['inside']}; fuera: {reviewed['counts']['outside']}.\nCampos faltantes: {', '.join(k for k in FIELDS if k not in mapping)}\nFormato ambiguo: {', '.join(reviewed['ambiguous']) or 'sin aviso'}\n")
+            self.review_text.insert('end', f"Comercio: {self.collector_config.commerce_id}\nFuente: {profile['kind']}\nAIVA procesará: {window.start} a {window.end}{' (hoy parcial)' if self.today.get() else ''}\nSolicitá al comercio exportar: {window.start} a {window.end} con todas las ventas de cada día y rango acreditado.\nFrecuencia: {self.vars['frequency'].get()} minutos; revisión: {self.vars['review_days'].get()} días\nCobertura: {'declarada por el usuario; pendiente de lectura completa' if self.complete.get() else 'desconocida'}\nMuestra acotada; no demuestra toda la cobertura ni los totales del período. Rango encontrado en la muestra: {reviewed['found_window']['start']} a {reviewed['found_window']['end']}. Dentro: {reviewed['counts']['inside']}; fuera: {reviewed['counts']['outside']}.\nCampos faltantes: {', '.join(k for k in FIELDS if k not in mapping)}\nFormato ambiguo: {', '.join(reviewed['ambiguous']) or 'sin aviso'}\n")
+            confirmation = profile.get('inventory_confirmation')
+            if confirmation:
+                self.review_text.insert('end', f"\nFoto confirmada: {confirmation['observed_on']} · fuente {confirmation['source_id']} · hash del archivo {confirmation['file_sha256'][:16]}… (sólo campos sin fecha explícita).\n")
             self.review_text.insert('end', '\nTotales de la muestra (no del período completo): ' + json.dumps(reviewed['sample_totals'], ensure_ascii=False) + '\n')
             self.review_text.insert('end', '\nEjemplos locales: origen → interpretación\n')
             for row in reviewed['examples']:
@@ -444,7 +483,7 @@ class ConnectionWizard(tk.Toplevel):
         try:
             values = {k:v.get() for k,v in self.vars.items() if not k.startswith('credential_')}
             save_draft(self.collector_config, {'kind': self.kind.get(), 'profile': self.profile, 'values': values,
-                                     'mapping': {k:v.get() for k,v in self.mapping.items()}, 'complete': self.complete.get(), 'today': self.today.get()})
+                                     'mapping': {k:v.get() for k,v in self.mapping.items()}, 'complete': self.complete.get(), 'today': self.today.get(), 'photo_confirm':self.photo_confirm.get()})
             self.status.set('Avance guardado sin secretos ni muestras. Al volver, probá acceso y confirmá nuevamente.')
         except Exception as exc:
             self.show_error(exc)
@@ -463,6 +502,7 @@ class ConnectionWizard(tk.Toplevel):
                         self.vars[k].set(v)
                 self.complete.set(draft.get('complete', False))
                 self.today.set(draft.get('today', False))
+                self.photo_confirm.set(draft.get('photo_confirm', False))
                 for k,v in draft.get('mapping', {}).items():
                     self.combos[k]['values'] = ('', v)
                     self.mapping[k].set(v)
@@ -482,7 +522,7 @@ class ConnectionWizard(tk.Toplevel):
                     for key, value in [('source_path', p['path']), ('table', p['table']), ('columns', ','.join(p['columns'])), ('date_column', p['date_column'])]:
                         self.vars[key].set(value)
                 self.vars['timezone'].set(p['timezone'])
-                self.vars['days'].set('personalizado')
+                self.vars['days'].set('3 meses cerrados + mes en curso' if p.get('history_mode')=='three_closed_months_current' else 'personalizado')
                 self.vars['start'].set(setup['window']['start'])
                 self.vars['end'].set(setup['window']['end'])
                 self.vars['frequency'].set(str(setup['frequency_minutes']))
@@ -491,6 +531,10 @@ class ConnectionWizard(tk.Toplevel):
                 for key in ('price', 'discount'):
                     self.vars[key].set(p.get('reader', {}).get('price_semantics' if key == 'price' else 'discount_semantics', self.vars[key].get()))
                 self.vars['cost_basis'].set(p.get('cost_basis', 'unknown'))
+                self.vars['currency'].set(p.get('currency') or '')
+                confirmation = p.get('inventory_confirmation') or {}
+                self.vars['photo_date'].set(confirmation.get('observed_on', ''))
+                self.photo_confirm.set(bool(confirmation))
                 self.credentials = CredentialVault(self.collector_config, setup['source_id']).load()
             if state_path(self.collector_config).exists():
                 status = json.loads(state_path(self.collector_config).read_text())

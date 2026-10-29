@@ -54,10 +54,17 @@ def atomic_json(path, value):
         temporary.unlink(missing_ok=True)
 
 
-def period(days=90, *, timezone="America/Argentina/Buenos_Aires", start=None, end=None, include_today=False, now=None):
+def period(days=90, *, timezone="America/Argentina/Buenos_Aires", start=None, end=None, include_today=False, now=None, mode=None):
     today = (now or datetime.now(ZoneInfo(timezone))).astimezone(ZoneInfo(timezone)).date()
     until = date.fromisoformat(end) if end else today if include_today else today - timedelta(days=1)
-    since = date.fromisoformat(start) if start else until - timedelta(days=int(days) - 1)
+    if mode == 'three_closed_months_current':
+        month_index = today.year * 12 + today.month - 1 - 3
+        year, month = divmod(month_index, 12)
+        since = date(year, month + 1, 1)
+    elif mode is None:
+        since = date.fromisoformat(start) if start else until - timedelta(days=int(days) - 1)
+    else:
+        raise AccessError('period_invalid', 'La opción de historial no es válida.')
     if until > today:
         raise AccessError("future_period", "No se puede solicitar información de días futuros.")
     return Window(since, until)
@@ -99,6 +106,8 @@ def validate_profile(profile):
         raise AccessError("status_profile_required", "Confirmá estados aceptados y anulados con el proveedor.")
     if profile.get("cost_basis", "unknown") not in {"historical", "current", "unknown"}:
         raise AccessError("cost_basis_invalid", "Confirmá si el costo es histórico, actual o desconocido.")
+    if profile.get('history_mode') not in (None, 'three_closed_months_current'):
+        raise AccessError('period_invalid', 'La opción de historial no es válida.')
 
 
 def save_connection(config, profile, mapping, window, *, frequency=15, review_days=7, confirmed=False, expected=None, source_id=None):
@@ -114,7 +123,7 @@ def save_connection(config, profile, mapping, window, *, frequency=15, review_da
     previous = load_connection(config)
     if expected != (digest(previous) if previous else None):
         raise AccessError("stale_confirmation", "La configuración cambió. Volvé a probar y confirmar la fuente.")
-    identity = {k: v for k, v in profile.items() if k not in {"mapping", "reader", "complete_days", "cost_basis", "max_rows", "timeout_seconds"}}
+    identity = {k: v for k, v in profile.items() if k not in {"mapping", "reader", "complete_days", "cost_basis", "max_rows", "timeout_seconds", "history_mode", "include_today", "inventory_confirmation"}}
     source = source_id or "source_" + digest([context(config), identity])[:40]
     if previous and previous["source_id"] != source:
         raise AccessError("source_transition_required", "Cambiar de fuente puede solapar ventas. Conservá la fuente actual y solicitá una transición revisada en Backend.")

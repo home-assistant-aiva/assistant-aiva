@@ -57,6 +57,7 @@ def build_capture(config, setup, reading, window, revision, *, features=(), toda
     raw = {**config.raw, **profile.get('reader', {}), 'column_mapping': setup['mapping'],
            'source_schema_version': '2.0.0', 'daily_source_id': setup['source_id'],
            'business_timezone': profile['timezone'], 'daily_snapshot_complete': reading.complete,
+           'currency': profile.get('currency'),
            'daily_complete_file_sha256': None, 'source_profile': {'context': 'connection-assistant'},
            'max_products_per_summary': 200000}
     if reading.rows and profile.get('headers') and any(sorted(row) != profile['headers'] for row in reading.rows):
@@ -132,7 +133,8 @@ def build_capture(config, setup, reading, window, revision, *, features=(), toda
     summary['metadata'].update({'connection': {'configuration_revision': setup['configuration_revision'],
         'mapping_revision': setup['mapping_revision'], 'source_id': setup['source_id'], 'kind': profile['kind'],
         'requested_start': str(window.start), 'requested_end': str(window.end), 'rows_inside': len(selected),
-        'rows_outside': outside, 'cost_basis': profile.get('cost_basis', 'unknown')}})
+        'rows_outside': outside, 'cost_basis': profile.get('cost_basis', 'unknown'),
+        'source_file_sha256': reading.source_file_sha256}})
     return summary, {'inside': len(selected), 'outside': outside, 'coverage': snapshot['coverage']}
 
 
@@ -141,7 +143,116 @@ def _init(conn):
         context TEXT NOT NULL, source_id TEXT NOT NULL, capture_key TEXT NOT NULL,
         payload_json TEXT NOT NULL, idempotency_key TEXT NOT NULL, status TEXT NOT NULL,
         confirmed_at TEXT, PRIMARY KEY(context,source_id,capture_key))''')
+    columns={row[1] for row in conn.execute('PRAGMA table_info(connection_batches)')}
+    if 'source_file_sha256' not in columns:
+        conn.execute('ALTER TABLE connection_batches ADD COLUMN source_file_sha256 TEXT')
+    conn.execute('''CREATE TABLE IF NOT EXISTS connection_inventory_batches (
+        context TEXT NOT NULL, source_id TEXT NOT NULL, content_hash TEXT NOT NULL,
+        payload_json TEXT, status TEXT NOT NULL, confirmed_at TEXT,
+        PRIMARY KEY(context,source_id,content_hash))''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS connection_inventory_files (
+        context TEXT NOT NULL, source_id TEXT NOT NULL, file_hash TEXT NOT NULL,
+        configuration_revision INTEGER NOT NULL, content_hash TEXT NOT NULL,
+        PRIMARY KEY(context,source_id,file_hash,configuration_revision))''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS connection_export_files (
+        context TEXT NOT NULL, source_id TEXT NOT NULL, file_hash TEXT NOT NULL,
+        detection_batch INTEGER NOT NULL, detected_at TEXT NOT NULL,
+        PRIMARY KEY(context,source_id,file_hash))''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS connection_file_scan (
+        context TEXT NOT NULL, source_id TEXT NOT NULL, configuration_revision INTEGER NOT NULL,
+        file_signature TEXT NOT NULL, scanned_end TEXT NOT NULL,
+        PRIMARY KEY(context,source_id,configuration_revision))''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS connection_day_confirmations (
+        context TEXT NOT NULL, source_id TEXT NOT NULL, business_date TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL, source_file_sha256 TEXT, confirmed_at TEXT NOT NULL,
+        PRIMARY KEY(context,source_id,business_date))''')
     conn.commit()
+
+
+def _scan_files(conn, config, setup, binding, clock):
+    """A content hash and first detection batch establish file order durably."""
+    from .readers import discover_input_files
+    from .file_fingerprint import compute_file_sha256
+    profile=setup['profile']
+    source=setup['source_id']
+    probe=CollectorConfig({'input_dir':profile['folder']},config.config_path)
+    paths=[path for path in discover_input_files(probe)
+           if not profile.get('suffix') or path.suffix.lower()==profile['suffix']]
+    if len(paths)>200:
+        raise AccessError('file_limit','Hay demasiadas exportaciones; revisá la carpeta antes de sincronizar.')
+    fingerprints={}
+    for path in paths:
+        if path.stat().st_size>min(int(profile.get('max_file_bytes',50000000)),100000000):
+            raise AccessError('file_limit','Una exportación supera el tamaño permitido; dividila por días completos.')
+        fingerprints[path]=compute_file_sha256(path)
+    known={row['file_hash']:row['detection_batch'] for row in conn.execute(
+        'SELECT file_hash,detection_batch FROM connection_export_files WHERE context=? AND source_id=?',
+        (binding,source))}
+    fresh={value for value in fingerprints.values() if value not in known}
+    if fresh:
+        batch=next_daily_revision(conn)
+        conn.executemany('INSERT INTO connection_export_files VALUES (?,?,?,?,?)',
+            [(binding,source,value,batch,clock.isoformat()) for value in sorted(fresh)])
+        conn.commit()
+        known.update({value:batch for value in fresh})
+    signature=digest(sorted((path.name,value) for path,value in fingerprints.items()))
+    return fingerprints,known,signature
+
+
+def _sync_inventory(conn, config, setup, client, binding, clock, fingerprints, versions):
+    """Hash files every run, but parse/store a photo only when content changes."""
+    from .file_fingerprint import compute_file_sha256
+    from .inventory import build_inventory
+    from .errors import BackendError
+    profile = setup['profile']
+    rows = conn.execute("""SELECT content_hash,payload_json FROM connection_inventory_batches
+        WHERE context=? AND source_id=? AND status='pending'""", (binding,setup['source_id'])).fetchall()
+
+    def deliver(content_hash, payload_json):
+        if digest(load_connection(config)) != digest(setup):
+            raise AccessError('configuration_changed', 'La fuente cambió durante la sincronización; revisá y reanudá.')
+        try:
+            client.send_inventory(json.loads(payload_json))
+        except BackendError as exc:
+            if exc.status_code is None or exc.status_code == 429 or exc.status_code >= 500:
+                raise AccessError('backend_temporary', 'AIVA no confirmó el inventario. Quedó en cola.', retry_after=60) from None
+            raise AccessError('backend_rejected', 'AIVA rechazó el inventario. Revisá el contrato antes de reanudar.') from None
+        conn.execute("""UPDATE connection_inventory_batches SET status='sent',payload_json=NULL,confirmed_at=?
+            WHERE context=? AND source_id=? AND content_hash=?""",
+            (clock.isoformat(),binding,setup['source_id'],content_hash))
+        conn.commit()
+
+    for row in rows:
+        deliver(row['content_hash'],row['payload_json'])
+    paths = sorted(fingerprints, key=lambda path:(versions[fingerprints[path]],path.name))
+    latest_date = None
+    for path in paths:
+        file_hash = fingerprints[path]
+        existing = conn.execute("""SELECT content_hash FROM connection_inventory_files
+            WHERE context=? AND source_id=? AND file_hash=? AND configuration_revision=?""",
+            (binding,setup['source_id'],file_hash,setup['configuration_revision'])).fetchone()
+        if existing:
+            continue
+        revision = next_daily_revision(conn)
+        snapshot = build_inventory(config,setup,path,file_hash=file_hash,revision=revision)
+        if snapshot is None:
+            continue
+        content_hash=snapshot['content_sha256']
+        conn.execute("""INSERT OR IGNORE INTO connection_inventory_batches VALUES (?,?,?,?,?,?)""",
+            (binding,setup['source_id'],content_hash,json.dumps(snapshot), 'pending',None))
+        conn.execute("""INSERT INTO connection_inventory_files VALUES (?,?,?,?,?)""",
+            (binding,setup['source_id'],file_hash,setup['configuration_revision'],content_hash))
+        conn.commit()
+        pending=conn.execute("""SELECT payload_json FROM connection_inventory_batches
+            WHERE context=? AND source_id=? AND content_hash=? AND status='pending'""",
+            (binding,setup['source_id'],content_hash)).fetchone()
+        if pending:
+            deliver(content_hash,pending['payload_json'])
+        dates=[item['observed_on'] for item in snapshot['observations']
+               if item['kind']=='stock' and item['quality']=='verified']
+        if dates:
+            latest_date=max(latest_date or '',max(dates))
+    return latest_date
 
 
 def synchronize(config, *, force=False, client=None, connector=None, now=None):
@@ -163,9 +274,6 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
         from pathlib import Path
         if Path(setup['profile']['path']).resolve() == local_db_path(config).resolve():
             raise AccessError('internal_database_forbidden', 'La SQLite interna de AIVA no es una fuente comercial.')
-    config.require_send_ready()
-    if not config.backend_url.startswith('https://'):
-        raise AccessError('tls_required', 'Configurá un Backend HTTPS válido antes de sincronizar datos del comercio.')
     with connection_lock(config):
         conn = connect(local_db_path(config))
         _init(conn)
@@ -175,6 +283,13 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
         started = time.monotonic()
         result = {'state': 'sync_completed', 'sent': 0, 'duplicates': 0, 'code': None, 'requested_window': setup['window'], 'complete_dates': [], 'partial_dates': [], 'missing_dates': []}
         try:
+            from .errors import ConfigError
+            try:
+                config.require_send_ready()
+            except (ConfigError, PermissionError, OSError):
+                raise AccessError('credential_unavailable', 'Esta sesión de Windows no puede usar el vínculo guardado. Iniciá sesión con el usuario que vinculó AIVA.') from None
+            if not config.backend_url.startswith('https://'):
+                raise AccessError('tls_required', 'Configurá un Backend HTTPS válido antes de sincronizar datos del comercio.')
             # Existing RC9 pending payloads retain their payload and idempotency.
             # Never abandon them when enabling the new connection workflow.
             from .offline_queue import process_queue
@@ -184,6 +299,36 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
             service = client.service_status()
             features = service.get('ingestion_features', [])
             result['capabilities'] = service.get('decision_readiness', {}).get('capabilities', [])
+            result['commerce_name'] = service.get('commerce_name') or status.get('commerce_name')
+            result['last_contact'] = clock.isoformat()
+            if 'daily_v2' not in features:
+                raise AccessError('backend_upgrade_required', 'Este Backend no admite ventas diarias v2. La cola queda intacta.')
+            fingerprints, versions, file_signature = ({}, {}, None)
+            if setup['profile']['kind']=='files':
+                fingerprints, versions, file_signature = _scan_files(conn,config,setup,binding,clock)
+                # A conflicting or partial replacement cannot advance either dataset.
+                from .connection_config import period
+                effective = period(timezone=setup['profile']['timezone'], now=clock,
+                    include_today=setup['profile'].get('include_today',False),
+                    mode=setup['profile'].get('history_mode')) if setup['profile'].get('history_mode') else None
+                scan_start = effective.start if effective else date.fromisoformat(setup['window']['start'])
+                scan_end = effective.end if effective else date.fromisoformat(setup['window']['end'])
+                prior_scan = conn.execute("""SELECT file_signature FROM connection_file_scan
+                    WHERE context=? AND source_id=? AND configuration_revision=?""",
+                    (binding,setup['source_id'],setup['configuration_revision'])).fetchone()
+                if not prior_scan or prior_scan['file_signature'] != file_signature:
+                    probe = create_connector({**setup['profile'],'_file_versions':versions}, {})
+                    try:
+                        probe.validate_overlaps(scan_start,scan_end)
+                    finally:
+                        probe.close()
+            inventory_required = setup['profile']['kind']=='files' and (
+                any(k in setup['mapping'] for k in ('stock_actual','precio_actual')) or
+                (setup['profile'].get('cost_basis')=='current' and 'costo_unitario' in setup['mapping']))
+            if inventory_required:
+                if 'inventory_snapshot_v1' not in features:
+                    raise AccessError('backend_upgrade_required', 'Este Backend no admite fotos de inventario fechadas. Actualizá Backend antes del Collector; la cola queda intacta.')
+                result['inventory_observed_on'] = _sync_inventory(conn,config,setup,client,binding,clock,fingerprints,versions) or status.get('inventory_observed_on')
             # Deliver durable pending payloads before creating captures. No credential
             # or source access is necessary for recovery of an already read batch.
             def deliver(key, payload, idem):
@@ -199,26 +344,66 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
                             raise AccessError('backend_temporary', 'AIVA no confirmó la recepción. El envío queda pendiente.', retry_after=60) from None
                         raise AccessError('backend_rejected', 'AIVA rechazó el envío. Revisá activación, contrato y permisos antes de reanudar.') from None
                     duplicates += 1
-                conn.execute("UPDATE connection_batches SET status='sent',confirmed_at=? WHERE context=? AND source_id=? AND capture_key=?", (clock.isoformat(), binding, setup['source_id'], key))
+                file_hash=(payload.get('metadata',{}).get('connection') or {}).get('source_file_sha256')
+                for coverage in (payload.get('daily_snapshot') or {}).get('coverage',[]):
+                    if coverage.get('status')=='complete':
+                        conn.execute("""INSERT INTO connection_day_confirmations VALUES (?,?,?,?,?,?)
+                            ON CONFLICT(context,source_id,business_date) DO UPDATE SET
+                            idempotency_key=excluded.idempotency_key,
+                            source_file_sha256=excluded.source_file_sha256,
+                            confirmed_at=excluded.confirmed_at""",
+                            (binding,setup['source_id'],coverage['business_date'],idem,file_hash,clock.isoformat()))
+                conn.execute("""UPDATE connection_batches SET status='sent',payload_json='{}',confirmed_at=?
+                    WHERE context=? AND source_id=? AND capture_key=?""",
+                    (clock.isoformat(), binding, setup['source_id'], key))
                 conn.commit()
                 result['last_success'] = clock.isoformat()
             pending = conn.execute("SELECT * FROM connection_batches WHERE context=? AND source_id=? AND status='pending'", (binding, setup['source_id'])).fetchall()
             for batch in pending:
                 deliver(batch['capture_key'], json.loads(batch['payload_json']), batch['idempotency_key'])
-            until = date.fromisoformat(setup['window']['end'])
-            since = date.fromisoformat(setup['window']['start'])
+            if setup['profile'].get('history_mode') == 'three_closed_months_current':
+                from .connection_config import period
+                effective = period(timezone=setup['profile']['timezone'], now=clock,
+                    include_today=setup['profile'].get('include_today',False), mode='three_closed_months_current')
+                since, until = effective.start, effective.end
+                result['requested_window'] = {'start':str(since),'end':str(until)}
+            else:
+                until = date.fromisoformat(setup['window']['end'])
+                since = date.fromisoformat(setup['window']['start'])
             today = clock.astimezone(ZoneInfo(setup['profile']['timezone'])).date()
             last_closed = today - timedelta(days=1)
-            # Initial captures missing from this configuration, then configurable
-            # recent full-day recaptures. Each day is an independent recovery unit.
+            until = min(until, today if setup['profile'].get('include_today') else last_closed)
+            # Each file content revision is scanned by day with a durable cursor.
+            # An unchanged file set never reparses four months every heartbeat.
             history_days = [since + timedelta(days=i) for i in range((until-since).days+1)]
-            recent_days = [last_closed - timedelta(days=i) for i in reversed(range(setup['review_days']))]
-            days = recent_days + [day for day in history_days if day not in recent_days]
+            recent_days = [day for day in (last_closed - timedelta(days=i) for i in reversed(range(setup['review_days'])))
+                           if since<=day<=until]
+            if file_signature is not None:
+                confirmed_before={row[0] for row in conn.execute("""SELECT business_date FROM connection_day_confirmations
+                    WHERE context=? AND source_id=? AND business_date BETWEEN ? AND ?""",
+                    (binding,setup['source_id'],str(since),str(until)))}
+                relevant=sorted(set(day for day in history_days if str(day) not in confirmed_before) |
+                                set(day for day in recent_days if since<=day<=until))
+                scan=conn.execute("""SELECT file_signature,scanned_end FROM connection_file_scan
+                    WHERE context=? AND source_id=? AND configuration_revision=?""",
+                    (binding,setup['source_id'],setup['configuration_revision'])).fetchone()
+                cursor=(date.fromisoformat(scan['scanned_end']) if scan and scan['file_signature']==file_signature
+                        else (relevant[0]-timedelta(days=1) if relevant else until))
+                if not scan or scan['file_signature'] != file_signature:
+                    conn.execute("""INSERT INTO connection_file_scan VALUES (?,?,?,?,?)
+                        ON CONFLICT(context,source_id,configuration_revision) DO UPDATE SET
+                        file_signature=excluded.file_signature,scanned_end=excluded.scanned_end""",
+                        (binding,setup['source_id'],setup['configuration_revision'],file_signature,str(cursor)))
+                    conn.commit()
+                days=[day for day in relevant if day>cursor]
+            else:
+                days = recent_days + [day for day in history_days if day not in recent_days]
             vault = CredentialVault(config, setup['source_id'])
             owned = connector is None
             if connector is None:
                 secrets = vault.load()
-                connector = create_connector(setup['profile'], secrets,
+                runtime_profile = {**setup['profile'], '_file_versions':versions} if setup['profile']['kind']=='files' else setup['profile']
+                connector = create_connector(runtime_profile, secrets,
                     **({'refreshed': vault.store} if setup['profile']['kind'] == 'rest' else {}))
             try:
                 for day in days:
@@ -230,7 +415,7 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
                     # Old historical days need reading once per configuration revision.
                     work_key = digest([setup['configuration_revision'], str(day)])
                     prior = conn.execute("SELECT status FROM connection_batches WHERE context=? AND source_id=? AND capture_key=?", (binding, setup['source_id'], work_key)).fetchone()
-                    if prior and day not in recent_days:
+                    if file_signature is None and prior and day not in recent_days:
                         continue
                     reading = connector.read(window)
                     payload, counts = build_capture(config, setup, reading, window, next_daily_revision(conn), features=features, today=today)
@@ -238,11 +423,18 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
                     if payload is None:
                         result['missing_days'] = result.get('missing_days', 0) + 1
                         result['missing_dates'].append(str(day))
+                        if file_signature is not None:
+                            conn.execute("""UPDATE connection_file_scan SET scanned_end=?
+                                WHERE context=? AND source_id=? AND configuration_revision=?""",
+                                (str(day),binding,setup['source_id'],setup['configuration_revision']))
+                            conn.commit()
                         continue
                     for coverage in payload['daily_snapshot']['coverage']:
                         result['complete_dates' if coverage['status'] == 'complete' else 'partial_dates'].append(coverage['business_date'])
                     result['last_read_counts'] = counts
                     idem = idempotency_key(payload)
+                    if file_signature is not None:
+                        work_key=digest([setup['configuration_revision'],str(day),idem])
                     # Same content has the same key, regardless of revision/config range.
                     previous = conn.execute("SELECT status FROM connection_batches WHERE context=? AND source_id=? AND idempotency_key=? AND status='sent'", (binding, setup['source_id'], idem)).fetchone()
                     if previous:
@@ -251,10 +443,21 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
                         state = 'sent'
                     else:
                         state = 'pending'
-                    conn.execute("INSERT OR REPLACE INTO connection_batches VALUES (?,?,?,?,?,?,?)", (binding, setup['source_id'], work_key, json.dumps(payload), idem, state, clock.isoformat() if previous else None))
+                    conn.execute("""INSERT OR IGNORE INTO connection_batches
+                        (context,source_id,capture_key,payload_json,idempotency_key,status,confirmed_at,source_file_sha256)
+                        VALUES (?,?,?,?,?,?,?,?)""",
+                        (binding,setup['source_id'],work_key,json.dumps(payload) if state=='pending' else '{}',
+                         idem,state,clock.isoformat() if previous else None,reading.source_file_sha256))
                     conn.commit()
-                    if not previous:
+                    if not previous and not (file_signature is not None and conn.execute(
+                        "SELECT status FROM connection_batches WHERE context=? AND source_id=? AND capture_key=?",
+                        (binding,setup['source_id'],work_key)).fetchone()['status']=='sent'):
                         deliver(work_key, payload, idem)
+                    if file_signature is not None:
+                        conn.execute("""UPDATE connection_file_scan SET scanned_end=?
+                            WHERE context=? AND source_id=? AND configuration_revision=?""",
+                            (str(day),binding,setup['source_id'],setup['configuration_revision']))
+                        conn.commit()
             finally:
                 if owned and connector is not None:
                     connector.close()
@@ -263,16 +466,38 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
             result['retry_count'] = 0
             result['message'] = result.get('message', 'Sincronización finalizada. Revisá cobertura y funciones informadas por AIVA.')
             result['next_attempt'] = clock.timestamp() + setup['frequency_minutes'] * 60
+            confirmed=conn.execute("""SELECT MAX(business_date) FROM connection_day_confirmations
+                WHERE context=? AND source_id=?""",(binding,setup['source_id'])).fetchone()[0]
+            result['last_confirmed_business_date']=confirmed or status.get('last_confirmed_business_date')
+            confirmed_days={row[0] for row in conn.execute("""SELECT business_date FROM connection_day_confirmations
+                WHERE context=? AND source_id=? AND business_date BETWEEN ? AND ?""",
+                (binding,setup['source_id'],str(since),str(last_closed)))}
+            result['missing_dates']=[str(day) for day in history_days if day<=last_closed and str(day) not in confirmed_days]
+            result['missing_days']=len(result['missing_dates'])
+            if status.get('code') and hasattr(client, 'post_status'):
+                try:
+                    client.post_status('active')
+                except Exception:
+                    pass
         except Exception as exc:
             error = safe_error(exc)
             retries = int(status.get('retry_count', 0)) + 1 if same_revision else 1
             result['retry_count'] = retries
             result.update(state='intervention_required' if not error['retry_after'] or retries > 10 else 'ready', **error,
                           next_attempt=clock.timestamp() + (error['retry_after'] or 86400))
+            if result.get('last_contact') and error['code'] != status.get('code') and hasattr(client, 'post_status'):
+                try:
+                    client.post_status('error', error['code'])
+                except Exception:
+                    pass
         finally:
             conn.close()
         result.update(sent=sent, duplicates=duplicates, rows=units, finished_at=clock.isoformat(), source_id=setup['source_id'],
                       configuration_revision=setup['configuration_revision'], version=config.collector_version,
-                      last_success=result.get('last_success', status.get('last_success')))
+                      last_success=result.get('last_success', status.get('last_success')),
+                      last_confirmed_business_date=result.get('last_confirmed_business_date',status.get('last_confirmed_business_date')),
+                      inventory_observed_on=result.get('inventory_observed_on',status.get('inventory_observed_on')),
+                      commerce_name=result.get('commerce_name',status.get('commerce_name')),
+                      last_contact=result.get('last_contact',status.get('last_contact')))
         atomic_json(state_path(config), result)
         return result
