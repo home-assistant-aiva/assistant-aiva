@@ -340,6 +340,7 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
             legacy = process_queue(conn, config, client=client)
             if legacy.errors:
                 raise AccessError('legacy_queue_intervention', 'Hay envíos RC9 rechazados. Revisá la cola antes de continuar.')
+            result['legacy_cost_review_pending'] = legacy.cost_review_pending
             service = client.service_status()
             features = service.get('ingestion_features', [])
             result['capabilities'] = service.get('decision_readiness', {}).get('capabilities', [])

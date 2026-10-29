@@ -37,6 +37,22 @@ class QueueProcessResult:
     retrying: int = 0
     errors: int = 0
     skipped: int = 0
+    cost_review_pending: int = 0
+
+
+def _unaccredited_cost_in_old_payload(payload: dict[str, Any]) -> bool:
+    """Old queued bytes remain untouched until their historical basis is reviewed."""
+    connection = (payload.get("metadata") or {}).get("connection") or {}
+    if connection.get("cost_basis") == "historical":
+        return False
+    metrics = (payload.get("daily_snapshot") or {}).get("metrics") or []
+    if any(metric.get("unit_cost") is not None or metric.get("cogs") is not None
+           for metric in metrics):
+        return True
+    financial = payload.get("resumen_financiero") or {}
+    return financial.get("costo_total_estimado") is not None or any(
+        product.get("costo_total_estimado") is not None
+        for product in payload.get("productos_resumidos") or [])
 
 
 def _json_dumps(payload: dict[str, Any]) -> str:
@@ -258,6 +274,9 @@ def process_queue(
             continue
         if file_row and file_row.get("backend_url") and file_row["backend_url"].rstrip("/") != config.backend_url:
             result.skipped += 1
+            continue
+        if candidate and config.raw.get("source_profile") and _unaccredited_cost_in_old_payload(candidate):
+            result.cost_review_pending += 1
             continue
         result.attempted += 1
         file_id = str(item["file_id"])

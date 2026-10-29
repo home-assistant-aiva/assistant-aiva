@@ -252,6 +252,11 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         detail = ("Las ventas siguen su curso. Hay varias exportaciones distintas: revisá cuál acredita la foto."
                   if auto_state.get("inventory_error_code") == "multiple_inventory_exports_review" else
                   "Las ventas siguen su curso; revisá el mapeo y la fecha de la foto.")
+    if ((connection_status.get("legacy_cost_review_pending") if active else auto_state.get("cost_review_pending"))
+            and state not in {"error", "setup"}):
+        state = "attention"
+        title = "Cola anterior pendiente de revisión"
+        detail = "Hay ventas anteriores con costo sin fecha histórica acreditada. Quedaron intactas en cola; los lotes nuevos seguros siguen su curso."
 
     if not _uses_secure_transport(config.backend_url) and "HTTP" not in detail:
         detail += " Modo de prueba: el servicio usa HTTP; requiere HTTPS para clientes."

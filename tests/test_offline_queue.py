@@ -110,6 +110,25 @@ def test_process_queue_sends_pending_and_marks_sent(tmp_path):
         conn.close()
 
 
+def test_old_guided_queue_with_unverified_cost_stays_pending(tmp_path):
+    base = _config(tmp_path)
+    config = CollectorConfig({**base.raw, "source_profile": {"context": "synthetic"}}, base.config_path)
+    conn = connect(tmp_path / "state" / "aiva.db")
+    try:
+        _insert_file(conn, tmp_path)
+        payload = _payload()
+        payload["resumen_financiero"]["costo_total_estimado"] = 40
+        payload["daily_snapshot"] = {"metrics": [{"unit_cost": "40", "cogs": "40"}]}
+        enqueue_payload(conn, config, file_id="file-1", payload=payload)
+        client = Client([{"summary_id": "s1"}])
+        result = process_queue(conn, config, client=client, force=True)
+        assert result.cost_review_pending == 1 and not client.sent
+        assert queue_counts(conn)["pending"] == 1
+        assert get_file(conn, "file-1")["status"] == "pending_send"
+    finally:
+        conn.close()
+
+
 def test_process_queue_preserves_idempotency_key(tmp_path):
     config = _config(tmp_path)
     payload = _payload()
