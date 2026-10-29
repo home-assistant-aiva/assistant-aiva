@@ -490,6 +490,7 @@ class ConnectionWizard(tk.Toplevel):
 
     def restore(self):
         try:
+            legacy_review_loaded = False
             draft = load_draft(self.collector_config)
             setup = load_connection(self.collector_config)
             if draft:
@@ -536,7 +537,20 @@ class ConnectionWizard(tk.Toplevel):
                 self.vars['photo_date'].set(confirmation.get('observed_on', ''))
                 self.photo_confirm.set(bool(confirmation))
                 self.credentials = CredentialVault(self.collector_config, setup['source_id']).load()
-            if state_path(self.collector_config).exists():
+            elif self.collector_config.raw.get('source_profile'):
+                from .legacy_migration import legacy_review_plan
+                plan = legacy_review_plan(self.collector_config)
+                self.kind.set('files')
+                self.select_kind()
+                self.profile = plan['profile']
+                self.fill_profile_controls(self.profile)
+                for key, column in plan['mapping'].items():
+                    if key in self.mapping:
+                        self.combos[key]['values'] = ('', column)
+                        self.mapping[key].set(column)
+                self.status.set('Configuración anterior cargada para revisión; no se activó el Asistente. ' + ' '.join(plan['requires_review']))
+                legacy_review_loaded = True
+            if not legacy_review_loaded and state_path(self.collector_config).exists():
                 status = json.loads(state_path(self.collector_config).read_text())
                 self.status.set(f"Último estado: {status.get('state')}. Última recepción confirmada: {status.get('last_success') or 'ninguna'}. {status.get('message', '')}")
         except Exception as exc:

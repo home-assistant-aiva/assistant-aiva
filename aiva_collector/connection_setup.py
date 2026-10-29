@@ -14,9 +14,22 @@ from .source_credentials import CredentialVault
 def source_identity(config, profile):
     keys = {'files': ('folder', 'suffix'), 'sqlite': ('path', 'table'),
             'odbc': ('engine', 'server', 'database', 'schema', 'table'), 'rest': ('base_url', 'path')}[profile['kind']]
+    current = load_connection(config)
+    if current:
+        prior = current['profile']
+        if prior['kind'] != profile['kind']:
+            raise AccessError('source_transition_required', 'Cambiar el tipo de fuente requiere revisar solapamientos en Backend.')
+        for key in keys:
+            old_value, new_value = prior.get(key), profile.get(key)
+            if key in {'folder', 'path'} and profile['kind'] in {'files', 'sqlite'} and old_value and new_value:
+                old_value, new_value = Path(old_value).resolve(), Path(new_value).resolve()
+            if old_value != new_value:
+                raise AccessError('source_transition_required', 'Cambiar de fuente requiere revisar solapamientos en Backend.')
+        return current['source_id']
     legacy = config.raw.get('daily_source_id')
-    if legacy and not load_connection(config):
-        if profile['kind'] == 'files' and Path(profile['folder']).resolve() == config.path('input_dir').resolve():
+    if legacy:
+        if (profile['kind'] == 'files' and Path(profile['folder']).resolve() == config.path('input_dir').resolve()
+                and profile.get('suffix') == (config.raw.get('source_profile') or {}).get('suffix')):
             return legacy
         raise AccessError('source_transition_required', 'Ya hay una fuente RC9 vinculada. Cambiar a API u otra base requiere revisar solapamientos en Backend.')
     return 'source_' + digest([context(config), {k: profile.get(k) for k in keys}])[:40]
@@ -41,6 +54,14 @@ def preview(config, profile, mapping, window, secrets=None, *, sample=None):
     from .normalizer import normalize_rows, count_problem_rows
     reader_config = {**profile.get('reader', {}), 'column_mapping': mapping}
     conventions, ambiguous = _conventions_for(sample, mapping, CollectorConfig(reader_config, config.config_path), profile.get('number_format', 'auto'))
+    if profile.get('number_format', 'auto') == 'auto':
+        for field, frozen in profile.get('reader', {}).get('decimal_conventions', {}).items():
+            if field not in mapping or frozen not in {'comma', 'dot'}:
+                continue
+            detected = conventions.get(field)
+            if detected in {'comma', 'dot'} and detected != frozen and field not in ambiguous:
+                raise AccessError('numeric_format_changed', 'El formato numérico ya no coincide con el configurado. Revisá la fuente y confirmá el formato expresamente.')
+            conventions[field] = frozen
     profile = {**profile, 'mapping': mapping, 'headers': headers,
                'reader': {**reader_config, 'decimal_conventions': conventions}}
     normalized = normalize_rows(sample, CollectorConfig({**profile['reader'], 'business_timezone': profile['timezone']}, config.config_path))
@@ -74,6 +95,12 @@ def activate(config, reviewed, *, frequency=15, review_days=7, secrets=None):
             raise AccessError('schedule_invalid', 'Revisá frecuencia y ventana de correcciones.')
         profile = reviewed['profile']
         source = source_identity(config, profile)
+        if not current and config.raw.get('daily_source_id'):
+            from .legacy_migration import require_migration_space
+            suffix = profile.get('suffix')
+            export_bytes = max((path.stat().st_size for path in Path(profile['folder']).glob('*')
+                                if path.is_file() and path.suffix.lower() == suffix), default=0)
+            require_migration_space(config, export_bytes=export_bytes)
         # Fail closed before activation if this identity cannot protect credentials.
         if secrets:
             CredentialVault(config, source).store(secrets)
