@@ -8,6 +8,7 @@ set "AIVA_LOG=%AIVA_ROOT%\logs\scheduled_task.log"
 set "TASK_XML=%TEMP%\aiva-collector-task.xml"
 set "TASK_LIMIT=PT30M"
 set "AIVA_QUIET=0"
+set "TASK_ENABLED=true"
 
 rem La tarea corre con la sesion de quien inicia Windows (grupo Usuarios,
 rem S-1-5-32-545), no con la cuenta de administrador que instalo. El token
@@ -23,6 +24,10 @@ if not exist "%AIVA_EXE%" (
   if "%AIVA_QUIET%"=="0" pause
   exit /b 1
 )
+
+rem Una actualizacion conserva la pausa operativa de la tarea anterior.
+schtasks /Query /TN "%TASK_NAME%" /XML 2>nul | findstr /I /C:"<Enabled>false</Enabled>" >nul
+if not errorlevel 1 set "TASK_ENABLED=false"
 
 for %%T in ("AIVA Collector" "AIVA Collector Scheduled" "AIVA Collector Auto") do (
   schtasks /Delete /TN %%~T /F >nul 2>nul
@@ -46,6 +51,7 @@ for %%T in ("AIVA Collector" "AIVA Collector Scheduled" "AIVA Collector Auto") d
   echo     ^</Principal^>
   echo   ^</Principals^>
   echo   ^<Settings^>
+  echo     ^<Enabled^>%TASK_ENABLED%^</Enabled^>
   echo     ^<MultipleInstancesPolicy^>IgnoreNew^</MultipleInstancesPolicy^>
   echo     ^<DisallowStartIfOnBatteries^>false^</DisallowStartIfOnBatteries^>
   echo     ^<StopIfGoingOnBatteries^>false^</StopIfGoingOnBatteries^>

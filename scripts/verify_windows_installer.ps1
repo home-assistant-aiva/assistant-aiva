@@ -254,6 +254,9 @@ try {
   $evidence["previous_installer_sha256"] = $previousHash
   $evidence["actual_previous_version"] = $previousVersion
 
+  & schtasks.exe /Change /TN $TaskName /DISABLE *> $null
+  Assert-True ($LASTEXITCODE -eq 0) "No se pudo pausar la tarea RC9 antes de actualizar."
+
   Invoke-Installer
   Assert-PreservedFiles $persistentHashes
   $preservedConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
@@ -262,6 +265,8 @@ try {
   Assert-InstalledBinaries
   Assert-CollectorRuntime
   Assert-ScheduledTask
+  Assert-True ((Get-ScheduledTask -TaskName $TaskName).State -eq 'Disabled') "La actualizacion reactivo una tarea pausada."
+  $evidence.scheduled_task_disabled_preserved = $true
   $databases = @(Get-ChildItem -LiteralPath $InstallDir -Recurse -File | Where-Object { $_.Extension -in @(".db", ".sqlite", ".sqlite3") })
   Assert-True ($databases.Count -eq 0) "El instalador incluyo una base de datos."
   $evidence.previous_version_update = $true
