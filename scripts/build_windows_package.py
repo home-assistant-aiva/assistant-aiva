@@ -47,8 +47,6 @@ INCLUDE_PATHS = [
     Path("README.md"),
     Path("pyproject.toml"),
     Path("configs/example_config.json"),
-    Path("samples/input/ventas_demo.csv"),
-    Path("samples/input/ventas_demo.xlsx"),
     Path("samples/output/.gitkeep"),
     Path("samples/processed/.gitkeep"),
     Path("samples/error/.gitkeep"),
@@ -160,8 +158,6 @@ def iter_included_files(root: Path) -> list[Path]:
     for relative in INCLUDE_PATHS:
         source = root / relative
         if not source.exists():
-            if relative == Path("samples/input/ventas_demo.xlsx"):
-                continue
             raise PackageError(f"Archivo requerido no existe: {relative}")
         if source.is_dir():
             for file_path in sorted(source.rglob("*")):

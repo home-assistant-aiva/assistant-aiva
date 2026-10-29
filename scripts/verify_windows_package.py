@@ -40,7 +40,6 @@ REQUIRED_FILES = {
     "README.md",
     "pyproject.toml",
     "configs/example_config.json",
-    "samples/input/ventas_demo.csv",
     "samples/output/.gitkeep",
     "samples/processed/.gitkeep",
     "samples/error/.gitkeep",
@@ -103,6 +102,8 @@ def assert_no_forbidden_paths(names: list[str]) -> None:
             raise VerifyError(f"Archivo prohibido en ZIP: {name}")
         if path.match("samples/output/*.json"):
             raise VerifyError(f"Output real prohibido en ZIP: {name}")
+        if path.match("samples/input/*"):
+            raise VerifyError(f"Archivo de muestra prohibido en ZIP candidato: {name}")
         if len(path.parts) >= 2 and path.parts[:2] in (("samples", "processed"), ("samples", "error")) and path.name != ".gitkeep":
             raise VerifyError(f"Archivo runtime prohibido en ZIP: {name}")
         if any(part.endswith(".egg-info") for part in path.parts):

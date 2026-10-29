@@ -71,6 +71,7 @@ def test_period_closed_day_and_not_calendar_months():
     assert period(now=datetime(2026,10,29,12,tzinfo=timezone.utc),mode='three_closed_months_current').start == date(2026,7,1)
     assert period(now=datetime(2026,10,29,12,tzinfo=timezone.utc),mode='three_closed_months_current').end == date(2026,10,28)
     assert period(now=datetime(2026,11,1,12,tzinfo=timezone.utc),mode='three_closed_months_current') == Window(date(2026,8,1),date(2026,10,31))
+    assert period(now=datetime(2027,1,15,12,tzinfo=timezone.utc),mode='three_closed_months_current') == Window(date(2026,10,1),date(2027,1,14))
 
 
 def test_snapshot_zero_dated_stock_current_partial_cost_and_negative(setup):

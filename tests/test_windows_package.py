@@ -45,7 +45,6 @@ REQUIRED_IN_ZIP = {
     "README.md",
     "pyproject.toml",
     "configs/example_config.json",
-    "samples/input/ventas_demo.csv",
     "samples/output/.gitkeep",
     "samples/processed/.gitkeep",
     "samples/error/.gitkeep",
