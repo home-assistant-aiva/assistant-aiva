@@ -199,7 +199,8 @@ def _scan_files(conn, config, setup, binding, clock):
     return fingerprints,known,signature
 
 
-def _sync_inventory(conn, config, setup, client, binding, clock, fingerprints, versions):
+def _sync_inventory(conn, config, setup, client, binding, clock, fingerprints, versions, *,
+                    deliver_enabled=True, check_configuration=True):
     """Hash files every run, but parse/store a photo only when content changes."""
     from .file_fingerprint import compute_file_sha256
     from .inventory import build_inventory
@@ -209,7 +210,7 @@ def _sync_inventory(conn, config, setup, client, binding, clock, fingerprints, v
         WHERE context=? AND source_id=? AND status='pending'""", (binding,setup['source_id'])).fetchall()
 
     def deliver(content_hash, payload_json):
-        if digest(load_connection(config)) != digest(setup):
+        if check_configuration and digest(load_connection(config)) != digest(setup):
             raise AccessError('configuration_changed', 'La fuente cambió durante la sincronización; revisá y reanudá.')
         try:
             client.send_inventory(json.loads(payload_json))
@@ -222,8 +223,9 @@ def _sync_inventory(conn, config, setup, client, binding, clock, fingerprints, v
             (clock.isoformat(),binding,setup['source_id'],content_hash))
         conn.commit()
 
-    for row in rows:
-        deliver(row['content_hash'],row['payload_json'])
+    if deliver_enabled:
+        for row in rows:
+            deliver(row['content_hash'],row['payload_json'])
     paths = sorted(fingerprints, key=lambda path:(versions[fingerprints[path]],path.name))
     latest_date = None
     for path in paths:
@@ -246,13 +248,55 @@ def _sync_inventory(conn, config, setup, client, binding, clock, fingerprints, v
         pending=conn.execute("""SELECT payload_json FROM connection_inventory_batches
             WHERE context=? AND source_id=? AND content_hash=? AND status='pending'""",
             (binding,setup['source_id'],content_hash)).fetchone()
-        if pending:
+        if pending and deliver_enabled:
             deliver(content_hash,pending['payload_json'])
         dates=[item['observed_on'] for item in snapshot['observations']
                if item['kind']=='stock' and item['quality']=='verified']
         if dates:
             latest_date=max(latest_date or '',max(dates))
     return latest_date
+
+
+def sync_legacy_inventory(conn, config, client, paths, *, clock=None):
+    """Keep the configured RC9 source and queue while adding dated photos."""
+    profile_config = config.raw.get('source_profile') or {}
+    mapping = config.raw.get('column_mapping') or {}
+    source_id = config.raw.get('daily_source_id')
+    if not profile_config or not source_id or not any(
+            key in mapping for key in ('stock_actual', 'costo_unitario', 'precio_actual')):
+        return {'status': 'not_configured', 'pending': 0}
+    from .file_fingerprint import compute_file_sha256
+    _init(conn)
+    clock = clock or datetime.now(timezone.utc)
+    features = client.service_status().get('ingestion_features', [])
+    # Mapping an explicitly named current-cost date accredits its meaning for
+    # inventory only. It never proves the cost of earlier sales.
+    current_cost = ('costo_unitario' in mapping and
+                    any(key in mapping for key in ('fecha_costo', 'fecha_valores_actuales')))
+    reader = {key: config.raw[key] for key in ('decimal_conventions', 'decimal_separator',
+        'xlsx_sheet', 'xlsx_header_row', 'csv_delimiter', 'csv_encoding') if key in config.raw}
+    profile = {'kind': 'files', 'reader': reader, 'headers': profile_config.get('headers'),
+               'cost_basis': 'current' if current_cost else 'unknown'}
+    revision = int(digest([mapping, reader, profile['cost_basis']])[:14], 16)
+    setup = {'source_id': source_id, 'mapping': mapping, 'profile': profile,
+             'configuration_revision': revision}
+    fingerprints = {path: compute_file_sha256(path) for path in paths}
+    if len(set(fingerprints.values())) > 1:
+        pending = conn.execute("""SELECT COUNT(*) FROM connection_inventory_batches
+            WHERE context=? AND source_id=? AND status='pending'""",
+            (context(config), source_id)).fetchone()[0]
+        return {'status': 'intervention_required', 'pending': pending,
+                'error_code': 'multiple_inventory_exports_review'}
+    versions = {value: 0 for value in fingerprints.values()}
+    supported = 'inventory_snapshot_v1' in features
+    observed = _sync_inventory(conn, config, setup, client, context(config), clock,
+                               fingerprints, versions, deliver_enabled=supported,
+                               check_configuration=False)
+    pending = conn.execute("""SELECT COUNT(*) FROM connection_inventory_batches
+        WHERE context=? AND source_id=? AND status='pending'""",
+        (context(config), source_id)).fetchone()[0]
+    return {'status': 'accepted' if supported else 'pending_backend_upgrade',
+            'pending': pending, 'observed_on': observed if supported else None}
 
 
 def synchronize(config, *, force=False, client=None, connector=None, now=None):
@@ -326,9 +370,13 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
                 any(k in setup['mapping'] for k in ('stock_actual','precio_actual')) or
                 (setup['profile'].get('cost_basis')=='current' and 'costo_unitario' in setup['mapping']))
             if inventory_required:
-                if 'inventory_snapshot_v1' not in features:
-                    raise AccessError('backend_upgrade_required', 'Este Backend no admite fotos de inventario fechadas. Actualizá Backend antes del Collector; la cola queda intacta.')
-                result['inventory_observed_on'] = _sync_inventory(conn,config,setup,client,binding,clock,fingerprints,versions) or status.get('inventory_observed_on')
+                inventory_supported = 'inventory_snapshot_v1' in features
+                observed_on = _sync_inventory(conn,config,setup,client,binding,clock,fingerprints,versions,
+                                              deliver_enabled=inventory_supported)
+                if inventory_supported:
+                    result['inventory_observed_on'] = observed_on or status.get('inventory_observed_on')
+                else:
+                    result['inventory_status'] = 'pending_backend_upgrade'
             # Deliver durable pending payloads before creating captures. No credential
             # or source access is necessary for recovery of an already read batch.
             def deliver(key, payload, idem):
@@ -464,7 +512,10 @@ def synchronize(config, *, force=False, client=None, connector=None, now=None):
             refreshed_status = client.service_status()
             result['capabilities'] = refreshed_status.get('decision_readiness', {}).get('capabilities', [])
             result['retry_count'] = 0
-            result['message'] = result.get('message', 'Sincronización finalizada. Revisá cobertura y funciones informadas por AIVA.')
+            result['message'] = result.get('message',
+                'Ventas sincronizadas; inventario en cola hasta que Backend admita fotos fechadas.'
+                if result.get('inventory_status') == 'pending_backend_upgrade' else
+                'Sincronización finalizada. Revisá cobertura y funciones informadas por AIVA.')
             result['next_attempt'] = clock.timestamp() + setup['frequency_minutes'] * 60
             confirmed=conn.execute("""SELECT MAX(business_date) FROM connection_day_confirmations
                 WHERE context=? AND source_id=?""",(binding,setup['source_id'])).fetchone()[0]

@@ -993,6 +993,9 @@ def _process_reliable_file(
             rows_read=len(raw_rows),
             rows_discarded=len(result.discarded),
         )
+        if config.raw.get("source_profile") and config.raw.get("cost_basis") != "historical":
+            from .summarizer import suppress_unaccredited_costs
+            suppress_unaccredited_costs(summary)
         if reprocess_v1_file_id and summary.get("source_schema_version") != "2.0.0":
             raise ValidationError("El reproceso exige un payload diario v2; no se envió.")
         if compute_file_sha256(path) != file_sha256:
@@ -1348,6 +1351,15 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
         conn = connect_local_state(local_db_path(config))
         initial_queue = process_queue(conn, config, client=client)
         discovered_files = discover_input_files(config)
+        inventory_state = {'status': 'not_configured', 'pending': 0}
+        if config.raw.get('source_profile'):
+            try:
+                from .connection_sync import sync_legacy_inventory
+                inventory_state = sync_legacy_inventory(conn, config, client, discovered_files)
+            except Exception as exc:
+                from .connectors.base import safe_error
+                inventory_state = {'status': 'intervention_required', 'pending': 0,
+                                   'error_code': safe_error(exc)['code']}
         skipped_details: list[dict[str, str]] = []
         files = _filter_unchanged_read_only_files(
             config,
@@ -1378,6 +1390,10 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
                     "rejected": blocked,
                     "summaries_sent": initial_queue.sent,
                     "queue_pending": pending_count,
+                    "inventory_status": inventory_state['status'],
+                    "inventory_pending": inventory_state['pending'],
+                    "inventory_error_code": inventory_state.get('error_code'),
+                    "inventory_observed_on": inventory_state.get('observed_on'),
                     "error_summary": skip_summary,
                     "next_attempt": "scheduled",
                 },
@@ -1448,6 +1464,10 @@ def cmd_run_auto(args: argparse.Namespace) -> int:
                 "needs_review": needs_review,
                 "summaries_sent": sent,
                 "queue_pending": queue_after.get("pending", 0) + queue_after.get("retrying", 0),
+                "inventory_status": inventory_state['status'],
+                "inventory_pending": inventory_state['pending'],
+                "inventory_error_code": inventory_state.get('error_code'),
+                "inventory_observed_on": inventory_state.get('observed_on'),
                 "error_summary": error_summary,
                 "next_attempt": "scheduled",
             },

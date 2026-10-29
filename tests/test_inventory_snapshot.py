@@ -76,16 +76,24 @@ class Client:
         return {"ok":True}
 
 
-def test_inventory_sent_once_and_backend_feature_required(tmp_path,monkeypatch):
+def test_old_backend_keeps_inventory_pending_but_accepts_sales(tmp_path,monkeypatch):
     config,setup,path=fixture(tmp_path,monkeypatch)
     now=datetime(2026,10,18,12,tzinfo=timezone.utc)
     old=Client(["daily_v2","dated_stock","cost_basis","empty_daily"])
-    rejected=synchronize(config,force=True,client=old,now=now)
-    assert rejected["code"]=="backend_upgrade_required" and not old.sales
+    compatible=synchronize(config,force=True,client=old,now=now)
+    assert compatible["state"]=="sync_completed"
+    assert compatible["inventory_status"]=="pending_backend_upgrade"
+    assert len(old.sales)==1
+    assert all(metric["unit_cost"] is None and metric["cogs"] is None
+               for metric in old.sales[0]["daily_snapshot"]["metrics"])
+    assert old.sales[0]["resumen_financiero"]["margen_bruto_estimado"] is None
     assert not old.inventory
+    with connect(local_db_path(config)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM connection_inventory_batches WHERE status='pending'").fetchone()[0]==1
     client=Client()
     first=synchronize(config,force=True,client=client,now=now)
     assert first["state"]=="sync_completed" and len(client.inventory)==1
+    assert not client.sales
     second=synchronize(config,force=True,client=client,now=now)
     assert second["state"]=="sync_completed" and len(client.inventory)==1
     write_file(path,stock="4")

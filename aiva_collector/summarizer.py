@@ -209,6 +209,26 @@ def _dominant_missing_cost_status(counts: dict[str, int]) -> str:
     return "missing"
 
 
+def suppress_unaccredited_costs(summary: dict[str, Any]) -> None:
+    """A mapped cost column alone does not prove a sale's historical cost."""
+    for metric in (summary.get("daily_snapshot") or {}).get("metrics", []):
+        metric["unit_cost"] = None
+        metric["cogs"] = None
+        flags = metric.setdefault("quality_flags", [])
+        if "cost_missing" not in flags:
+            flags.append("cost_missing")
+    for product in summary.get("productos_resumidos", []):
+        for key in ("costo_total_estimado", "costo_unitario_promedio",
+                    "margen_bruto_estimado", "margen_porcentaje_estimado"):
+            product[key] = None
+    financial = summary.get("resumen_financiero", {})
+    financial.update({"cost_basis": "unknown", "limitations": ["historical_cost_unavailable"],
+        "costo_total_estimado": None, "margen_bruto_estimado": None,
+        "margen_porcentaje_estimado": None, "productos_con_costo": 0,
+        "productos_sin_costo": len(summary.get("productos_resumidos", [])),
+        "cobertura_costos_porcentaje": 0})
+
+
 def stable_summary_hash(summary: dict[str, Any]) -> str:
     payload = json.dumps(summary.get("productos_resumidos", []), sort_keys=True, ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

@@ -373,6 +373,9 @@ def preview_source(path, mapping, *, price, discount, complete=False,
             f"{problems} fila(s) no se pudieron leer; no se enviarán totales parciales. Revisá:\n{detail}"
         )
     summary = build_summary(normalized.rows, candidate, 1, len(rows), 0)
+    if raw.get("cost_basis") != "historical":
+        from .summarizer import suppress_unaccredited_costs
+        suppress_unaccredited_costs(summary)
     if compute_file_sha256(path) != digest:
         raise ValidationError("El archivo cambió durante la vista previa. Volvé a previsualizar.")
     metrics = summary["daily_snapshot"]["metrics"]

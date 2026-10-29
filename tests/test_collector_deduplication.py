@@ -42,6 +42,8 @@ def _mock_backend(monkeypatch, sent: list[dict], *, fail: bool = False):
     monkeypatch.setenv("AIVA_COLLECTOR_TOKEN", "token-test")
     monkeypatch.setattr("aiva_collector.cli._backend_mapping", lambda config: None)
     monkeypatch.setattr("aiva_collector.cli.CollectorClient.post_status", lambda self, status, message=None: {})
+    monkeypatch.setattr("aiva_collector.cli.CollectorClient.service_status",
+                        lambda self: {"ingestion_features": ["daily_v2"]})
 
     def send(self, summary):
         if fail:

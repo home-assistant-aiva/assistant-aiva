@@ -45,8 +45,8 @@ def test_preview_independent_discount_math(setup_source, price, kind, discount, 
     totals = result["totals"]
     assert Decimal(totals["ventas_netas"]) == Decimal(expected_net)
     assert Decimal(totals["descuentos"]) == Decimal(expected_discount)
-    assert Decimal(totals["costos"]) == 80
-    assert Decimal(totals["margen"]) == Decimal(expected_net) - 80
+    assert totals["costos"] == "desconocido"
+    assert totals["margen"] == "desconocido"
     assert result["summary"]["resumen_financiero"]["facturacion_total"] == float(expected_net)
     assert result["summary"]["daily_snapshot"]["price_semantics"] == "final_net_with_discounts"
     assert source.read_bytes() == before
@@ -184,6 +184,39 @@ def test_same_bytes_in_another_source_have_independent_history(setup_source, mon
     assert sent[0]["daily_snapshot"]["source_id"] != sent[1]["daily_snapshot"]["source_id"]
     with connect(local_db_path(load_config(config_path))) as conn:
         assert conn.execute("SELECT count(*) FROM processed_files WHERE status='sent'").fetchone()[0] == 2
+
+
+def test_existing_file_and_prices_path_queues_inventory_without_blocking_sales(setup_source, monkeypatch):
+    from aiva_collector.cli import main
+    from aiva_collector.local_state import connect, local_db_path
+    config_path, source, _ = setup_source
+    mapping = {**MAPPING, "stock_actual": "stock_actual", "fecha_stock": "fecha_stock",
+               "fecha_costo": "fecha_costo", "precio_actual": "precio_actual",
+               "fecha_precio": "fecha_precio"}
+    source.write_text(",".join(mapping.values()) +
+        "\n2026-09-01,A,Producto sintético,2,100,10,40,0,2026-10-17,2026-10-17,120,2026-10-17\n",
+        encoding="utf-8-sig")
+    sales, inventory = [], []
+    _mock_backend(monkeypatch, sales)
+    monkeypatch.setattr("aiva_collector.cli.CollectorClient.send_inventory",
+                        lambda self, payload: inventory.append(payload) or {})
+    save_source_preview(preview_source(source, mapping, price="final_net", discount="per_line", complete=True))
+    source_id = load_config(config_path).raw["daily_source_id"]
+    assert main(["run-auto", "--config", str(config_path)]) == 0
+    assert len(sales) == 1 and not inventory
+    assert sales[0]["daily_snapshot"]["source_id"] == source_id
+    assert sales[0]["daily_snapshot"]["metrics"][0]["cogs"] is None
+    with connect(local_db_path(load_config(config_path))) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM connection_inventory_batches WHERE status='pending'").fetchone()[0] == 1
+    monkeypatch.setattr("aiva_collector.cli.CollectorClient.service_status",
+                        lambda self: {"ingestion_features": ["daily_v2", "inventory_snapshot_v1"]})
+    assert main(["run-auto", "--config", str(config_path)]) == 0
+    assert len(sales) == 1 and len(inventory) == 1
+    assert inventory[0]["source_id"] == source_id
+    assert {item["kind"]: item["observed_on"] for item in inventory[0]["observations"]} == {
+        "stock": "2026-10-17", "current_cost": "2026-10-17", "current_price": "2026-10-17"}
+    assert main(["run-auto", "--config", str(config_path)]) == 0
+    assert len(inventory) == 1
 
 
 def test_rc7_sqlite_upgrade_backup_restores_and_retains_rows(tmp_path):

@@ -241,6 +241,18 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         title = "AIVA Collector está conectado"
         detail = "La conexión está preparada y la sincronización automática queda activa."
 
+    inventory_status = (connection_status if active else auto_state).get("inventory_status")
+    if inventory_status == "pending_backend_upgrade" and state not in {"error", "setup"}:
+        state = "attention"
+        title = "Ventas activas; inventario pendiente"
+        detail = "Las ventas se sincronizan. La foto queda en cola hasta que Backend admita inventory_snapshot_v1."
+    elif inventory_status == "intervention_required" and state not in {"error", "setup"}:
+        state = "attention"
+        title = "Revisar foto de inventario"
+        detail = ("Las ventas siguen su curso. Hay varias exportaciones distintas: revisá cuál acredita la foto."
+                  if auto_state.get("inventory_error_code") == "multiple_inventory_exports_review" else
+                  "Las ventas siguen su curso; revisá el mapeo y la fecha de la foto.")
+
     if not _uses_secure_transport(config.backend_url) and "HTTP" not in detail:
         detail += " Modo de prueba: el servicio usa HTTP; requiere HTTPS para clientes."
 
@@ -275,7 +287,7 @@ def load_dashboard_snapshot() -> DashboardSnapshot:
         last_contact=connection_status.get("last_contact") or (legacy_last_run if not active else None),
         last_success=connection_status.get("last_success") or legacy_last_success,
         last_confirmed_business_date=connection_status.get("last_confirmed_business_date"),
-        inventory_observed_on=connection_status.get("inventory_observed_on"),
+        inventory_observed_on=connection_status.get("inventory_observed_on") if active else auto_state.get("inventory_observed_on"),
     )
 
 
