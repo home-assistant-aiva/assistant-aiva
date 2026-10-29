@@ -1,6 +1,14 @@
-AIVA Collector 0.3.0rc1 — candidato de asistente de conexión
+AIVA Collector 0.3.0rc2 — candidato para prueba física en Windows 11
 Basado en RC9 f5751d7. No es una entrega de producción.
-Instalador: AIVA-Collector-Setup-v0.3.0-desktop-rc1.exe
+Instalador: AIVA-Collector-Setup-v0.3.0-desktop-rc2.exe
+Actualizar encima de la instalación existente: no desvincular ni borrar ProgramData.
+Pausar la tarea AIVA Collector Auto y comprobar respaldo antes de instalar.
+El instalador conserva la pausa de una tarea deshabilitada; revisarla después.
+Backend actual sin inventory_snapshot_v1: salen ventas compatibles y la foto
+queda pendiente localmente. Costos de venta no acreditados se informan desconocidos.
+Una cola anterior con costos sin fecha histórica queda intacta para revisión.
+El Asistente exige HTTPS; si el destino sigue en HTTP, no sincroniza por esa ruta.
+La ruta Configurar archivo y precios sigue disponible en este candidato.
 Abrir Asistente de conexión para archivos CSV/XLSX, SQLite o perfiles REST/SQL Server.
 Leer connection_assistant.md instalado junto al programa; perfiles sintéticos en profiles/.
 Requiere Backend HTTPS válido y prueba física en la PC antes de un piloto real.

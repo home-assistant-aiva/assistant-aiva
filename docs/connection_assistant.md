@@ -1,9 +1,10 @@
-# Asistente de conexión — candidato 0.3.0rc1
+# Asistente de conexión — candidato 0.3.0rc2
 
 Implementación sobre Collector RC9 `f5751d792d3ae3c0833eea2fa48b0a8328b5c96f`.
 El checkout persistente oficial es `/opt/aiva-collector`, rama
-`feat/connection-assistant-rc10`. Backend parte de `a15c2f1` y Admin de `25214cc`.
-RC9, su rama y sus artefactos no se reemplazan. La versión cambia a 0.3.0rc1
+`feat/connection-assistant-rc10`. El Backend desplegado al 29/10/2026 es `cb23a8f`;
+el inventario candidato está aislado en `feat/commerce-inventory-snapshot`.
+RC9, su rama y sus artefactos no se reemplazan. La versión cambia a 0.3.0rc2
 por incorporar conectores y configuración nueva. El manifest del artefacto es
 la autoridad sobre el commit exacto que se compiló.
 
@@ -23,19 +24,21 @@ PostgreSQL, MySQL/MariaDB, Firebird y Access requieren adaptación y pruebas;
 no se habilitan por encontrar un controlador. No hay compatibilidad universal.
 No se afirma compatibilidad con proveedores comerciales sin probar sus perfiles.
 
-El contrato sigue siendo v2 `snapshot_replace`, `whole_commerce`, por día.
+El contrato de ventas sigue siendo v2 `snapshot_replace`, `whole_commerce`, por día.
 Metadata incluye fuente y revisiones de configuración y mapeo.
-Backend candidato agrega procedencia opcional `stock_as_of_date` y `cost_basis`,
-y días explícitamente vacíos sin productos. Collector consulta `ingestion_features`:
-con Backend RC9 omite campos nuevos y mantiene stock desconocido; rechaza días
-vacíos si el servidor no los admite. Sin fecha no convierte stock RC9 en actual.
-Un costo actual o no confirmado se conserva como limitación; la nueva ruta no
-lo usa para una ganancia histórica. Costos RC9 heredados conservan su contrato.
+Backend candidato agrega `inventory_snapshot_v1` para fotos parciales fechadas.
+Collector consulta `ingestion_features`: con el Backend desplegado, que anuncia
+`daily_v2` pero no esa capacidad, envía ventas compatibles sin costos históricos
+no acreditados y conserva la foto en cola local. Rechaza días vacíos si el
+servidor no los admite. Sin fecha no convierte stock en actual. Una cola RC9 con
+costo sin procedencia histórica queda intacta para revisión. El Asistente exige
+HTTPS; la ruta anterior sigue visible para instalaciones existentes en modo de
+prueba HTTP.
 
 ## Instalación y configuración controlada
 
 1. Obtener el EXE y SHA256SUMS del workflow oficial; verificar el hash.
-2. Instalar encima de RC9 sin borrar ProgramData. Instalador x64; necesita
+2. Instalar encima de RC9 o `0.3.0rc1` sin borrar ProgramData. Instalador x64; necesita
    administrador para Program Files y tarea. No necesita Python de desarrollo.
 3. Abrir AIVA con el usuario de Windows que hará las sincronizaciones. Activar
    el comercio contra un Backend HTTPS con certificado válido. La URL HTTP
